@@ -38,6 +38,11 @@ import {
   Film,
   Smile,
   ShieldAlert,
+  Heart,
+  MessageSquareHeart,
+  CalendarClock,
+  Coins,
+  Globe,
 } from 'lucide-react';
 
 interface GroupItem {
@@ -73,6 +78,15 @@ interface ModerationSettings {
   autoKick3Warnings: boolean;
   botReply: boolean;
   customBadwords: string[];
+  // Maya AI Settings
+  mayaAiEnabled: boolean;
+  mayaRomantic: boolean;
+  mayaFunny: boolean;
+  mayaAutoParticipate: boolean;
+  mayaReplyCooldown: number;
+  mayaReplyFrequency: number;
+  mayaLanguage: string;
+  mayaMemoryLimit: number;
 }
 
 interface ActivityLog {
@@ -89,10 +103,18 @@ interface ActivityLog {
 }
 
 export default function App() {
-  const [activePage, setActivePage] = useState<'home' | 'security' | 'integrations' | 'pairing' | 'groups'>('home');
+  const [activePage, setActivePage] = useState<'home' | 'security' | 'maya' | 'integrations' | 'pairing' | 'groups'>('home');
+  const [uiLang, setUiLang] = useState<'bn' | 'en'>((localStorage.getItem('wg_ui_lang') as 'bn' | 'en') || 'bn');
   const [toastMessage, setToastMessage] = useState('');
   const [showToast, setShowToast] = useState(false);
   const [toastTimer, setToastTimer] = useState<any>(null);
+
+  const toggleUiLang = () => {
+    const nextLang = uiLang === 'bn' ? 'en' : 'bn';
+    setUiLang(nextLang);
+    localStorage.setItem('wg_ui_lang', nextLang);
+    showNotification(nextLang === 'bn' ? 'ভাষা বাংলা সিলেক্ট করা হয়েছে' : 'Language switched to English');
+  };
 
   // Live WhatsApp Connection State
   const [liveStatus, setLiveStatus] = useState<LiveStatusData>({
@@ -134,6 +156,14 @@ export default function App() {
     autoKick3Warnings: true,
     botReply: true,
     customBadwords: [],
+    mayaAiEnabled: true,
+    mayaRomantic: true,
+    mayaFunny: true,
+    mayaAutoParticipate: false,
+    mayaReplyCooldown: 30,
+    mayaReplyFrequency: 15,
+    mayaLanguage: 'auto',
+    mayaMemoryLimit: 10,
   });
   const [customBadwordsText, setCustomBadwordsText] = useState('');
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
@@ -176,17 +206,45 @@ export default function App() {
   };
 
   const callApi = async (path: string, method = 'GET', body?: any) => {
-    const base = baileysUrl.trim() || window.location.origin;
-    const res = await fetch(`${base}${path}`, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.error || `HTTP ${res.status}`);
+    let base = baileysUrl.trim();
+    if (base && base.endsWith('/')) {
+      base = base.slice(0, -1);
     }
-    return data;
+    
+    const cleanPath = path.startsWith('/') ? path : `/${path}`;
+    const url = base ? `${base}${cleanPath}` : cleanPath;
+    
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined,
+        credentials: 'include',
+      });
+      
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      return data;
+    } catch (err: any) {
+      // If fetching via custom baileysUrl failed with network error, fall back to relative path
+      if (base && (err.name === 'TypeError' || String(err.message).includes('Failed to fetch'))) {
+        console.warn(`Fetch to custom server ${base} failed (${err.message}). Falling back to local app server...`);
+        const fallbackRes = await fetch(cleanPath, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: body ? JSON.stringify(body) : undefined,
+          credentials: 'same-origin',
+        });
+        const fallbackData = await fallbackRes.json();
+        if (!fallbackRes.ok) {
+          throw new Error(fallbackData.error || `HTTP ${fallbackRes.status}`);
+        }
+        return fallbackData;
+      }
+      throw err;
+    }
   };
 
   // Poll live status from WhatsApp backend
@@ -308,7 +366,9 @@ export default function App() {
   // Start real WhatsApp pairing flow
   const handleStartPairing = async () => {
     let clean = phoneNumber.replace(/\D/g, '');
-    if (clean.startsWith('01') && clean.length === 11) {
+    if (clean.startsWith('1') && clean.length === 10) {
+      clean = '880' + clean;
+    } else if (clean.startsWith('01') && clean.length === 11) {
       clean = '88' + clean;
     }
 
@@ -392,6 +452,35 @@ export default function App() {
   };
 
   const testAI = async () => {
+    const testInputEl = document.getElementById('mayaTestInput') as HTMLInputElement;
+    const testInput = testInputEl?.value?.trim();
+
+    if (activePage === 'maya' && testInput) {
+       showNotification('মায়ার উত্তরের জন্য অপেক্ষা করুন...');
+       try {
+         // We can use a dedicated test endpoint or just a dummy reply for now 
+         // but the user wants a real test. 
+         // I'll add a server endpoint /api/maya/test
+         const res = await callApi('/api/maya/test', 'POST', { 
+           text: testInput,
+           settings: settings
+         });
+         
+         // Display response in the UI (e.g. in a toast or the placeholder)
+         const hintEl = testInputEl.parentElement?.nextElementSibling;
+         if (hintEl) {
+            hintEl.innerHTML = `<b>মায়া:</b> ${res.reply}`;
+            hintEl.classList.remove('italic', 'text-gray-600');
+            hintEl.classList.add('text-emerald-800');
+         }
+         showNotification('মায়া উত্তর দিয়েছে!');
+         testInputEl.value = '';
+       } catch (err: any) {
+         showNotification('Maya Test Error: ' + err.message);
+       }
+       return;
+    }
+
     try {
       const res = await callApi('/api/ai/test', 'POST');
       showNotification(res.message || 'AI Moderation Active');
@@ -470,6 +559,14 @@ export default function App() {
             </span>
           </div>
           <button
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold transition-all cursor-pointer shadow-xs"
+            onClick={toggleUiLang}
+            title={uiLang === 'bn' ? 'Switch UI to English' : 'বাংলা ইন্টারফেসে পরিবর্তন করুন'}
+          >
+            <Globe size={14} className="text-emerald-600" />
+            <span>{uiLang === 'bn' ? 'English (ইন্টারফেস)' : 'বাংলা (ইন্টারফেস)'}</span>
+          </button>
+          <button
             className="iconbutton"
             onClick={() => {
               if (activePage === 'home') loadDashboard();
@@ -504,6 +601,15 @@ export default function App() {
             }}
           >
             <ShieldCheck size={18} /> সিকিউরিটি
+          </button>
+          <button
+            className={`nav ${activePage === 'maya' ? 'active' : ''}`}
+            onClick={() => {
+              setActivePage('maya');
+              loadModerationData();
+            }}
+          >
+            <Heart size={18} /> মায়া AI (Maya)
           </button>
           <button
             className={`nav ${activePage === 'integrations' ? 'active' : ''}`}
@@ -1073,6 +1179,168 @@ export default function App() {
             </section>
           )}
 
+          {/* MAYA AI PAGE */}
+          {activePage === 'maya' && (
+            <section className="page active" id="maya">
+              <div className="page-head">
+                <div>
+                  <h1>Maya AI — Advanced Romantic Personality</h1>
+                  <p>মায়া (Maya) বটের স্মার্ট পারসোনালিটি, রোমান্টিক কথোপকথন ও স্বয়ংক্রিয় গ্রুপ অংশগ্রহণ নিয়ন্ত্রণ করুন।</p>
+                </div>
+                <button className="btn outline" onClick={loadModerationData}>
+                  <RefreshCw size={15} />
+                  <span className="btn-text">Refresh Settings</span>
+                </button>
+              </div>
+
+              <div className="grid2">
+                <div className="card">
+                  <div className="card-head">
+                    <div>
+                      <h3>Maya AI Core Configuration</h3>
+                      <p>বট পারসোনালিটি ও রিপ্লাই ইঞ্জিন নিয়ন্ত্রণ</p>
+                    </div>
+                    <div className="symbol sp">
+                      <Heart size={19} />
+                    </div>
+                  </div>
+
+                  <div className="toggle-row">
+                    <div className="toggle-info">
+                      <h4>Maya AI Engine <span className={`badge ${settings.mayaAiEnabled ? 'badge-green' : 'badge-amber'}`}>{settings.mayaAiEnabled ? 'ACTIVE' : 'OFF'}</span></h4>
+                      <p>Gemini AI এর মাধ্যমে মায়ার স্মার্ট পারসোনালিটি সক্রিয় করুন। এটি বন্ধ থাকলে বট সাধারণ অটো-রিপ্লাই দেবে।</p>
+                    </div>
+                    <label className="switch">
+                      <input type="checkbox" checked={settings.mayaAiEnabled} onChange={(e) => updateSettingToggle('mayaAiEnabled', e.target.checked)} />
+                      <span className="slider"></span>
+                    </label>
+                  </div>
+
+                  <div className="toggle-row">
+                    <div className="toggle-info">
+                      <h4>Romantic Personality <span className={`badge ${settings.mayaRomantic ? 'badge-green' : 'badge-amber'}`}>{settings.mayaRomantic ? 'ENABLED' : 'OFF'}</span></h4>
+                      <p>মায়াকে আরও রোমান্টিক, মিষ্টি ও যত্নশীল করে তুলুন। সে ব্যবহারকারীর আবেগ বুঝবে এবং সেভাবে উত্তর দেবে। ❤️</p>
+                    </div>
+                    <label className="switch">
+                      <input type="checkbox" checked={settings.mayaRomantic} onChange={(e) => updateSettingToggle('mayaRomantic', e.target.checked)} />
+                      <span className="slider"></span>
+                    </label>
+                  </div>
+
+                  <div className="toggle-row">
+                    <div className="toggle-info">
+                      <h4>Funny & Mischievous <span className={`badge ${settings.mayaFunny ? 'badge-green' : 'badge-amber'}`}>{settings.mayaFunny ? 'ENABLED' : 'OFF'}</span></h4>
+                      <p>মায়াকে দুষ্টুমি ও হাসি-ঠাট্টায় অভ্যস্ত করুন। সে গ্রুপে মজার উত্তর দেবে এবং সবাইকে মাতিয়ে রাখবে। 🙈</p>
+                    </div>
+                    <label className="switch">
+                      <input type="checkbox" checked={settings.mayaFunny} onChange={(e) => updateSettingToggle('mayaFunny', e.target.checked)} />
+                      <span className="slider"></span>
+                    </label>
+                  </div>
+
+                  <div className="toggle-row">
+                    <div className="toggle-info">
+                      <h4>Automatic Group Participation <span className={`badge ${settings.mayaAutoParticipate ? 'badge-green' : 'badge-amber'}`}>{settings.mayaAutoParticipate ? 'ON' : 'OFF'}</span></h4>
+                      <p>বট ট্যাগ করা ছাড়াই মায়া মাঝে মাঝে গ্রুপের কথা শুনে নিজে থেকে উত্তর দেবে। এটি স্প্যাম কমাতে প্রোবাবিলিটি ব্যবহার করে।</p>
+                    </div>
+                    <label className="switch">
+                      <input type="checkbox" checked={settings.mayaAutoParticipate} onChange={(e) => updateSettingToggle('mayaAutoParticipate', e.target.checked)} />
+                      <span className="slider"></span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="card">
+                  <div className="card-head">
+                    <div>
+                      <h3>Timing & Frequency</h3>
+                      <p>রিপ্লাই দেওয়ার সময় ও বারবার করার হার</p>
+                    </div>
+                    <div className="symbol so">
+                      <CalendarClock size={19} />
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Reply Cooldown (সেকেন্ড)</label>
+                    <div className="flex items-center gap-3">
+                      <input 
+                        type="range" min="5" max="300" step="5" className="flex-1 h-2 bg-emerald-100 rounded-lg appearance-none cursor-pointer accent-emerald-600" 
+                        value={settings.mayaReplyCooldown} 
+                        onChange={(e) => setSettings({...settings, mayaReplyCooldown: parseInt(e.target.value)})}
+                        onMouseUp={() => callApi('/api/moderation/settings', 'POST', { mayaReplyCooldown: settings.mayaReplyCooldown })}
+                      />
+                      <span className="text-xs font-bold w-12 text-emerald-700">{settings.mayaReplyCooldown}s</span>
+                    </div>
+                    <p className="hint">একটি রিপ্লাই দেওয়ার পর কতক্ষণ বিরতি নেবে (অটো-পার্টিসিপেশনের জন্য)।</p>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Reply Frequency (প্রোবাবিলিটি)</label>
+                    <div className="flex items-center gap-3">
+                      <input 
+                        type="range" min="1" max="100" step="1" className="flex-1 h-2 bg-emerald-100 rounded-lg appearance-none cursor-pointer accent-emerald-600" 
+                        value={settings.mayaReplyFrequency} 
+                        onChange={(e) => setSettings({...settings, mayaReplyFrequency: parseInt(e.target.value)})}
+                        onMouseUp={() => callApi('/api/moderation/settings', 'POST', { mayaReplyFrequency: settings.mayaReplyFrequency })}
+                      />
+                      <span className="text-xs font-bold w-12 text-emerald-700">{settings.mayaReplyFrequency}%</span>
+                    </div>
+                    <p className="hint">অটো-পার্টিসিপেশন সক্রিয় থাকলে কত শতাংশ মেসেজে মায়া উত্তর দেবে।</p>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Preferred Language</label>
+                    <select 
+                      className="field" 
+                      value={settings.mayaLanguage} 
+                      onChange={(e) => updateSettingToggle('mayaLanguage' as any, e.target.value as any)}
+                    >
+                      <option value="auto">Automatic (Smart Detection)</option>
+                      <option value="bn">Bengali Only (বাংলা)</option>
+                      <option value="en">English Only</option>
+                      <option value="banglish">Banglish (বাংলা রোমান অক্ষরে)</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Memory Limit (মেসেজ সংখ্যা)</label>
+                    <select 
+                      className="field" 
+                      value={settings.mayaMemoryLimit} 
+                      onChange={(e) => updateSettingToggle('mayaMemoryLimit' as any, parseInt(e.target.value) as any)}
+                    >
+                      <option value={5}>5 Messages (Lite)</option>
+                      <option value={10}>10 Messages (Standard)</option>
+                      <option value={20}>20 Messages (Deep Context)</option>
+                      <option value={50}>50 Messages (Full History)</option>
+                    </select>
+                    <p className="hint">মায়া কতগুলো পূর্ববর্তী মেসেজ মনে রাখবে। বেশি হলে পারফরম্যান্সে প্রভাব পড়তে পারে।</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="card">
+                <div className="card-head">
+                  <div>
+                    <h3>Test Maya AI (চ্যাট প্রিভিউ)</h3>
+                    <p>মায়ার সাথে সরাসরি কথা বলে তার বর্তমান মোড পরীক্ষা করুন।</p>
+                  </div>
+                  <div className="symbol sp">
+                    <MessageSquareHeart size={19} />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                   <input type="text" className="field" placeholder="মায়াকে কিছু বলুন..." id="mayaTestInput" onKeyDown={(e) => e.key === 'Enter' && testAI()} />
+                   <button className="btn primary" onClick={testAI}>Send</button>
+                </div>
+                <div className="mt-3 p-4 bg-gray-50 rounded-xl border border-dashed border-gray-200 min-h-[60px] text-sm italic text-gray-600">
+                   💡 চ্যাট প্রিভিউ কাজ করার জন্য মায়া AI Engine এনাবল (ON) থাকতে হবে। গ্রুপে মায়াকে ট্যাগ করুন অথবা নাম ধরে ডাকুন (যেমন: মায়া, কেমন আছো?)
+                </div>
+              </div>
+            </section>
+          )}
+
           {/* PAIRING PAGE (AUTHENTIC REAL 8-DIGIT PROTOCOL) */}
           {activePage === 'pairing' && (
             <section className="page active" id="pairing">
@@ -1628,6 +1896,30 @@ export default function App() {
                   </button>
                 </div>
               </div>
+
+              {/* GitHub Pages Deployment Card */}
+              <div className="card border border-emerald-200 bg-emerald-50/60">
+                <div className="card-head">
+                  <div>
+                    <h3 className="text-emerald-950 font-bold">GitHub Pages Deployment (Blank Screen Fixed)</h3>
+                    <p className="text-emerald-800 text-xs">গিটহাব পেজেসে ডিপ্লয় করলে হোয়াইট পেজ আসার সমস্যার সমাধান</p>
+                  </div>
+                  <div className="symbol sg">
+                    <CheckCircle2 size={19} />
+                  </div>
+                </div>
+                <div className="text-xs text-emerald-950 leading-relaxed space-y-2">
+                  <p>
+                    <b>✅ Relative Asset Base Path:</b> <code>vite.config.ts</code> এ <code>base: &#39;./&#39;</code> কনফিগার করা হয়েছে।
+                  </p>
+                  <p>
+                    এখন প্রজেক্টটি GitHub Pages (e.g. <code>username.github.io/repo-name/</code>) এ ডিপ্লয় করলে কোনো ব্ল্যাঙ্ক বা ফাঁকা সাদা পেজ আসবে না।
+                  </p>
+                  <div className="p-3 bg-white rounded-lg border border-emerald-200 font-mono text-[11px] text-gray-800">
+                    npm run build &nbsp;&nbsp;&mdash; Generates GitHub Pages ready build with relative assets
+                  </div>
+                </div>
+              </div>
             </section>
           )}
         </main>
@@ -1651,6 +1943,16 @@ export default function App() {
         >
           <ShieldCheck size={19} />
           <span>সিকিউরিটি</span>
+        </button>
+        <button
+          className={activePage === 'maya' ? 'active' : ''}
+          onClick={() => {
+            setActivePage('maya');
+            loadModerationData();
+          }}
+        >
+          <Heart size={19} />
+          <span>মায়া AI</span>
         </button>
         <button
           className={activePage === 'integrations' ? 'active' : ''}

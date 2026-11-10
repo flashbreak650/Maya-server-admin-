@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import type { proto, WASocket } from '@whiskeysockets/baileys';
+import { getMayaResponse } from './aiEngine.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +27,15 @@ export interface ModerationSettings {
   autoKick3Warnings: boolean;
   botReply: boolean;
   customBadwords: string[];
+  // Maya AI Settings
+  mayaAiEnabled: boolean;
+  mayaRomantic: boolean;
+  mayaFunny: boolean;
+  mayaAutoParticipate: boolean;
+  mayaReplyCooldown: number; // in seconds
+  mayaReplyFrequency: number; // 0-100 probability
+  mayaLanguage: string;
+  mayaMemoryLimit: number;
 }
 
 export interface ActivityLog {
@@ -82,6 +92,14 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   autoKick3Warnings: true,
   botReply: true,
   customBadwords: [],
+  mayaAiEnabled: true,
+  mayaRomantic: true,
+  mayaFunny: true,
+  mayaAutoParticipate: false,
+  mayaReplyCooldown: 30,
+  mayaReplyFrequency: 15,
+  mayaLanguage: 'auto',
+  mayaMemoryLimit: 10,
 };
 
 // In-memory runtime database
@@ -148,6 +166,7 @@ loadDatabase();
 const processedMsgIds = new Set<string>();
 const stickerTimestamps: Record<string, number[]> = {}; // key: `${groupId}:${senderJid}`
 const groupMetaCache: Record<string, { meta: any; fetchedAt: number }> = {};
+const lastAiReplyTime: Record<string, number> = {}; // key: groupId
 
 export function getSettings(): ModerationSettings {
   return { ...db.settings };
@@ -800,48 +819,81 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
   }
 
   // -------------------------------------------------------------
-  // BOT MENTION & NAME CALLING REPLY (মায়া, মায়ান, WAGuard, Bot Tag)
+  // MAYA AI PERSONALITY & AUTO-REPLY ENGINE
   // -------------------------------------------------------------
-  if (settings.botReply && messageText) {
+  if (settings.botReply && settings.mayaAiEnabled && messageText) {
     const lower = messageText.toLowerCase();
     const botJid = sock.user?.id || '';
     const cleanBot = botJid.split('@')[0].split(':')[0];
 
-    const isMentioned =
-      msg.message.extendedTextMessage?.contextInfo?.mentionedJid?.includes(botJid) ||
+    // 1. Determine if bot should reply when called by name or tagged in group
+    const isDirectMention =
+      msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.includes(botJid) ||
       lower.includes('@' + cleanBot) ||
-      lower.includes('waguard') ||
+      lower.includes('maya') ||
       lower.includes('মায়া') ||
-      lower.includes('মায়ান') ||
-      lower.includes('বট') ||
+      lower.includes('মায়া') ||
+      lower.includes('waguard');
+
+    const isDirectCall = 
+      lower.includes('মায়ান') || 
+      lower.includes('মায়ান') || 
+      lower.includes('বট') || 
       lower.includes('bot');
 
-    if (isMentioned) {
-      console.log(`Bot called/mentioned in ${groupSubject} by @${cleanPhone}`);
-      const replies = [
-        `🤖 আসসালামু আলাইকুম @${cleanPhone}! আমি WAGuard - আপনার গ্রুপের সার্বক্ষণিক রিয়েল সিকিউরিটি গার্ড। গ্রুপে স্প্যাম, গালি ও ক্ষতিকর লিংক প্রতিরোধে আমি সক্রিয় আছি। কোনো সাহায্য প্রয়োজন?`,
-        `👋 হ্যালো @${cleanPhone}! আমি WAGuard সিকিউরিটি বট। আমি এই গ্রুপের সকল মেসেজ মনিটর ও সুরক্ষিত রাখছি। সবাইকে নিয়ম মেনে চলার অনুরোধ করছি।`,
-        `🛡️ আসসালামু আলাইকুম! আমি মায়া ও মায়ান AI ইঞ্জিনের সমন্বয়ে তৈরি WAGuard। গ্রুপটি সম্পূর্ণ নিরাপদ রয়েছে।`,
-      ];
-      const replyText = replies[Math.floor(Math.random() * replies.length)];
+    const shouldAttemptReply = isDirectMention || isDirectCall || (settings.mayaAutoParticipate && Math.random() * 100 < settings.mayaReplyFrequency);
 
+    if (shouldAttemptReply) {
+      // 2. Check cooldown
+      const now = Date.now();
+      const lastReply = lastAiReplyTime[remoteJid] || 0;
+      const cooldownMs = settings.mayaReplyCooldown * 1000;
+
+      // Mentions always bypass cooldown
+      if (!isDirectMention && !isDirectCall && now - lastReply < cooldownMs) {
+        return; // Still in cooldown for automatic participation
+      }
+
+      console.log(`[Maya AI] Processing reply for ${groupSubject} (Direct: ${isDirectMention || isDirectCall})`);
+      
       try {
-        await sock.sendMessage(remoteJid, {
-          text: replyText,
-          mentions: [senderJid],
-        });
+        const userName = msg.pushName || 'User';
+        const memoryKey = `${remoteJid}:${senderJid}`;
+        
+        const aiResponse = await getMayaResponse(
+          messageText,
+          cleanPhone,
+          userName,
+          groupSubject,
+          memoryKey,
+          {
+            romantic: settings.mayaRomantic,
+            funny: settings.mayaFunny,
+            language: settings.mayaLanguage,
+            memoryLimit: settings.mayaMemoryLimit
+          }
+        );
 
-        addActivityLog({
-          groupId: remoteJid,
-          groupName: groupSubject,
-          senderJid,
-          senderPhone: cleanPhone,
-          action: 'replied',
-          reason: 'বট মেনশন বা নাম ধরে ডাকার রেসপন্স',
-          details: messageText.slice(0, 60),
-        });
+        if (aiResponse) {
+          lastAiReplyTime[remoteJid] = now;
+
+          await sock.sendMessage(remoteJid, {
+            text: aiResponse,
+            mentions: [senderJid],
+          }, { quoted: msg as any });
+
+          addActivityLog({
+            groupId: remoteJid,
+            groupName: groupSubject,
+            senderJid,
+            senderPhone: cleanPhone,
+            action: 'replied',
+            reason: isDirectMention || isDirectCall ? 'বট মেনশন বা সরাসরি রিকোয়েস্ট' : 'স্বয়ংক্রিয় গ্রুপ অংশগ্রহণ (Auto Participate)',
+            details: aiResponse.slice(0, 60),
+          });
+        }
       } catch (err: any) {
-        console.error('Failed to reply to bot mention:', err.message);
+        console.error('Failed to get Maya AI response:', err.message);
       }
     }
   }

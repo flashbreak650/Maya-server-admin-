@@ -184,6 +184,7 @@ input:checked + .slider:before{transform:translateX(20px)}
  <div class="side-label">MAIN MENU</div>
  <button class="nav active" data-page="home" onclick="go('home')"><i data-lucide="layout-dashboard"></i> হোম</button>
  <button class="nav" data-page="security" onclick="go('security')"><i data-lucide="shield-check"></i> সিকিউরিটি</button>
+ <button class="nav" data-page="maya" onclick="go('maya')"><i data-lucide="heart"></i> মায়া AI (Maya)</button>
  <button class="nav" data-page="integrations" onclick="go('integrations')"><i data-lucide="plug"></i> API & Integrations</button>
  <button class="nav" data-page="groups" onclick="go('groups')"><i data-lucide="users"></i> গ্রুপ</button>
  <button class="nav" data-page="pairing" onclick="go('pairing')"><i data-lucide="smartphone"></i> কানেক্ট</button>
@@ -378,6 +379,87 @@ input:checked + .slider:before{transform:translateX(20px)}
  </div>
 </section>
 
+<!-- মায়া AI পেজ -->
+<section class="page" id="maya">
+ <div class="page-head">
+  <div><h1>Maya AI — Romantic Personality</h1><p>মায়া (Maya) বটের স্মার্ট পারসোনালিটি, রোমান্টিক কথোপকথন ও গ্রুপ অংশগ্রহণ নিয়ন্ত্রণ করুন।</p></div>
+  <button class="btn outline" onclick="btnAction(this, loadModerationData)"><i data-lucide="refresh-cw"></i> Refresh Settings</button>
+ </div>
+
+ <div class="grid2">
+  <div class="card">
+   <div class="card-head"><div><h3>Maya AI Core Config</h3><p>বট পারসোনালিটি ও রিপ্লাই ইঞ্জিন</p></div><div class="symbol sp"><i data-lucide="heart"></i></div></div>
+   
+   <div class="toggle-row">
+    <div class="toggle-info">
+     <h4>Maya AI Engine <span class="badge badge-green" id="badgeMayaEnabled">ACTIVE</span></h4>
+     <p>Gemini AI এর মাধ্যমে মায়ার স্মার্ট পারসোনালিটি সক্রিয় করুন।</p>
+    </div>
+    <label class="switch"><input type="checkbox" id="swMayaAiEnabled" onchange="handleToggle('mayaAiEnabled', this.checked)"><span class="slider"></span></label>
+   </div>
+
+   <div class="toggle-row">
+    <div class="toggle-info">
+     <h4>Romantic Mode <span class="badge badge-green" id="badgeMayaRomantic">ON</span></h4>
+     <p>মায়াকে আরও রোমান্টিক, মিষ্টি ও যত্নশীল করে তুলুন। ❤️</p>
+    </div>
+    <label class="switch"><input type="checkbox" id="swMayaRomantic" onchange="handleToggle('mayaRomantic', this.checked)"><span class="slider"></span></label>
+   </div>
+
+   <div class="toggle-row">
+    <div class="toggle-info">
+     <h4>Funny & Mischievous <span class="badge badge-green" id="badgeMayaFunny">ON</span></h4>
+     <p>মায়াকে দুষ্টুমি ও হাসি-ঠাট্টায় অভ্যস্ত করুন। 🙈</p>
+    </div>
+    <label class="switch"><input type="checkbox" id="swMayaFunny" onchange="handleToggle('mayaFunny', this.checked)"><span class="slider"></span></label>
+   </div>
+
+   <div class="toggle-row">
+    <div class="toggle-info">
+     <h4>Auto Participation <span class="badge badge-amber" id="badgeMayaAuto">OFF</span></h4>
+     <p>মায়া মাঝে মাঝে গ্রুপের কথা শুনে নিজে থেকে উত্তর দেবে।</p>
+    </div>
+    <label class="switch"><input type="checkbox" id="swMayaAutoParticipate" onchange="handleToggle('mayaAutoParticipate', this.checked)"><span class="slider"></span></label>
+   </div>
+  </div>
+
+  <div class="card">
+   <div class="card-head"><div><h3>Timing & Intelligence</h3><p>রিপ্লাই দেওয়ার সময় ও মেমোরি লিমিট</p></div><div class="symbol so"><i data-lucide="calendar-clock"></i></div></div>
+   
+   <div class="form-group">
+    <label>Reply Frequency (প্রোবাবিলিটি: <span id="valFrequency">15</span>%)</label>
+    <input type="range" class="full" id="rangeFrequency" min="1" max="100" value="15" oninput="updateRangeVal('Frequency', this.value)" onchange="handleToggle('mayaReplyFrequency', parseInt(this.value))">
+   </div>
+
+   <div class="form-group">
+    <label>Memory Limit (মেসেজ সংখ্যা: <span id="valMemory">10</span>)</label>
+    <input type="range" class="full" id="rangeMemory" min="5" max="50" step="5" value="10" oninput="updateRangeVal('Memory', this.value)" onchange="handleToggle('mayaMemoryLimit', parseInt(this.value))">
+   </div>
+
+   <div class="form-group">
+    <label>Preferred Language</label>
+    <select class="field" id="selMayaLanguage" onchange="handleToggle('mayaLanguage', this.value)">
+     <option value="auto">Automatic (Smart Detection)</option>
+     <option value="bn">Bengali Only (বাংলা)</option>
+     <option value="en">English Only</option>
+     <option value="banglish">Banglish (রোমান বাংলা)</option>
+    </select>
+   </div>
+  </div>
+ </div>
+
+ <div class="card">
+  <div class="card-head"><div><h3>Test Maya AI (চ্যাট প্রিভিউ)</h3><p>মায়ার সাথে সরাসরি কথা বলে তার বর্তমান মোড পরীক্ষা করুন।</p></div><div class="symbol sp"><i data-lucide="message-square-heart"></i></div></div>
+  <div style="display:flex;gap:10px">
+   <input type="text" class="field" id="mayaTestInput" placeholder="মায়াকে কিছু বলুন..." onkeydown="if(event.key==='Enter')testMaya()">
+   <button class="btn primary" onclick="testMaya()">Send</button>
+  </div>
+  <div id="mayaTestResult" class="hint" style="margin-top:12px;padding:12px;background:#f8fafc;border-radius:10px;border:1px dashed #cbd5e1">
+   💡 মায়ার উত্তরের জন্য এখানে মেসেজ পাঠিয়ে অপেক্ষা করুন।
+  </div>
+ </div>
+</section>
+
 <!-- API ও Integrations পেজ -->
 <section class="page" id="integrations">
  <div class="page-head"><div><h1>API & Integrations</h1><p>Configure server endpoints and external credentials.</p></div></div>
@@ -395,8 +477,8 @@ input:checked + .slider:before{transform:translateX(20px)}
   <div class="form-group">
    <label>GEMINI MODEL</label>
    <select class="field" id="geminiModel">
-    <option value="gemini-2.5-flash">Gemini 2.5 Flash (Super Fast & Stable)</option>
-    <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+    <option value="gemini-1.5-flash">Gemini 1.5 Flash (Super Fast & Stable)</option>
+    <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
    </select>
   </div>
   <div class="form-actions">
@@ -408,7 +490,7 @@ input:checked + .slider:before{transform:translateX(20px)}
    <button class="btn outline" onclick="btnAction(this, testAI)">
      <span class="spinner"></span>
      <span class="btn-icon-holder"><i data-lucide="activity"></i></span>
-     <span class="btn-text">Test AI</span>
+     <span class="btn-text">Test AI Engine</span>
    </button>
   </div>
  </div>
@@ -433,67 +515,6 @@ input:checked + .slider:before{transform:translateX(20px)}
      <span class="spinner"></span>
      <span class="btn-icon-holder"><i data-lucide="save"></i></span>
      <span class="btn-text">Save Meta Config</span>
-   </button>
-  </div>
- </div>
-
- <!-- Groq AI -->
- <div class="card">
-  <div class="card-head"><div><h3>Groq AI (Fast Fallback)</h3><p>Lightning-fast Llama-3 fallback provider</p></div><div class="symbol so"><i data-lucide="zap"></i></div></div>
-  <div class="form-group">
-   <label>GROQ API KEY</label>
-   <div class="fieldwrap">
-    <input class="field secret" id="groqKey" type="password" placeholder="gsk_...">
-    <button class="reveal" onclick="reveal('groqKey',this)"><i data-lucide="eye"></i></button>
-   </div>
-  </div>
-  <div class="form-actions">
-   <button class="btn primary" onclick="btnAction(this, () => saveConfig('groq'))">
-     <span class="spinner"></span>
-     <span class="btn-icon-holder"><i data-lucide="save"></i></span>
-     <span class="btn-text">Save Groq Config</span>
-   </button>
-  </div>
- </div>
-
- <!-- OpenRouter -->
- <div class="card">
-  <div class="card-head"><div><h3>OpenRouter (Alternative)</h3><p>Access many AI models via OpenRouter</p></div><div class="symbol sb"><i data-lucide="cpu"></i></div></div>
-  <div class="form-group">
-   <label>OPENROUTER API KEY</label>
-   <div class="fieldwrap">
-    <input class="field secret" id="openrouterKey" type="password" placeholder="sk-or-v1-...">
-    <button class="reveal" onclick="reveal('openrouterKey',this)"><i data-lucide="eye"></i></button>
-   </div>
-  </div>
-  <div class="form-actions">
-   <button class="btn primary" onclick="btnAction(this, () => saveConfig('openrouter'))">
-     <span class="spinner"></span>
-     <span class="btn-icon-holder"><i data-lucide="save"></i></span>
-     <span class="btn-text">Save OpenRouter Config</span>
-   </button>
-  </div>
- </div>
-
- <!-- Supabase Config -->
- <div class="card">
-  <div class="card-head"><div><h3>Supabase (Free Persistence)</h3><p>Sync logs and stats to a persistent database</p></div><div class="symbol sr"><i data-lucide="database"></i></div></div>
-  <div class="form-group">
-   <label>SUPABASE URL</label>
-   <input class="field" id="supabaseUrl" placeholder="https://xyz.supabase.co">
-  </div>
-  <div class="form-group">
-   <label>SUPABASE ANON KEY</label>
-   <div class="fieldwrap">
-    <input class="field secret" id="supabaseKey" type="password" placeholder="eyJhbGci...">
-    <button class="reveal" onclick="reveal('supabaseKey',this)"><i data-lucide="eye"></i></button>
-   </div>
-  </div>
-  <div class="form-actions">
-   <button class="btn primary" onclick="btnAction(this, saveSupabaseConfig)">
-     <span class="spinner"></span>
-     <span class="btn-icon-holder"><i data-lucide="save"></i></span>
-     <span class="btn-text">Save Supabase Config</span>
    </button>
   </div>
  </div>
@@ -530,7 +551,6 @@ input:checked + .slider:before{transform:translateX(20px)}
   <h3 style="font-size:19px;font-weight:800">Link WhatsApp Device</h3>
   <p class="hint">আন্তর্জাতিক কান্ট্রি কোডসহ আপনার WhatsApp নম্বর দিন (যেমন: <b>88017XXXXXXXX</b>)।</p>
   
-  <!-- মোড নির্বাচন (কোড বনাম কিউআর) -->
   <div class="mode-switcher">
     <button class="mode-btn active" id="modeBtnCode" onclick="setPairMode('code')"><i data-lucide="key-round"></i> ৮-ডিজিট কোড</button>
     <button class="mode-btn" id="modeBtnQr" onclick="setPairMode('qr')"><i data-lucide="qr-code"></i> কিউআর কোড</button>
@@ -550,14 +570,12 @@ input:checked + .slider:before{transform:translateX(20px)}
     <span class="btn-text">Generate Real Pairing Code</span>
   </button>
   
-  <!-- পেয়ারিং রেজাল্ট -->
   <div id="pairResult" style="display:none" class="info">
    <div style="display:flex;justify-content:space-between;align-items:center">
      <div style="font-size:11px;font-weight:700;letter-spacing:.8px">OFFICIAL WHATSAPP PAIRING CODE</div>
      <span id="pairTimerBadge" style="background:#c6e9d6;color:#0b7348;font-weight:700;font-size:10px;padding:3px 8px;border-radius:20px">রেডি</span>
    </div>
 
-   <!-- কোড ডিসপ্লে -->
    <div id="codeDisplaySection">
      <h2 id="pairCode" style="letter-spacing:8px;font-size:34px;margin:14px 0;color:var(--green);font-weight:900;font-family:monospace"></h2>
      <div style="display:flex;justify-content:center;gap:8px">
@@ -574,13 +592,11 @@ input:checked + .slider:before{transform:translateX(20px)}
      </div>
    </div>
 
-   <!-- কিউআর কোড ডিসপ্লে -->
    <div id="qrDisplaySection" style="display:none;margin:16px 0">
      <img id="qrImage" src="" alt="WhatsApp QR" style="width:220px;height:220px;margin:auto;display:block;border-radius:12px;border:1px solid #cce8d9;background:white;padding:6px">
      <p style="font-size:11px;color:#475569;margin-top:8px">WhatsApp ওপেন করে Linked Devices &gt; স্ক্যান করুন।</p>
    </div>
 
-   <!-- নির্দেশিকা -->
    <div style="margin-top:16px;text-align:left;background:#ffffff;padding:14px;border-radius:12px;font-size:11px;line-height:1.7;border:1px solid #cce8d9">
      <strong style="color:#087f55">কীভাবে ফোনে যুক্ত করবেন:</strong>
      <ol style="padding-left:18px;margin-top:6px">
@@ -597,7 +613,6 @@ input:checked + .slider:before{transform:translateX(20px)}
    </div>
   </div>
 
-  <!-- ইতিমধ্যে কানেক্টেড বক্স -->
   <div id="alreadyConnectedBox" style="display:none;background:#e9f7ef;border:1px solid #10a36c;padding:20px;border-radius:14px;margin-top:16px">
     <div style="width:50px;height:50px;margin:auto;background:#d1fae5;color:#087f55;border-radius:50%;display:grid;place-items:center;margin-bottom:10px">
       <i data-lucide="check-circle-2" style="width:28px;height:28px"></i>
@@ -638,7 +653,7 @@ input:checked + .slider:before{transform:translateX(20px)}
 <nav class="mobile-nav">
  <button class="active" data-page="home" onclick="go('home')"><i data-lucide="layout-dashboard"></i>হোম</button>
  <button data-page="security" onclick="go('security')"><i data-lucide="shield-check"></i>সিকিউরিটি</button>
- <button data-page="integrations" onclick="go('integrations')"><i data-lucide="plug"></i>API</button>
+ <button data-page="maya" onclick="go('maya')"><i data-lucide="heart"></i>মায়া</button>
  <button data-page="pairing" onclick="go('pairing')"><i data-lucide="smartphone"></i>কানেক্ট</button>
  <button data-page="groups" onclick="go('groups')"><i data-lucide="users"></i>গ্রুপ</button>
 </nav>
@@ -656,14 +671,7 @@ let currentSettings = {};
 
 // লোকালস্টোরেজ ডাটা পপুলেট করা
 document.getElementById('geminiKey').value = localStorage.getItem('wg_gemini_key') || '';
-document.getElementById('geminiModel').value = localStorage.getItem('wg_gemini_model') || 'gemini-2.5-flash';
-document.getElementById('waToken').value = localStorage.getItem('wg_watoken') || '';
-document.getElementById('phoneId').value = localStorage.getItem('wg_phoneid') || '';
-document.getElementById('wabaId').value = localStorage.getItem('wg_wabaid') || '';
-document.getElementById('groqKey').value = localStorage.getItem('wg_groq_key') || '';
-document.getElementById('openrouterKey').value = localStorage.getItem('wg_openrouter_key') || '';
-document.getElementById('supabaseUrl').value = localStorage.getItem('wg_supabase_url') || '';
-document.getElementById('supabaseKey').value = localStorage.getItem('wg_supabase_key') || '';
+document.getElementById('geminiModel').value = localStorage.getItem('wg_gemini_model') || 'gemini-1.5-flash';
 document.getElementById('baileysUrl').value = API;
 document.getElementById('pairPhone').value = localStorage.getItem('wg_phone') || '';
 
@@ -674,12 +682,45 @@ function toast(s){
  window.toastTimer=setTimeout(()=>t.style.display='none',3200);
 }
 
+async function call(path, method='GET', body=null) {
+ let base = API.trim();
+ if (base && base.endsWith('/')) base = base.slice(0, -1);
+ const cleanPath = path.startsWith('/') ? path : `/${path}`;
+ const url = base ? `${base}${cleanPath}` : cleanPath;
+ 
+ try {
+  const res = await fetch(url, {
+   method,
+   headers: {'Content-Type': 'application/json'},
+   body: body ? JSON.stringify(body) : null,
+   credentials: 'include'
+  });
+  const data = await res.json();
+  if(!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+ } catch(err) {
+  if (base && (err.name === 'TypeError' || String(err.message).includes('Failed to fetch'))) {
+   const fallbackRes = await fetch(cleanPath, {
+    method,
+    headers: {'Content-Type': 'application/json'},
+    body: body ? JSON.stringify(body) : null,
+    credentials: 'same-origin'
+   });
+   const fallbackData = await fallbackRes.json();
+   if(!fallbackRes.ok) throw new Error(fallbackData.error || `HTTP ${fallbackRes.status}`);
+   return fallbackData;
+  }
+  throw err;
+ }
+}
+
 async function btnAction(btn, asyncFn) {
  if(!btn) return;
  btn.classList.add('is-loading');
  try {
   await asyncFn();
  } catch(err) {
+  toast('Error: ' + err.message);
   console.error(err);
  } finally {
   setTimeout(() => btn.classList.remove('is-loading'), 300);
@@ -690,6 +731,7 @@ function refreshCurrent() {
  const active = document.querySelector('.page.active');
  if(active && active.id === 'home') loadDashboard();
  else if(active && active.id === 'security') loadModerationData();
+ else if(active && active.id === 'maya') loadModerationData();
  else if(active && active.id === 'groups') loadGroups();
  else pollLiveStatus();
 }
@@ -701,7 +743,7 @@ function go(id){
  target.classList.add('active');
  document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===id));
  if(id === 'groups') loadGroups();
- if(id === 'security') loadModerationData();
+ if(id === 'security' || id === 'maya') loadModerationData();
  window.scrollTo({top:0,behavior:'smooth'});
 }
 
@@ -720,6 +762,10 @@ function reveal(id,button){
  lucide.createIcons();
 }
 
+function updateRangeVal(id, val){
+ document.getElementById('val' + id).textContent = val;
+}
+
 async function saveConfig(type){
  if(type==='gemini'){
   localStorage.setItem('wg_gemini_key', document.getElementById('geminiKey').value);
@@ -730,329 +776,231 @@ async function saveConfig(type){
   localStorage.setItem('wg_phoneid', document.getElementById('phoneId').value);
   localStorage.setItem('wg_wabaid', document.getElementById('wabaId').value);
   toast('Meta Config Saved!');
- } else if(type==='groq'){
-  localStorage.setItem('wg_groq_key', document.getElementById('groqKey').value);
-  toast('Groq Config Saved!');
- } else if(type==='openrouter'){
-  localStorage.setItem('wg_openrouter_key', document.getElementById('openrouterKey').value);
-  toast('OpenRouter Config Saved!');
  }
-}
-
-async function saveSupabaseConfig(){
- const url = document.getElementById('supabaseUrl').value.trim();
- const key = document.getElementById('supabaseKey').value.trim();
- if(!url || !key){toast('Supabase URL এবং Key প্রদান করুন'); return;}
- localStorage.setItem('wg_supabase_url', url);
- localStorage.setItem('wg_supabase_key', key);
- toast('Supabase Database Saved Successfully!');
 }
 
 async function saveBaileysUrl(){
  const val = document.getElementById('baileysUrl').value.trim().replace(/\/+$/,'');
  if(val){
-  try{new URL(val)}catch(e){toast('সঠিক Server URL দিন (https://...)');return}
-  API = val;
-  localStorage.setItem('wg_server', API);
-  toast('Baileys Server URL Saved!');
- } else {
-  localStorage.removeItem('wg_server');
-  API = '';
-  toast('বিল্ট-ইন রিয়েল সার্ভার মোড সক্রিয় করা হয়েছে');
- }
+  try{new URL(val); API = val; localStorage.setItem('wg_server', val); toast('Server URL Saved!');}
+  catch(e){toast('Invalid URL');}
+ } else {API = ''; localStorage.removeItem('wg_server'); toast('Built-in Server Active');}
 }
 
 async function resetBaileysUrl(){
- localStorage.removeItem('wg_server');
- API = '';
- document.getElementById('baileysUrl').value = '';
- toast('Baileys URL Reset Done');
+ API = ''; document.getElementById('baileysUrl').value = ''; localStorage.removeItem('wg_server'); toast('Reset Done');
 }
 
-async function testAI(){
+async function loadDashboard() {
  try {
-  const d = await call('/api/ai/test', 'POST');
-  toast(d.message || 'AI Connection Active');
- } catch(e) {
-  toast('Gemini AI Engine Active');
- }
+  const d = await call('/api/dashboard');
+  document.getElementById('messages').textContent = d.overview.messagesChecked;
+  document.getElementById('warnings').textContent = d.overview.warnings;
+  document.getElementById('blocked').textContent = d.overview.blockedWords;
+  document.getElementById('groupCount').textContent = d.overview.groups;
+  updateStatusUI(d.connection);
+  toast('Dashboard Updated');
+ } catch(e){toast('Sync Error');}
 }
 
-async function call(path, method='GET', body){
- const targetAPI = API || window.location.origin;
- const options = { method, headers: { 'Content-Type': 'application/json' } };
- if(body!==undefined) options.body = JSON.stringify(body);
- 
- const res = await fetch(targetAPI + path, options);
- const json = await res.json();
- if(!res.ok) throw Error(json.error || 'Server error ' + res.status);
- return json;
-}
-
-// লোড মডারেশন ডাটা ও সেটিংস
-async function loadModerationData(){
+async function loadModerationData() {
  try {
   const s = await call('/api/moderation/settings');
-  if(s.settings) {
-    currentSettings = s.settings;
-    updateUiSettings(s.settings);
-  }
-  const l = await call('/api/moderation/logs?limit=50');
-  renderLogs(l.logs || []);
-  toast('Security Rules Synced');
- } catch(e) {
-  toast('Error loading moderation data: ' + e.message);
- }
+  const l = await call('/api/moderation/logs?limit=40');
+  currentSettings = s.settings;
+  syncSettingsToUI(s.settings);
+  renderLogs(l.logs);
+ } catch(e){toast('Moderation Sync Error');}
 }
 
-function updateUiSettings(st){
- const map = {
-  swAdminShield: ['adminShield', 'badgeAdminShield', 'ON - SHIELDED', 'OFF'],
-  swAutoKick3Warnings: ['autoKick3Warnings', 'badgeAutoKick', 'ACTIVE', 'OFF'],
-  swAntiStickerSpam: ['antiStickerSpam', 'badgeStickerSpam', 'ACTIVE', 'OFF'],
-  swAntiSticker: ['antiSticker', 'badgeSticker', 'BLOCKED', 'ALLOWED'],
-  swAntiGif: ['antiGif', 'badgeGif', 'BLOCKED', 'ALLOWED'],
-  swAntiVideo: ['antiVideo', 'badgeVideo', 'BLOCKED', 'ALLOWED'],
-  swAntiImage: ['antiImage', 'badgeImage', 'BLOCKED', 'ALLOWED'],
-  swAntiViewOnce: ['antiViewOnce', 'badgeViewOnce', 'BLOCKED', 'ALLOWED'],
-  swAntiBadword: ['antiBadword', 'badgeBadword', 'REAL-TIME ACTIVE', 'OFF'],
-  swAntiLink: ['antiLink', 'badgeLink', 'BLOCKED', 'OFF'],
-  swBotReply: ['botReply', 'badgeBotReply', 'ACTIVE', 'OFF'],
- };
+function syncSettingsToUI(s) {
+ // Security Toggles
+ document.getElementById('swAdminShield').checked = s.adminShield;
+ document.getElementById('swAutoKick3Warnings').checked = s.autoKick3Warnings;
+ document.getElementById('swAntiStickerSpam').checked = s.antiStickerSpam;
+ document.getElementById('swAntiSticker').checked = s.antiSticker;
+ document.getElementById('swAntiGif').checked = s.antiGif;
+ document.getElementById('swAntiVideo').checked = s.antiVideo;
+ document.getElementById('swAntiImage').checked = s.antiImage;
+ document.getElementById('swAntiViewOnce').checked = s.antiViewOnce;
+ document.getElementById('swAntiBadword').checked = s.antiBadword;
+ document.getElementById('swAntiLink').checked = s.antiLink;
+ document.getElementById('swBotReply').checked = s.botReply;
+ document.getElementById('customBadwordsInput').value = (s.customBadwords || []).join(', ');
 
- for(const [swId, [prop, badgeId, onTxt, offTxt]] of Object.entries(map)){
-   const el = document.getElementById(swId);
-   const badge = document.getElementById(badgeId);
-   if(el) el.checked = Boolean(st[prop]);
-   if(badge) {
-     badge.textContent = st[prop] ? onTxt : offTxt;
-     badge.className = 'badge ' + (st[prop] ? 'badge-green' : 'badge-amber');
-   }
- }
-
- const customInput = document.getElementById('customBadwordsInput');
- if(customInput && Array.isArray(st.customBadwords)) {
-   customInput.value = st.customBadwords.join(', ');
- }
-}
-
-async function handleToggle(prop, checked){
- try {
-   await call('/api/moderation/settings', 'POST', { [prop]: checked });
-   currentSettings[prop] = checked;
-   updateUiSettings(currentSettings);
-   toast(prop + ' = ' + (checked ? 'ON' : 'OFF') + ' সংরক্ষিত হয়েছে');
- } catch(e) {
-   toast('Error saving setting: ' + e.message);
- }
-}
-
-async function saveCustomBadwords(){
- const text = document.getElementById('customBadwordsInput').value;
- const list = text.split(/[,\n]/).map(s=>s.trim()).filter(Boolean);
- try {
-   await call('/api/moderation/settings', 'POST', { customBadwords: list });
-   toast('Custom Badwords সংরক্ষিত হয়েছে (' + list.length + ' টি শব্দ)');
- } catch(e) {
-   toast('Error: ' + e.message);
- }
-}
-
-async function resetAllWarnings(){
- if(!confirm('আপনি কি নিশ্চিত সব Warning মুছে ফেলতে চান?')) return;
- try {
-   await call('/api/moderation/reset-warnings', 'POST');
-   toast('সকল সদস্যের Warning সফলভাবে রিসেট করা হয়েছে!');
-   loadDashboard();
- } catch(e) {
-   toast('Reset failed: ' + e.message);
- }
-}
-
-async function clearLogs(){
- try {
-   await call('/api/moderation/clear-logs', 'POST');
-   renderLogs([]);
-   toast('Logs Cleared');
- } catch(e) {
-   toast('Clear failed');
- }
-}
-
-function renderLogs(logs){
- const tbody = document.getElementById('activityLogTable');
- if(!tbody) return;
- if(!logs || !logs.length) {
-   tbody.innerHTML = '<tr><td colspan="5" class="empty">কোনো কার্যকলাপের লগ এখনো পাওয়া যায়নি।</td></tr>';
-   return;
- }
- tbody.innerHTML = logs.map(l => {
-   const badgeClass = l.action === 'kicked' ? 'badge-red' : l.action === 'warned' ? 'badge-amber' : l.action === 'locked' ? 'badge-amber' : l.action === 'error' ? 'badge-red' : l.action === 'replied' ? 'badge-blue' : 'badge-green';
-   const timeStr = new Date(l.timestamp).toLocaleTimeString();
-   return `<tr>
-    <td style="white-space:nowrap;font-size:10px;color:#64748b">${timeStr}</td>
-    <td><b>${l.groupName || l.groupId}</b></td>
-    <td style="font-family:monospace;font-size:11px">${l.senderPhone ? '@'+l.senderPhone : l.senderJid}</td>
-    <td><span class="badge ${badgeClass}">${l.action.toUpperCase()}</span></td>
-    <td><b>${l.reason}</b>${l.details ? `<div style="font-size:10px;color:#64748b;margin-top:2px">${l.details}</div>` : ''}</td>
-   </tr>`;
- }).join('');
-}
-
-async function loadDashboard(){
- try{
-  const d = await call('/api/dashboard');
-  document.getElementById('messages').textContent = d.overview?.messagesChecked ?? '0';
-  document.getElementById('warnings').textContent = d.overview?.warnings ?? '0';
-  document.getElementById('blocked').textContent = d.overview?.blockedWords ?? '0';
-  document.getElementById('groupCount').textContent = d.overview?.groups ?? '0';
-  await pollLiveStatus();
-  toast('Dashboard Synced');
- }catch(e){
-  toast('Dashboard Active (Built-in Server)');
- }
-}
-
-// লাইভ স্ট্যাটাস পোলিং (WhatsApp সকেট কানেকশন ট্র্যাকিং)
-async function pollLiveStatus(){
- try {
-  const d = await call('/api/whatsapp/status');
-  const dot = document.getElementById('heroDot');
-  const statusEl = document.getElementById('heroStatus');
-  const sideText = document.getElementById('sideStatusText');
-  const pill = document.getElementById('headerStatusPill');
-  const pillText = document.getElementById('headerStatusText');
-
-  if(d.online) {
-    dot.style.background = '#4ade80';
-    pill.className = 'live-pill connected';
-    pillText.textContent = 'অনলাইন ও কানেক্টেড';
-    statusEl.textContent = 'অনলাইন ও কানেক্টেড (' + (d.user?.name || d.phoneNumber || 'Active') + ')';
-    sideText.textContent = 'কানেক্টেড: ' + (d.user?.name || d.phoneNumber || 'Active');
-    document.getElementById('alreadyConnectedBox').style.display = 'block';
-    document.getElementById('pairResult').style.display = 'none';
-    document.getElementById('connectedUserInfo').innerHTML = '<b>WhatsApp Account:</b> ' + (d.user?.name || 'User') + '<br><b>Phone/JID:</b> ' + (d.user?.id || d.phoneNumber || 'Connected');
-    document.getElementById('heroConnectBtn').style.display = 'none';
-  } else if(d.status === 'pairing') {
-    dot.style.background = '#facc15';
-    pill.className = 'live-pill pairing';
-    pillText.textContent = 'পেয়ারিং চালু আছে';
-    statusEl.textContent = d.stepMessage || 'ফোনে কোড দেওয়ার জন্য অপেক্ষা করা হচ্ছে...';
-    document.getElementById('heroConnectBtn').style.display = 'inline-flex';
-    document.getElementById('alreadyConnectedBox').style.display = 'none';
-    
-    if(d.pairingCode) {
-      currentPairCode = d.pairingCode;
-      document.getElementById('pairCode').textContent = d.pairingCode;
-      document.getElementById('pairResult').style.display = 'block';
-      document.getElementById('pairTimerBadge').textContent = d.remainingSeconds > 0 ? (d.remainingSeconds + 's বাকি') : 'সক্রিয়';
-      document.getElementById('liveStepIndicator').textContent = d.stepMessage || 'WhatsApp সকেট সক্রিয়';
-    }
-    if(d.qrCode) {
-      currentQrCode = d.qrCode;
-      document.getElementById('qrImage').src = d.qrCode;
-    }
-  } else {
-    dot.style.background = '#c3d3ca';
-    pill.className = 'live-pill disconnected';
-    pillText.textContent = 'ডিসকানেক্টেড';
-    statusEl.textContent = 'ডিসকানেক্টেড (কানেক্ট করতে কোড নিন)';
-    sideText.textContent = 'সরাসরি WhatsApp সার্ভার রেডি';
-    document.getElementById('alreadyConnectedBox').style.display = 'none';
-    document.getElementById('heroConnectBtn').style.display = 'inline-flex';
-  }
- } catch(e) {}
-}
-
-// রিয়েল পেয়ারিং কোড জেনারেটর (Official Baileys Server)
-async function getPairing(){
- const phoneInput = document.getElementById('pairPhone');
- let phone = phoneInput.value.replace(/\D/g,'');
- if(phone.startsWith('01') && phone.length === 11) {
-   phone = '88' + phone;
- }
-
- const errBox = document.getElementById('pairError');
- errBox.style.display = 'none';
-
- if(phone.length < 10){
-   errBox.textContent = 'সঠিক আন্তর্জাতিক কান্ট্রি কোডসহ ফোন নম্বর লিখুন (যেমন: 88017XXXXXXXX)';
-   errBox.style.display = 'block';
-   toast('সঠিক ফোন নম্বর দিন');
-   return;
- }
-
- localStorage.setItem('wg_phone', phone);
- toast('WhatsApp সার্ভার থেকে রিয়েল ৮-ডিজিট কোড নেওয়া হচ্ছে...');
+ // Maya Toggles
+ document.getElementById('swMayaAiEnabled').checked = s.mayaAiEnabled;
+ document.getElementById('swMayaRomantic').checked = s.mayaRomantic;
+ document.getElementById('swMayaFunny').checked = s.mayaFunny;
+ document.getElementById('swMayaAutoParticipate').checked = s.mayaAutoParticipate;
  
- try{
-  const d = await call('/api/whatsapp/pair', 'POST', { phoneNumber: phone });
+ // Maya Ranges
+ document.getElementById('rangeFrequency').value = s.mayaReplyFrequency;
+ updateRangeVal('Frequency', s.mayaReplyFrequency);
+ document.getElementById('rangeMemory').value = s.mayaMemoryLimit;
+ updateRangeVal('Memory', s.mayaMemoryLimit);
+ document.getElementById('selMayaLanguage').value = s.mayaLanguage || 'auto';
+
+ // Badges
+ updateBadges(s);
+}
+
+function updateBadges(s) {
+ document.getElementById('badgeAdminShield').textContent = s.adminShield ? 'ON - SHIELDED' : 'OFF';
+ document.getElementById('badgeAdminShield').className = 'badge ' + (s.adminShield ? 'badge-green' : 'badge-amber');
+ 
+ document.getElementById('badgeAutoKick').textContent = s.autoKick3Warnings ? 'ACTIVE' : 'OFF';
+ document.getElementById('badgeAutoKick').className = 'badge ' + (s.autoKick3Warnings ? 'badge-green' : 'badge-amber');
+
+ document.getElementById('badgeMayaEnabled').textContent = s.mayaAiEnabled ? 'ACTIVE' : 'OFF';
+ document.getElementById('badgeMayaEnabled').className = 'badge ' + (s.mayaAiEnabled ? 'badge-green' : 'badge-amber');
+ 
+ document.getElementById('badgeMayaAuto').textContent = s.mayaAutoParticipate ? 'ON' : 'OFF';
+ document.getElementById('badgeMayaAuto').className = 'badge ' + (s.mayaAutoParticipate ? 'badge-green' : 'badge-amber');
+}
+
+async function handleToggle(key, val) {
+ try {
+  await call('/api/moderation/settings', 'POST', {[key]: val});
+  currentSettings[key] = val;
+  updateBadges(currentSettings);
+  toast('Saved: ' + key);
+ } catch(e){toast('Save Failed');}
+}
+
+async function saveCustomBadwords() {
+ const list = document.getElementById('customBadwordsInput').value.split(',').map(s=>s.trim()).filter(Boolean);
+ await call('/api/moderation/settings', 'POST', {customBadwords: list});
+ toast('Badwords Saved');
+}
+
+async function resetAllWarnings() {
+ if(!confirm('Reset all warnings?')) return;
+ await call('/api/moderation/reset-warnings', 'POST');
+ toast('Warnings Reset');
+}
+
+async function clearLogs() {
+ await call('/api/moderation/clear-logs', 'POST');
+ document.getElementById('activityLogTable').innerHTML = '<tr><td colspan="5" class="empty">লগ ক্লিয়ার করা হয়েছে</td></tr>';
+}
+
+function renderLogs(logs) {
+ const tbody = document.getElementById('activityLogTable');
+ if(!logs || logs.length === 0) {
+  tbody.innerHTML = '<tr><td colspan="5" class="empty">No activity recorded yet</td></tr>';
+  return;
+ }
+ tbody.innerHTML = logs.map(l => `
+  <tr>
+   <td>${new Date(l.timestamp).toLocaleTimeString()}</td>
+   <td>${l.groupName}</td>
+   <td>@${l.senderPhone}</td>
+   <td><span class="badge ${l.action==='kicked'?'badge-red':l.action==='replied'?'badge-blue':'badge-amber'}">${l.action.toUpperCase()}</span></td>
+   <td>${l.reason}</td>
+  </tr>
+ `).join('');
+}
+
+async function getPairing() {
+ let phone = document.getElementById('pairPhone').value.replace(/\D/g,'');
+ if(phone.startsWith('1') && phone.length === 10) phone = '880' + phone;
+ if(phone.startsWith('01') && phone.length === 11) phone = '88' + phone;
+ if(phone.length < 10) {toast('Invalid phone'); return;}
+ localStorage.setItem('wg_phone', phone);
+ 
+ document.getElementById('pairError').style.display = 'none';
+ try {
+  const d = await call('/api/whatsapp/pair', 'POST', {phoneNumber: phone});
   if(d.alreadyConnected) {
-    toast('ইতিমধ্যে কানেক্টেড রয়েছে!');
-    pollLiveStatus();
-    return;
+   toast('Already Connected!');
+   loadDashboard();
+   return;
   }
-  if(!d.pairingCode) throw Error('No code returned from WhatsApp server');
-  currentPairCode = d.pairingCode;
-  document.getElementById('pairCode').textContent = currentPairCode;
-  if(d.qrCode) {
-    currentQrCode = d.qrCode;
-    document.getElementById('qrImage').src = d.qrCode;
-  }
+  document.getElementById('pairCode').textContent = d.pairingCode;
+  document.getElementById('qrImage').src = d.qrCode;
   document.getElementById('pairResult').style.display = 'block';
-  toast('রিয়েল অফিশিয়াল পেয়ারিং কোড তৈরি হয়েছে!');
+  toast('Code Generated!');
   pollLiveStatus();
  } catch(e){
-  errBox.textContent = e.message || 'WhatsApp সার্ভারে সংযোগ তৈরি করা যায়নি। আবার চেষ্টা করুন।';
-  errBox.style.display = 'block';
-  toast(e.message || 'Error occurred');
+  document.getElementById('pairError').textContent = e.message;
+  document.getElementById('pairError').style.display = 'block';
  }
 }
 
-async function copyPair(){
- if(!currentPairCode) return;
+function pollLiveStatus() {
+ if(pollTimer) clearInterval(pollTimer);
+ pollTimer = setInterval(async () => {
+  try {
+   const d = await call('/api/whatsapp/status');
+   updateStatusUI(d);
+   if(d.online) {
+    clearInterval(pollTimer);
+    document.getElementById('pairResult').style.display = 'none';
+    document.getElementById('alreadyConnectedBox').style.display = 'block';
+    document.getElementById('connectedUserInfo').textContent = `কানেক্টেড: ${d.user?.name || d.phoneNumber}`;
+   }
+  } catch(e){}
+ }, 3000);
+}
+
+function updateStatusUI(d) {
+ const pill = document.getElementById('headerStatusPill');
+ const text = document.getElementById('headerStatusText');
+ const side = document.getElementById('sideStatusText');
+ const hDot = document.getElementById('heroDot');
+ const hStat = document.getElementById('heroStatus');
+ 
+ if(d.online) {
+  pill.className = 'live-pill connected'; text.textContent = 'অনলাইন';
+  side.textContent = 'সরাসরি সকেট লাইভ কানেক্টেড';
+  hDot.style.background = '#4ade80'; hStat.textContent = 'WhatsApp কানেক্টেড আছে';
+ } else if(d.status === 'pairing') {
+  pill.className = 'live-pill pairing'; text.textContent = 'পেয়ারিং...';
+  side.textContent = 'পেয়ারিং কোড সেশন সক্রিয়';
+  hDot.style.background = '#facc15'; hStat.textContent = 'পেয়ারিং সেশন চলছে';
+ } else {
+  pill.className = 'live-pill disconnected'; text.textContent = 'ডিসকানেক্টেড';
+  side.textContent = 'সরাসরি WhatsApp সার্ভার রেডি';
+  hDot.style.background = '#e2e8f0'; hStat.textContent = 'WhatsApp কানেক্টেড নেই';
+ }
+}
+
+async function copyPair() {
+ const code = document.getElementById('pairCode').textContent;
+ await navigator.clipboard.writeText(code);
+ document.getElementById('copyBtnText').textContent = 'কপি হয়েছে!';
+ setTimeout(()=>document.getElementById('copyBtnText').textContent = 'Copy Code', 2000);
+}
+
+async function disconnectSession() {
+ if(!confirm('Disconnect session?')) return;
+ await call('/api/whatsapp/disconnect', 'POST');
+ location.reload();
+}
+
+async function testAI() {
+ toast('Testing AI Engine...');
  try {
-  await navigator.clipboard.writeText(currentPairCode);
-  document.getElementById('copyBtnText').textContent = 'কপি হয়েছে!';
-  toast('Code Copied to Clipboard!');
-  setTimeout(() => {
-    document.getElementById('copyBtnText').textContent = 'Copy Code';
-  }, 2000);
- } catch(e) {
-  toast('Copy failed');
- }
+  const d = await call('/api/ai/test', 'POST');
+  toast(d.message);
+ } catch(e){toast('AI Test Error');}
 }
 
-async function disconnectSession(){
+async function testMaya() {
+ const input = document.getElementById('mayaTestInput');
+ const text = input.value.trim();
+ if(!text) return;
+ input.value = '';
+ document.getElementById('mayaTestResult').textContent = 'মায়া ভাবছে...';
  try {
-  await call('/api/whatsapp/disconnect', 'POST');
-  document.getElementById('alreadyConnectedBox').style.display = 'none';
-  toast('WhatsApp ডিসকানেক্ট করা হয়েছে');
-  pollLiveStatus();
- } catch(e) {
-  toast('Disconnect failed');
- }
+  const d = await call('/api/maya/test', 'POST', {text, settings: currentSettings});
+  document.getElementById('mayaTestResult').innerHTML = `<b>মায়া:</b> ${d.reply}`;
+ } catch(e){toast('AI Error');}
 }
 
-async function loadGroups(){
- try{
-  const d = await call('/api/groups');
-  const groups = d.groups || [];
-  document.getElementById('groupList').innerHTML = groups.length ? groups.map(g=>`<tr><td><b>${g.name||g.subject||'WhatsApp Group'}</b><div style="font-size:10px;color:#64748b;font-family:monospace">${g.id}</div></td><td>${Number(g.participants||0)} members</td><td><span class="status-tag good">Protected by WAGuard</span></td></tr>`).join('') : '<tr><td colspan="3" class="empty">কোনো গ্রুপ পাওয়া যায়নি</td></tr>';
-  toast('Groups Synced');
- } catch(e){
-  document.getElementById('groupList').innerHTML = `
-   <tr><td><b>WAGuard Official Community</b></td><td>184 members</td><td><span class="status-tag good">Protected by WAGuard</span></td></tr>
-   <tr><td><b>Devs & Admins Group</b></td><td>42 members</td><td><span class="status-tag good">Protected by WAGuard</span></td></tr>
-  `;
-  toast('Groups Loaded (Active)');
- }
-}
-
-window.onload = () => {
- loadDashboard();
- pollTimer = setInterval(pollLiveStatus, 2500);
-};
+// Initial Load
+loadDashboard();
 </script>
 </body>
 </html>

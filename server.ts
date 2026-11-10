@@ -36,6 +36,18 @@ const app = express();
 const server = createServer(app);
 const PORT = 3000;
 
+// Enable CORS for all origins, supporting credentials and preflight OPTIONS
+app.use((req: Request, res: Response, next) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 app.use(express.json());
 
 // Persistent directory for WhatsApp session auth keys
@@ -202,34 +214,70 @@ async function initializeExistingSession() {
 initializeExistingSession();
 
 /**
+ * Format and validate international phone number
+ */
+function formatAndValidatePhone(inputPhone: string): { valid: boolean; cleanPhone: string; error?: string } {
+  if (!inputPhone) {
+    return { valid: false, cleanPhone: '', error: 'ফোন নম্বর প্রদান করুন (যেমন: 88017XXXXXXXX)' };
+  }
+  let clean = String(inputPhone).replace(/\D/g, '');
+  if (clean.startsWith('00')) {
+    clean = clean.slice(2);
+  }
+  if (clean.startsWith('1') && clean.length === 10) {
+    clean = '880' + clean;
+  } else if (clean.startsWith('01') && clean.length === 11) {
+    clean = '88' + clean;
+  }
+  if (clean.length < 10 || clean.length > 15) {
+    return {
+      valid: false,
+      cleanPhone: clean,
+      error: 'আন্তর্জাতিক কান্ট্রি কোডসহ সঠিক ফোন নম্বর প্রদান করুন (যেমন: 88017XXXXXXXX, ১০-১৫ ডিজিট)',
+    };
+  }
+  return { valid: true, cleanPhone: clean };
+}
+
+/**
  * Request real 8-digit WhatsApp pairing code directly from WhatsApp server
  */
 async function startRealPairingFlow(cleanPhone: string): Promise<{ pairingCode: string; qrCode: string }> {
+  console.log(`[Baileys Engine] Starting real pairing flow for phone: ${cleanPhone}...`);
+
   // If an unauthenticated socket is already running, gracefully close it
   if (currentSock && !currentSock.authState?.creds?.registered) {
     try {
+      console.log('[Baileys Engine] Closing existing unauthenticated socket before new pairing attempt...');
       currentSock.end(undefined);
     } catch (e) {}
     currentSock = null;
   }
 
-  // Clear unauthenticated session files to avoid stale keys
+  // Clear unauthenticated session files completely to avoid stale keys
   try {
     const credsPath = path.join(SESSIONS_DIR, 'creds.json');
+    let isRegistered = false;
     if (fs.existsSync(credsPath)) {
       const content = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
-      if (!content.registered) {
-        fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
-        fs.mkdirSync(SESSIONS_DIR, { recursive: true });
-      }
+      if (content.registered) isRegistered = true;
     }
-  } catch (e) {}
+    if (!isRegistered) {
+      console.log('[Baileys Engine] Cleaning unauthenticated session directory for fresh key generation...');
+      fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
+      fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+    }
+  } catch (e) {
+    console.error('[Baileys Engine] Error cleaning session directory:', e);
+  }
 
   const { state, saveCreds } = await useMultiFileAuthState(SESSIONS_DIR);
   const { version } = await fetchLatestBaileysVersion().catch(() => ({
     version: [2, 3000, 1015901307] as [number, number, number],
     isLatest: true,
   }));
+
+  console.log(`[Baileys Engine] Initializing WASocket with version ${version.join('.')}...`);
 
   botState.status = 'connecting';
   botState.step = 'initializing';
@@ -256,15 +304,16 @@ async function startRealPairingFlow(cleanPhone: string): Promise<{ pairingCode: 
   return new Promise((resolve, reject) => {
     let resolved = false;
 
-    // Give WhatsApp server up to 25 seconds to establish Noise WebSocket and return pairing code
+    // Timeout of 30 seconds for Noise handshake and pairing code request
     const timer = setTimeout(() => {
       if (!resolved) {
         resolved = true;
         botState.step = 'error';
         botState.stepMessage = 'WhatsApp সার্ভার রেসপন্স টাইমআউট হয়েছে। পুনরায় চেষ্টা করুন।';
+        console.error(`[Baileys Engine] Timeout generating pairing code for ${cleanPhone}`);
         reject(new Error('WhatsApp server handshake timeout. Please check number and try again.'));
       }
-    }, 25000);
+    }, 30000);
 
     const onUpdate = async (update: any) => {
       if (resolved) return;
@@ -275,9 +324,9 @@ async function startRealPairingFlow(cleanPhone: string): Promise<{ pairingCode: 
         sock.ev.off('connection.update', onUpdate);
 
         try {
-          console.log(`Requesting official pairing code for ${cleanPhone} from WhatsApp...`);
+          console.log(`[Baileys Engine] Noise handshake successful. Requesting pairing code for ${cleanPhone}...`);
           const rawCode = await sock.requestPairingCode(cleanPhone);
-          console.log(`REAL OFFICIAL WHATSAPP PAIRING CODE: ${rawCode}`);
+          console.log(`[Baileys Engine] SUCCESS! Real WhatsApp pairing code generated: ${rawCode}`);
 
           const formattedCode =
             rawCode.length === 8 && !rawCode.includes('-')
@@ -295,6 +344,7 @@ async function startRealPairingFlow(cleanPhone: string): Promise<{ pairingCode: 
 
           resolve({ pairingCode: formattedCode, qrCode: qrUrl });
         } catch (err: any) {
+          console.error('[Baileys Engine] requestPairingCode failed:', err.message);
           botState.step = 'error';
           botState.stepMessage = `কোড জেনারেট ত্রুটি: ${err.message || 'WhatsApp error'}`;
           reject(err);
@@ -305,9 +355,10 @@ async function startRealPairingFlow(cleanPhone: string): Promise<{ pairingCode: 
           resolved = true;
           clearTimeout(timer);
           sock.ev.off('connection.update', onUpdate);
+          console.error('[Baileys Engine] Connection closed during pairing:', err?.message || 'Closed');
           botState.step = 'error';
-          botState.stepMessage = `কানেকশন বন্ধ হয়েছে: ${err.message || 'Connection closed'}`;
-          reject(err);
+          botState.stepMessage = `কানেকশন বন্ধ হয়েছে: ${err?.message || 'Connection closed'}`;
+          reject(err || new Error('Connection closed by WhatsApp server'));
         }
       }
     };
@@ -321,24 +372,16 @@ async function startRealPairingFlow(cleanPhone: string): Promise<{ pairingCode: 
 // 1. WhatsApp 8-digit Pairing Code Endpoint
 app.post('/api/whatsapp/pair', async (req: Request, res: Response) => {
   try {
-    let { phoneNumber } = req.body;
-    if (!phoneNumber) {
-      return res.status(400).json({ success: false, error: 'Phone number is required' });
+    const { phoneNumber } = req.body;
+    console.log('[API /api/whatsapp/pair] Received request for phone:', phoneNumber);
+
+    const validation = formatAndValidatePhone(phoneNumber);
+    if (!validation.valid) {
+      console.warn('[API /api/whatsapp/pair] Validation failed:', validation.error);
+      return res.status(400).json({ success: false, error: validation.error });
     }
 
-    let cleanPhone = String(phoneNumber).replace(/\D/g, '');
-
-    // Auto-fix Bangladesh numbers without 88 prefix (e.g. 017XXXXXXXX -> 88017XXXXXXXX)
-    if (cleanPhone.startsWith('01') && cleanPhone.length === 11) {
-      cleanPhone = '88' + cleanPhone;
-    }
-
-    if (cleanPhone.length < 10) {
-      return res.status(400).json({
-        success: false,
-        error: 'Please enter a valid international phone number with country code (e.g. 88017XXXXXXXX)',
-      });
-    }
+    const cleanPhone = validation.cleanPhone;
 
     // If already connected
     if (currentSock?.authState?.creds?.registered && botState.status === 'connected') {
@@ -347,6 +390,26 @@ app.post('/api/whatsapp/pair', async (req: Request, res: Response) => {
         alreadyConnected: true,
         message: 'WhatsApp is already connected and active!',
         user: botState.user,
+      });
+    }
+
+    // Prevent duplicate requests within 90 seconds if pairing code exists for same number
+    const elapsedSec = (Date.now() - botState.pairingStartedAt) / 1000;
+    if (botState.status === 'pairing' && botState.phoneNumber === cleanPhone && botState.pairingCode && elapsedSec < 90) {
+      console.log(`[API /api/whatsapp/pair] Returning existing active pairing code for ${cleanPhone}`);
+      return res.json({
+        success: true,
+        phoneNumber: cleanPhone,
+        pairingCode: botState.pairingCode,
+        qrCode: botState.qrCodeDataUrl,
+        alreadyPairing: true,
+        instructions: [
+          '১. আপনার ফোনের WhatsApp অ্যাপ ওপেন করুন',
+          '২. উপরে ৩ ডট মেনু > Linked Devices এ যান',
+          '৩. "Link a Device" বাটনে চাপুন',
+          '৪. নিচে "Link with phone number instead" চাপুন',
+          `৫. এই ৮-ডিজিটের অফিশিয়াল কোডটি লিখুন: ${botState.pairingCode}`,
+        ],
       });
     }
 
@@ -366,7 +429,7 @@ app.post('/api/whatsapp/pair', async (req: Request, res: Response) => {
       ],
     });
   } catch (err: any) {
-    console.error('Error in /api/whatsapp/pair:', err);
+    console.error('[API /api/whatsapp/pair] Error:', err.message || err);
     return res.status(500).json({
       success: false,
       error: err.message || 'Failed to generate genuine WhatsApp pairing code from server',
@@ -511,8 +574,36 @@ app.post('/api/whatsapp/disconnect', async (req: Request, res: Response) => {
 app.post('/api/ai/test', async (req: Request, res: Response) => {
   res.json({
     success: true,
-    message: 'AI Moderation Engine is active and ready (Gemini 2.5 Flash / Groq / OpenRouter supported).',
+    message: 'AI Moderation Engine is active and ready (Gemini 1.5 Flash supported).',
   });
+});
+
+// 7. Maya AI Test Endpoint
+app.post('/api/maya/test', async (req: Request, res: Response) => {
+  try {
+    const { text, settings: mayaSettings } = req.body;
+    if (!text) return res.status(400).json({ error: 'Text is required' });
+
+    const { getMayaResponse } = await import('./src/aiEngine.ts');
+    
+    const reply = await getMayaResponse(
+      text,
+      'TEST-USER',
+      'Dashboard Admin',
+      'Admin Control Panel',
+      'ADMIN:TEST',
+      {
+        romantic: mayaSettings?.mayaRomantic ?? true,
+        funny: mayaSettings?.mayaFunny ?? true,
+        language: mayaSettings?.mayaLanguage ?? 'auto',
+        memoryLimit: mayaSettings?.mayaMemoryLimit ?? 10
+      }
+    );
+
+    res.json({ success: true, reply });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // Vite middleware in dev or static files in production
@@ -534,7 +625,27 @@ async function startServer() {
   }
 
   // Start group unlock timer monitor (resumes 10-minute locks even after restart)
-  startGroupLockMonitor(() => currentSock);
+  server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`[Server Warning] Port ${PORT} is currently busy, retrying binding in 1.5s...`);
+      setTimeout(() => {
+        server.close();
+        server.listen(PORT, '0.0.0.0');
+      }, 1500);
+    } else {
+      console.error('[Server Error]:', err);
+    }
+  });
+
+  const shutdown = () => {
+    console.log('Closing server socket gracefully...');
+    server.close(() => {
+      process.exit(0);
+    });
+  };
+
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server listening on port ${PORT}`);
