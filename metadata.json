@@ -1,0 +1,6 @@
+{
+  "name": "WAGuard WhatsApp Console",
+  "description": "Real WhatsApp 8-digit pairing code connection, group management, and AI moderation console.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
