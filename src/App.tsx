@@ -116,11 +116,145 @@ export default function App() {
     showNotification(nextLang === 'bn' ? 'ভাষা বাংলা সিলেক্ট করা হয়েছে' : 'Language switched to English');
   };
 
+  const isBn = uiLang === 'bn';
+
+  // Comprehensive Translation Dictionary
+  const t = {
+    // Nav
+    home: isBn ? 'হোম' : 'Home',
+    security: isBn ? 'সিকিউরিটি' : 'Security',
+    maya: isBn ? 'মায়া AI' : 'Maya AI',
+    integrations: isBn ? 'API কি' : 'API Keys',
+    groups: isBn ? 'গ্রুপ' : 'Groups',
+    connect: isBn ? 'কানেক্ট' : 'Connect',
+    mainMenu: isBn ? 'প্রধান মেনু' : 'MAIN MENU',
+
+    // Status Tags & Pills
+    connected: isBn ? 'অনলাইন ও কানেক্টেড' : 'Online & Connected',
+    pairingActive: isBn ? 'পেয়ারিং চালু আছে' : 'Pairing Active',
+    disconnected: isBn ? 'ডিসকানেক্টেড' : 'Disconnected',
+    realPortConnected: isBn ? 'সরাসরি সকেট লাইভ কানেক্টেড' : 'Live Socket Connected',
+    realPortReady: isBn ? 'সরাসরি WhatsApp সার্ভার রেডি' : 'WhatsApp Server Ready',
+
+    // Action Buttons
+    refresh: isBn ? 'রিফ্রেশ' : 'Refresh',
+    syncStatus: isBn ? 'সিঙ্ক স্ট্যাটাস' : 'Sync Status',
+    disconnectWa: isBn ? 'ডিসকানেক্ট WhatsApp' : 'Disconnect WhatsApp',
+    connectWa: isBn ? 'কানেক্ট WhatsApp (৮-ডিজিট)' : 'Connect WhatsApp (8-Digit)',
+
+    // Home Overview
+    overviewTitle: isBn ? 'Overview Dashboard' : 'Overview Dashboard',
+    overviewDesc: isBn ? 'লাইভ ক্লাউড মনিটরিং সেন্টার ও WhatsApp মডারেশন।' : 'Real-time cloud monitoring & WhatsApp live moderation.',
+    messagesChecked: isBn ? 'পরীক্ষাকৃত মেসেজ' : 'Messages Checked',
+    warnings: isBn ? 'সতর্কবার্তা' : 'Warnings',
+    blockedItems: isBn ? 'ব্লককৃত মেসেজ' : 'Blocked Items',
+    activeGroups: isBn ? 'সক্রিয় গ্রুপ' : 'Active Groups',
+    realtimeEngine: isBn ? 'লাইভ ইঞ্জিন' : 'Real-time Engine',
+    activeWarnings: isBn ? 'সক্রিয় ওয়ার্নিং' : 'Active Warnings',
+    deletedViolations: isBn ? 'মুছে ফেলা ভায়োলেশন' : 'Deleted Violations',
+    protectedGroups: isBn ? 'সুরক্ষিত গ্রুপ' : 'Protected Groups',
+    
+    // Bot Connection Card
+    botConnTitle: isBn ? 'WhatsApp বট কানেকশন' : 'WhatsApp Bot Connection',
+    botConnDescConnected: (user: string) => isBn ? `আপনার WhatsApp অ্যাকাউন্ট (${user}) সফলভাবে যুক্ত রয়েছে!` : `Your WhatsApp account (${user}) is connected and active!`,
+    botConnDescDisconnected: isBn ? 'Real-time online pairing এবং অফিশিয়াল ৮-ডিজিট কোড প্রসেস (REAL BAILEYS).' : 'Real-time online pairing and official 8-digit code process.',
+    groupSecTitle: isBn ? 'গ্রুপ সিকিউরিটি স্ট্যাটাস' : 'Group Security Status',
+    groupSecDesc: isBn ? '🛡️ Admin Shield, Anti-Badword, Anti-Link, 3-Warning Auto-Kick এবং Anti-Sticker Spam রিয়েল-টাইমে সক্রিয় আছে।' : '🛡️ Admin Shield, Anti-Badword, Anti-Link, 3-Warning Auto-Kick and Anti-Sticker Spam active.',
+    manageRulesBtn: isBn ? 'সিকিউরিটি রুলস নিয়ন্ত্রণ' : 'Manage Security Rules',
+
+    // Security Page
+    securityTitle: isBn ? 'গ্রুপ সিকিউরিটি ও মডারেশন' : 'Group Security & Moderation',
+    securitySub: isBn ? 'রিয়েল-টাইম গ্রুপ সুরক্ষা, অ্যান্টি-স্প্যাম, গালি ফিল্টার ও অটো-কিক ইঞ্জিন।' : 'Real-time group protection, anti-spam, badword filter & auto-kick engine.',
+    refreshRules: isBn ? 'রুলস রিফ্রেশ' : 'Refresh Rules',
+    resetWarningsBtn: isBn ? 'সকল Warning রিসেট' : 'Reset All Warnings',
+
+    // Security Cards
+    sec1Title: isBn ? '১. অ্যাডমিন সিকিউরিটি শিল্ড ও অটো-কিক' : '1. Admin Security Shield & Auto-Kick System',
+    sec1Sub: isBn ? 'গ্রুপ অ্যাডমিনদের নিরাপত্তা ও ৩ সতর্কতা কিক নিয়মাবলী' : 'Group admin protection & 3-warning auto-kick rules',
+    adminShieldTitle: isBn ? 'Admin Security Shield (অ্যাডমিন সুরক্ষা)' : 'Admin Security Shield',
+    adminShieldDesc: isBn ? 'কোনো Group Admin-কে কখনো Kick বা Warning দেবে না এবং তাদের মেসেজ ডিলিট করবে না।' : 'Never kick, warn, or delete messages from Group Admins.',
+    autoKickTitle: isBn ? 'Three Warning Auto Kick (৩ স্ট্রাইক কিক)' : 'Three Warning Auto Kick',
+    autoKickDesc: isBn ? '১ম ও ২য় বার Warning, ৩য় বার বাস্তবে কিক। বট অ্যাডমিন হলে সদস্যকে বাস্তবে Kick করবে।' : 'Warning 1, Warning 2, and real Kick on 3rd violation when bot is admin.',
+
+    sec2Title: isBn ? '২. মিডিয়া ফিল্টার ও অ্যান্টি-স্প্যাম লক' : '2. Media Restrictions & Anti-Spam Lock',
+    sec2Sub: isBn ? 'স্টিকার স্প্যাম, জিআইএফ, ভিডিও, ছবি ও ভিউ ওয়ান্স মডারেশন' : 'Sticker spam, GIF, video, photo & view-once moderation',
+    antiStickerSpamTitle: isBn ? 'Anti-Sticker Spam (১০ মিনিট গ্রুপ লক)' : 'Anti-Sticker Spam (Auto 10m Group Lock)',
+    antiStickerSpamDesc: isBn ? '৫ সেকেন্ডে ৩টি বা বেশি Sticker পাঠালে মেসেজ ডিলিট ও পুরো গ্রুপ ১০ মিনিটের জন্য লক হবে।' : '3+ stickers in 5 seconds locks group for 10 minutes.',
+    antiStickerTitle: isBn ? 'Anti-Sticker (সকল স্টিকার নিষিদ্ধ)' : 'Anti-Sticker (All Stickers)',
+    antiStickerDesc: isBn ? 'গ্রুপে যেকোনো WhatsApp Sticker সঙ্গে সঙ্গে ডিলিট ও সতর্ক করবে।' : 'Deletes all stickers sent in groups immediately.',
+    antiGifTitle: isBn ? 'Anti-GIF (জিআইএফ ডিলিট)' : 'Anti-GIF (Animated GIF & Video GIFs)',
+    antiGifDesc: isBn ? 'যেকোনো GIF এবং Animated GIF Video ডিলিট করবে।' : 'Deletes all GIFs and animated media.',
+    antiVideoTitle: isBn ? 'Anti-Video (ভিডিও ডিলিট)' : 'Anti-Video',
+    antiVideoDesc: isBn ? 'গ্রুপে যেকোনো Video Message ডিলিট করবে।' : 'Deletes video messages.',
+    antiImageTitle: isBn ? 'Anti-Image / Photo (ছবি ডিলিট)' : 'Anti-Image / Photo',
+    antiImageDesc: isBn ? 'গ্রুপে যেকোনো Photo বা Image ডিলিট করবে।' : 'Deletes photo messages.',
+    antiViewOnceTitle: isBn ? 'Anti-View Once (ভিউ ওয়ান্স ডিলিট)' : 'Anti-View Once',
+    antiViewOnceDesc: isBn ? 'View Once Photo এবং View Once Video ডিলিট ও সতর্ক করবে।' : 'Deletes View Once photos and videos.',
+
+    sec3Title: isBn ? '৩. বহুভাষিক গালি ও লিংক ফিল্টার' : '3. Multilingual Badword & Link Detection',
+    sec3Sub: isBn ? 'বাংলা, সিলেটি, Banglish, Hindi, English, Arabic গালি ফিল্টার' : 'Bengali, Sylheti, Banglish, Hindi, English, Arabic profanity filter',
+    antiBadwordTitle: isBn ? 'Advanced Multilingual Anti-Badword' : 'Advanced Multilingual Anti-Badword',
+    antiBadwordDesc: isBn ? 'বাংলা, সিলেটি, Banglish, English, Hindi, Arabic গালি ও স্পেস দিয়ে লেখা শব্দও ডিলিট করবে।' : 'Detects profanity across languages including spaced & leetspeak variants.',
+    antiLinkTitle: isBn ? 'Anti-Link (সকল লিংক ও গ্রুপ ইনভাইট)' : 'Anti-Link (All URLs & WhatsApp Invites)',
+    antiLinkDesc: isBn ? 'Website URL, WhatsApp Invites, Telegram, Facebook, YouTube লিংক মুছে ফেলবে।' : 'Deletes URLs, group invite links, and social media links.',
+    botReplyTitle: isBn ? 'Bot Reply System (বট রিপ্লাই অন/অফ সুইচ)' : 'Bot Reply System (On/Off Switch)',
+    botReplyDesc: isBn ? 'ইনবক্সে (DM) মেসেজ পাঠালে বট চুপ থাকবে (কোনো উত্তর দেবে না)। কিন্তু গ্রুপে "মায়া" (Maya) নামে ডাকলে, ট্যাগ করলে বা মেনশন করলে উত্তর দেবে।' : 'Silent in DMs/Inbox. In groups, responds whenever tagged or called "Maya" / "Bot".',
+    customBadwordsLabel: isBn ? 'Custom Badword List (কাস্টম নিষিদ্ধ শব্দের তালিকা)' : 'Custom Badword List',
+    customBadwordsHint: isBn ? 'কমা (,) দিয়ে আলাদা করে শব্দ লিখুন।' : 'Separate words with commas.',
+    saveBadwordsBtn: isBn ? 'কাস্টম ব্যাডওয়ার্ড সেভ' : 'Save Custom Badwords',
+
+    // Activity Logs
+    activityTitle: isBn ? 'লাইভ মডারেশন অ্যাক্টিভিটি লগ' : 'Real-Time Moderation Activity Log',
+    activitySub: isBn ? 'গ্রুপে ঘটা সকল ডিলিট, ওয়ার্নিং, কিক ও লকের লাইভ রেকর্ড' : 'Live logs of deletes, warnings, kicks & locks',
+    clearLogsBtn: isBn ? 'লগ ক্লিয়ার' : 'Clear Logs',
+    noLogsMsg: isBn ? 'কোনো কার্যকলাপের লগ এখনো পাওয়া যায়নি। নতুন মেসেজ আসলে তা এখানে প্রদর্শিত হবে।' : 'No activity recorded yet. New events will appear here.',
+
+    // Maya AI Page
+    mayaTitle: isBn ? 'Maya AI — Advanced Romantic Personality' : 'Maya AI — Advanced Romantic Personality',
+    mayaSub: isBn ? 'মায়া (Maya) বটের মিষ্টি পারসোনালিটি, রোমান্টিক ভাব ও স্বয়ংক্রিয় উত্তর নিয়ন্ত্রণ করুন।' : 'Control Maya\'s personality, romantic tone, and AI auto-responses.',
+    mayaCoreTitle: isBn ? 'Maya AI Core Configuration' : 'Maya AI Core Configuration',
+    mayaCoreSub: isBn ? 'বট পারসোনালিটি ও রিপ্লাই ইঞ্জিন নিয়ন্ত্রণ' : 'Control bot personality & reply engine',
+    mayaEngineTitle: isBn ? 'Maya AI Engine' : 'Maya AI Engine State',
+    mayaEngineDesc: isBn ? 'Gemini AI এর মাধ্যমে মায়ার স্মার্ট পারসোনালিটি সক্রিয় করুন।' : 'Enable Maya\'s smart AI personality via Gemini.',
+    romanticTitle: isBn ? 'Romantic Mode (রোমান্টিক মোড)' : 'Romantic Mode',
+    romanticDesc: isBn ? 'মায়াকে আরও রোমান্টিক, মিষ্টি ও যত্নশীল করে তুলুন। ❤️' : 'Make Maya sweet, caring, and romantic. ❤️',
+    funnyTitle: isBn ? 'Funny & Mischievous (দুষ্টুমি ও হাসি-ঠাট্টা)' : 'Funny & Mischievous',
+    funnyDesc: isBn ? 'মায়াকে হাসিখুশি ও সিগনেচার ফানি রিপ্লাইয়ে অভ্যস্ত করুন। 🙈' : 'Enable playful, witty, and sassy responses. 🙈',
+    autoPartTitle: isBn ? 'Auto Participation (গ্রুপে স্বয়ংক্রিয় কথা বলা)' : 'Auto Group Participation',
+    autoPartDesc: isBn ? 'মায়া গ্রুপের কথা শুনে নিজে থেকেও মাঝে মাঝে কথা বলবে।' : 'Maya occasionally replies in group chats autonomously.',
+    testMayaTitle: isBn ? 'Test Maya AI (চ্যাট প্রিভিউ)' : 'Test Maya AI (Live Preview)',
+    testMayaSub: isBn ? 'মায়ার সাথে কথা বলে রিপ্লাই পরীক্ষা করুন।' : 'Chat directly with Maya to test her personality.',
+    testMayaPlaceholder: isBn ? 'মায়াকে কিছু বলুন...' : 'Say something to Maya...',
+    sendBtn: isBn ? 'পাঠান' : 'Send',
+
+    // Connect Page
+    connectTitle: isBn ? 'WhatsApp Connect Device' : 'WhatsApp Connect Device',
+    connectSub: isBn ? 'অফিশিয়াল ৮-ডিজিট কোড দিয়ে ফোন যুক্ত করুন (REAL BAILEYS).' : 'Link your WhatsApp using real official 8-digit pairing code.',
+    linkDeviceHead: isBn ? 'Link WhatsApp Device' : 'Link WhatsApp Device',
+    eightDigitCode: isBn ? '৮-ডিজিট কোড' : '8-Digit Code',
+    qrCodeLabel: isBn ? 'কিউআর কোড' : 'QR Code',
+    phoneInputLabel: isBn ? 'WhatsApp Phone Number' : 'WhatsApp Phone Number',
+    phoneInputHint: isBn ? 'নম্বরের শুরুতে ৮৮ না দিলে স্বয়ংক্রিয়ভাবে ৮৮ যোগ হবে (যেমন: 017XXXXXXXX -> 88017XXXXXXXX)।' : 'Auto-adds country code 88 if missing (e.g. 017XXXXXXXX -> 88017XXXXXXXX).',
+    genPairCodeBtn: isBn ? 'Generate Real Pairing Code (কোড নিন)' : 'Generate Real Pairing Code',
+    connectedTitle: isBn ? 'অভিনন্দন! আপনার WhatsApp সফলভাবে যুক্ত হয়েছে!' : 'Congratulations! WhatsApp Linked Successfully!',
+    alreadyConnectedSub: (user: string) => isBn ? `কানেক্টেড একাউন্ট: ${user}` : `Connected Account: ${user}`,
+    copyCodeBtn: isBn ? 'Copy Code' : 'Copy Code',
+    getNewCodeBtn: isBn ? 'নতুন কোড নিন' : 'Get New Code',
+
+    // Groups Page
+    groupsTitle: isBn ? 'Group Management' : 'Group Management',
+    groupsSub: isBn ? 'সংযুক্ত WhatsApp গ্রুপের বিবরণ ও সুরক্ষা স্ট্যাটাস।' : 'View cloud connected groups & real protection status.',
+    groupNameCol: isBn ? 'গ্রুপ নাম' : 'GROUP NAME',
+    membersCol: isBn ? 'সদস্য সংখ্যা' : 'MEMBERS',
+    statusCol: isBn ? 'মডারেশন স্ট্যাটাস' : 'MODERATION STATUS',
+    protectedBadge: isBn ? 'WAGuard দ্বারা সুরক্ষিত' : 'Protected by WAGuard',
+  };
+
   // Live WhatsApp Connection State
   const [liveStatus, setLiveStatus] = useState<LiveStatusData>({
     status: 'disconnected',
     step: 'idle',
-    stepMessage: 'WhatsApp সংযোগের জন্য প্রস্তুত',
+    stepMessage: isBn ? 'WhatsApp সংযোগের জন্য প্রস্তুত' : 'Ready to connect WhatsApp',
     online: false,
     remainingSeconds: 0,
   });
@@ -228,7 +362,6 @@ export default function App() {
       }
       return data;
     } catch (err: any) {
-      // If fetching via custom baileysUrl failed with network error, fall back to relative path
       if (base && (err.name === 'TypeError' || String(err.message).includes('Failed to fetch'))) {
         console.warn(`Fetch to custom server ${base} failed (${err.message}). Falling back to local app server...`);
         const fallbackRes = await fetch(cleanPath, {
@@ -271,9 +404,8 @@ export default function App() {
         setCustomBadwordsText((data.moderation.settings.customBadwords || []).join(', '));
       }
       await checkStatus();
-      showNotification('Dashboard Synced');
     } catch {
-      showNotification('Dashboard Active (Built-in Server)');
+      // non-blocking
     }
   };
 
@@ -291,23 +423,22 @@ export default function App() {
       if (logsRes.logs) {
         setActivityLogs(logsRes.logs);
       }
-      showNotification('Security Settings & Logs Synced');
+      showNotification(isBn ? 'সেটিংস ও লগ প্রস্তুত' : 'Settings & Logs Synced');
     } catch (err: any) {
-      showNotification('Failed to load moderation data: ' + err.message);
+      showNotification((isBn ? 'ডাটা লোড ত্রুটি: ' : 'Failed to load data: ') + err.message);
     } finally {
       setIsLogsLoading(false);
     }
   };
 
-  const updateSettingToggle = async (key: keyof ModerationSettings, value: boolean) => {
+  const updateSettingToggle = async (key: keyof ModerationSettings, value: any) => {
     const updated = { ...settings, [key]: value };
     setSettings(updated);
     try {
       await callApi('/api/moderation/settings', 'POST', { [key]: value });
-      showNotification(`সফলভাবে সেভ হয়েছে: ${key} = ${value ? 'ON' : 'OFF'}`);
+      showNotification(isBn ? `সফলভাবে সেভ হয়েছে: ${key} = ${value}` : `Saved: ${key} = ${value}`);
     } catch (err: any) {
-      showNotification('সেটিংস সেভ করতে ব্যর্থ: ' + err.message);
-      // revert on error
+      showNotification((isBn ? 'সেভ করতে ব্যর্থ: ' : 'Save failed: ') + err.message);
       setSettings(settings);
     }
   };
@@ -321,20 +452,20 @@ export default function App() {
     try {
       await callApi('/api/moderation/settings', 'POST', { customBadwords: list });
       setSettings((prev) => ({ ...prev, customBadwords: list }));
-      showNotification(`Custom Badwords সংরক্ষিত হয়েছে (${list.length} টি শব্দ)`);
+      showNotification(isBn ? `কাস্টম ব্যাডওয়ার্ড সেভ হয়েছে (${list.length} টি)` : `Badwords Saved (${list.length} words)`);
     } catch (err: any) {
-      showNotification('সংরক্ষণ ব্যর্থ: ' + err.message);
+      showNotification((isBn ? 'সংরক্ষণ ব্যর্থ: ' : 'Save failed: ') + err.message);
     }
   };
 
   const resetAllWarnings = async () => {
-    if (!confirm('আপনি কি নিশ্চিত যে সকল সদস্যের সতর্কবার্তা (Warnings) রিসেট করতে চান?')) return;
+    if (!confirm(isBn ? 'আপনি কি নিশ্চিত যে সকল সদস্যের Warning রিসেট করতে চান?' : 'Reset all member warnings?')) return;
     try {
       await callApi('/api/moderation/reset-warnings', 'POST');
-      showNotification('সকল সদস্যের Warning সফলভাবে রিসেট করা হয়েছে!');
+      showNotification(isBn ? 'সকল Warning রিসেট করা হয়েছে!' : 'All warnings reset successfully!');
       loadDashboard();
     } catch (err: any) {
-      showNotification('রিসেট ব্যর্থ: ' + err.message);
+      showNotification((isBn ? 'রিসেট ব্যর্থ: ' : 'Reset failed: ') + err.message);
     }
   };
 
@@ -342,9 +473,9 @@ export default function App() {
     try {
       await callApi('/api/moderation/clear-logs', 'POST');
       setActivityLogs([]);
-      showNotification('অ্যাক্টিভিটি লগ ক্লিয়ার করা হয়েছে!');
+      showNotification(isBn ? 'অ্যাক্টিভিটি লগ ক্লিয়ার করা হয়েছে!' : 'Activity logs cleared!');
     } catch (err: any) {
-      showNotification('ক্লিয়ার ব্যর্থ: ' + err.message);
+      showNotification((isBn ? 'ক্লিয়ার ব্যর্থ: ' : 'Clear failed: ') + err.message);
     }
   };
 
@@ -355,9 +486,8 @@ export default function App() {
       if (data.groups && Array.isArray(data.groups)) {
         setGroups(data.groups);
       }
-      showNotification('Groups Synced');
     } catch {
-      showNotification('Groups Loaded (Active)');
+      // non-blocking
     } finally {
       setIsGroupsLoading(false);
     }
@@ -373,28 +503,27 @@ export default function App() {
     }
 
     if (clean.length < 10) {
-      setPairingError('সঠিক আন্তর্জাতিক ফোন নম্বর লিখুন (e.g. 88017XXXXXXXX)');
-      showNotification('সঠিক ফোন নম্বর দিন');
+      setPairingError(isBn ? 'সঠিক আন্তর্জাতিক ফোন নম্বর লিখুন (e.g. 88017XXXXXXXX)' : 'Enter valid phone number (e.g. 88017XXXXXXXX)');
+      showNotification(isBn ? 'সঠিক ফোন নম্বর দিন' : 'Enter valid phone number');
       return;
     }
 
     localStorage.setItem('wg_phone', clean);
     setIsPairingLoading(true);
     setPairingError(null);
-    showNotification('WhatsApp সার্ভার থেকে অফিশিয়াল ৮-ডিজিট কোড রিকোয়েস্ট করা হচ্ছে...');
+    showNotification(isBn ? 'WhatsApp সার্ভার থেকে অফিশিয়াল ৮-ডিজিট কোড রিকোয়েস্ট করা হচ্ছে...' : 'Requesting 8-digit code from WhatsApp server...');
 
     try {
       const res = await callApi('/api/whatsapp/pair', 'POST', { phoneNumber: clean });
       if (res.pairingCode) {
-        showNotification('রিয়েল WhatsApp পেয়ারিং কোড তৈরি হয়েছে!');
+        showNotification(isBn ? 'রিয়েল WhatsApp পেয়ারিং কোড তৈরি হয়েছে!' : 'Real pairing code generated!');
         await checkStatus();
       } else if (res.alreadyConnected) {
-        showNotification('ইতিমধ্যে WhatsApp কানেক্টেড রয়েছে!');
+        showNotification(isBn ? 'ইতিমধ্যে WhatsApp কানেক্টেড রয়েছে!' : 'WhatsApp is already connected!');
         await checkStatus();
       }
     } catch (err: any) {
-      console.error('Pairing error:', err);
-      const msg = err.message || 'WhatsApp সার্ভারের সাথে সংযোগে সমস্যা হয়েছে';
+      const msg = err.message || (isBn ? 'WhatsApp সার্ভারের সাথে সংযোগে সমস্যা হয়েছে' : 'Connection error');
       setPairingError(msg);
       showNotification(msg);
     } finally {
@@ -405,10 +534,10 @@ export default function App() {
   const handleDisconnect = async () => {
     try {
       await callApi('/api/whatsapp/disconnect', 'POST');
-      showNotification('WhatsApp সেশন ডিসকানেক্ট করা হয়েছে');
+      showNotification(isBn ? 'WhatsApp সেশন ডিসকানেক্ট করা হয়েছে' : 'Disconnected session');
       await checkStatus();
     } catch {
-      showNotification('ডিসকানেক্ট সম্পন্ন হয়েছে');
+      showNotification(isBn ? 'ডিসকানেক্ট সম্পন্ন হয়েছে' : 'Disconnected');
     }
   };
 
@@ -417,7 +546,7 @@ export default function App() {
     try {
       await navigator.clipboard.writeText(liveStatus.pairingCode);
       setIsCopied(true);
-      showNotification('কোড কপি হয়েছে!');
+      showNotification(isBn ? 'কোড কপি হয়েছে!' : 'Code copied!');
       setTimeout(() => setIsCopied(false), 2000);
     } catch {
       showNotification('Copy failed');
@@ -429,25 +558,21 @@ export default function App() {
       localStorage.setItem('wg_gemini_key', geminiKey);
       localStorage.setItem('wg_gemini_model', geminiModel);
       showNotification('Gemini Config Saved!');
+    } else if (type === 'groq') {
+      localStorage.setItem('wg_groq_key', groqKey);
+      showNotification('Groq API Key Saved!');
+    } else if (type === 'openrouter') {
+      localStorage.setItem('wg_openrouter_key', openrouterKey);
+      showNotification('OpenRouter API Key Saved!');
+    } else if (type === 'supabase') {
+      localStorage.setItem('wg_supabase_url', supabaseUrl);
+      localStorage.setItem('wg_supabase_key', supabaseKey);
+      showNotification('Supabase Credentials Saved!');
     } else if (type === 'meta') {
       localStorage.setItem('wg_watoken', waToken);
       localStorage.setItem('wg_phoneid', phoneId);
       localStorage.setItem('wg_wabaid', wabaId);
       showNotification('Meta Config Saved!');
-    } else if (type === 'groq') {
-      localStorage.setItem('wg_groq_key', groqKey);
-      showNotification('Groq Config Saved!');
-    } else if (type === 'openrouter') {
-      localStorage.setItem('wg_openrouter_key', openrouterKey);
-      showNotification('OpenRouter Config Saved!');
-    } else if (type === 'supabase') {
-      if (!supabaseUrl || !supabaseKey) {
-        showNotification('Supabase URL এবং Key দিন');
-        return;
-      }
-      localStorage.setItem('wg_supabase_url', supabaseUrl);
-      localStorage.setItem('wg_supabase_key', supabaseKey);
-      showNotification('Supabase Saved!');
     }
   };
 
@@ -456,24 +581,20 @@ export default function App() {
     const testInput = testInputEl?.value?.trim();
 
     if (activePage === 'maya' && testInput) {
-       showNotification('মায়ার উত্তরের জন্য অপেক্ষা করুন...');
+       showNotification(isBn ? 'মায়ার উত্তরের জন্য অপেক্ষা করুন...' : 'Waiting for Maya response...');
        try {
-         // We can use a dedicated test endpoint or just a dummy reply for now 
-         // but the user wants a real test. 
-         // I'll add a server endpoint /api/maya/test
          const res = await callApi('/api/maya/test', 'POST', { 
            text: testInput,
            settings: settings
          });
          
-         // Display response in the UI (e.g. in a toast or the placeholder)
          const hintEl = testInputEl.parentElement?.nextElementSibling;
          if (hintEl) {
-            hintEl.innerHTML = `<b>মায়া:</b> ${res.reply}`;
+            hintEl.innerHTML = `<b>Maya:</b> ${res.reply}`;
             hintEl.classList.remove('italic', 'text-gray-600');
             hintEl.classList.add('text-emerald-800');
          }
-         showNotification('মায়া উত্তর দিয়েছে!');
+         showNotification(isBn ? 'মায়া উত্তর দিয়েছে!' : 'Maya replied!');
          testInputEl.value = '';
        } catch (err: any) {
          showNotification('Maya Test Error: ' + err.message);
@@ -497,11 +618,11 @@ export default function App() {
         localStorage.setItem('wg_server', val);
         showNotification('Baileys Server URL Saved!');
       } catch {
-        showNotification('সঠিক Server URL দিন (https://...)');
+        showNotification(isBn ? 'সঠিক Server URL দিন (https://...)' : 'Invalid URL');
       }
     } else {
       localStorage.removeItem('wg_server');
-      showNotification('বিল্ট-ইন রিয়েল সার্ভার মোড সক্রিয়');
+      showNotification(isBn ? 'বিল্ট-ইন রিয়েল সার্ভার মোড সক্রিয়' : 'Built-in Server Active');
     }
   };
 
@@ -525,11 +646,14 @@ export default function App() {
 
   return (
     <div className="shell">
-      {/* Header */}
+      {/* Toast Notification */}
+      {showToast && <div className="toast block">{toastMessage}</div>}
+
+      {/* Compact Header */}
       <header className="header">
         <div className="brand">
           <div className="brandmark">
-            <ShieldCheck size={23} />
+            <ShieldCheck size={20} />
           </div>
           <div className="brandname">
             WA<span>Guard</span>
@@ -537,7 +661,7 @@ export default function App() {
         </div>
         <div className="header-right">
           <div
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold ${
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold ${
               liveStatus.online
                 ? 'bg-[#e9f7ef] text-[#108255]'
                 : liveStatus.status === 'pairing'
@@ -552,20 +676,23 @@ export default function App() {
             ></span>
             <span>
               {liveStatus.online
-                ? 'অনলাইন ও কানেক্টেড'
+                ? t.connected
                 : liveStatus.status === 'pairing'
-                ? 'পেয়ারিং চালু আছে'
-                : 'ডিসকানেক্টেড'}
+                ? t.pairingActive
+                : t.disconnected}
             </span>
           </div>
+
+          {/* Bengali / English Language Switcher Button */}
           <button
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold transition-all cursor-pointer shadow-xs"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-extrabold transition-all cursor-pointer shadow-xs shrink-0"
             onClick={toggleUiLang}
-            title={uiLang === 'bn' ? 'Switch UI to English' : 'বাংলা ইন্টারফেসে পরিবর্তন করুন'}
+            title={isBn ? 'Switch UI to English' : 'বাংলায় পরিবর্তন করুন'}
           >
-            <Globe size={14} className="text-emerald-600" />
-            <span>{uiLang === 'bn' ? 'English (ইন্টারফেস)' : 'বাংলা (ইন্টারফেস)'}</span>
+            <Globe size={13} className="text-emerald-700" />
+            <span>{isBn ? 'English' : 'বাংলা'}</span>
           </button>
+
           <button
             className="iconbutton"
             onClick={() => {
@@ -574,11 +701,11 @@ export default function App() {
               else if (activePage === 'groups') loadGroups();
               else checkStatus();
             }}
-            title="Refresh"
+            title={t.refresh}
           >
-            <RefreshCw size={17} />
+            <RefreshCw size={15} />
           </button>
-          <div className="avatar">W</div>
+          <div className="avatar text-xs font-bold">W</div>
         </div>
       </header>
 
@@ -586,12 +713,12 @@ export default function App() {
       <div className="layout">
         {/* Sidebar */}
         <aside className="sidebar">
-          <div className="side-label">MAIN MENU</div>
+          <div className="side-label">{t.mainMenu}</div>
           <button
             className={`nav ${activePage === 'home' ? 'active' : ''}`}
             onClick={() => setActivePage('home')}
           >
-            <LayoutDashboard size={18} /> হোম
+            <LayoutDashboard size={16} /> {t.home}
           </button>
           <button
             className={`nav ${activePage === 'security' ? 'active' : ''}`}
@@ -600,7 +727,7 @@ export default function App() {
               loadModerationData();
             }}
           >
-            <ShieldCheck size={18} /> সিকিউরিটি
+            <ShieldCheck size={16} /> {t.security}
           </button>
           <button
             className={`nav ${activePage === 'maya' ? 'active' : ''}`}
@@ -609,13 +736,13 @@ export default function App() {
               loadModerationData();
             }}
           >
-            <Heart size={18} /> মায়া AI (Maya)
+            <Heart size={16} /> {t.maya}
           </button>
           <button
             className={`nav ${activePage === 'integrations' ? 'active' : ''}`}
             onClick={() => setActivePage('integrations')}
           >
-            <Plug size={18} /> API & Integrations
+            <Plug size={16} /> {t.integrations}
           </button>
           <button
             className={`nav ${activePage === 'groups' ? 'active' : ''}`}
@@ -624,22 +751,22 @@ export default function App() {
               loadGroups();
             }}
           >
-            <Users size={18} /> গ্রুপ
+            <Users size={16} /> {t.groups}
           </button>
           <button
             className={`nav ${activePage === 'pairing' ? 'active' : ''}`}
             onClick={() => setActivePage('pairing')}
           >
-            <Smartphone size={18} /> কানেক্ট
+            <Smartphone size={16} /> {t.connect}
           </button>
 
           <div className="side-bottom">
-            <div className="flex items-center gap-2">
-              <Radio size={18} className="text-[#087f55] animate-pulse" />
-              <strong>REAL PORT BAILEYS</strong>
+            <div className="flex items-center gap-1.5">
+              <Radio size={16} className="text-[#087f55] animate-pulse" />
+              <strong>REAL BAILEYS</strong>
             </div>
-            <p className="mt-1 text-xs">
-              {liveStatus.online ? 'সরাসরি সকেট লাইভ কানেক্টেড' : 'সরাসরি WhatsApp সার্ভার রেডি'}
+            <p className="mt-1 text-[10px]">
+              {liveStatus.online ? t.realPortConnected : t.realPortReady}
             </p>
           </div>
         </aside>
@@ -651,56 +778,56 @@ export default function App() {
             <section className="page active" id="home">
               <div className="page-head">
                 <div>
-                  <h1>Overview Dashboard</h1>
-                  <p>Real-time online cloud monitoring center & WhatsApp live moderation.</p>
+                  <h1>{t.overviewTitle}</h1>
+                  <p>{t.overviewDesc}</p>
                 </div>
                 <button className="btn outline" onClick={loadDashboard}>
-                  <RefreshCw size={15} />
-                  <span className="btn-text">Refresh</span>
+                  <RefreshCw size={13} />
+                  <span className="btn-text">{t.refresh}</span>
                 </button>
               </div>
 
-              {/* Stats */}
+              {/* Compact Stats */}
               <div className="stats">
                 <div className="stat">
                   <div className="stat-top">
-                    <small>Messages Checked</small>
+                    <small>{t.messagesChecked}</small>
                     <div className="symbol sg">
-                      <MessagesSquare size={19} />
+                      <MessagesSquare size={16} />
                     </div>
                   </div>
                   <h2>{overview.messagesChecked}</h2>
-                  <p>Real-time engine</p>
+                  <p>{t.realtimeEngine}</p>
                 </div>
                 <div className="stat">
                   <div className="stat-top">
-                    <small>Warnings</small>
+                    <small>{t.warnings}</small>
                     <div className="symbol so">
-                      <AlertTriangle size={19} />
+                      <AlertTriangle size={16} />
                     </div>
                   </div>
                   <h2>{overview.warnings}</h2>
-                  <p>Active warnings</p>
+                  <p>{t.activeWarnings}</p>
                 </div>
                 <div className="stat">
                   <div className="stat-top">
-                    <small>Blocked Items</small>
+                    <small>{t.blockedItems}</small>
                     <div className="symbol sr">
-                      <Ban size={19} />
+                      <Ban size={16} />
                     </div>
                   </div>
                   <h2>{overview.blockedWords}</h2>
-                  <p>Deleted violations</p>
+                  <p>{t.deletedViolations}</p>
                 </div>
                 <div className="stat">
                   <div className="stat-top">
-                    <small>Active Groups</small>
+                    <small>{t.activeGroups}</small>
                     <div className="symbol sb">
-                      <Users size={19} />
+                      <Users size={16} />
                     </div>
                   </div>
                   <h2>{overview.groups || groups.length}</h2>
-                  <p>Protected groups</p>
+                  <p>{t.protectedGroups}</p>
                 </div>
               </div>
 
@@ -708,11 +835,11 @@ export default function App() {
               <div className="grid2">
                 <div className="hero">
                   <div className="hero-content">
-                    <h3 className="font-bold text-lg">WhatsApp Bot Connection</h3>
-                    <p>
+                    <h3 className="font-bold text-sm">{t.botConnTitle}</h3>
+                    <p className="text-xs mt-1">
                       {liveStatus.online
-                        ? `আপনার WhatsApp অ্যাকাউন্ট (${liveStatus.user?.name || liveStatus.phoneNumber || 'Connected'}) সফলভাবে যুক্ত রয়েছে!`
-                        : 'Real-time online pairing and live session status (REAL BAILEYS).'}
+                        ? t.botConnDescConnected(liveStatus.user?.name || liveStatus.phoneNumber || 'Connected')
+                        : t.botConnDescDisconnected}
                     </p>
 
                     <div className="hero-status">
@@ -731,15 +858,15 @@ export default function App() {
                           className="btn bg-rose-600 hover:bg-rose-700 text-white"
                           onClick={handleDisconnect}
                         >
-                          <LogOut size={15} /> Disconnect WhatsApp
+                          <LogOut size={13} /> {t.disconnectWa}
                         </button>
                       ) : (
                         <button className="btn" onClick={() => setActivePage('pairing')}>
-                          <LinkIcon size={15} /> Connect WhatsApp (৮-ডিজিট কোড)
+                          <LinkIcon size={13} /> {t.connectWa}
                         </button>
                       )}
                       <button className="btn bg-white/20 text-white" onClick={loadDashboard}>
-                        <RefreshCw size={15} /> Sync Status
+                        <RefreshCw size={13} /> {t.syncStatus}
                       </button>
                     </div>
                   </div>
@@ -748,25 +875,25 @@ export default function App() {
                 <div className="card" style={{ marginBottom: 0 }}>
                   <div className="card-head">
                     <div>
-                      <h3>Group Security Status</h3>
+                      <h3>{t.groupSecTitle}</h3>
                       <p>Active Moderation Shield</p>
                     </div>
                     <div className="symbol sp">
-                      <ShieldCheck size={19} />
+                      <ShieldCheck size={16} />
                     </div>
                   </div>
-                  <p className="hint">
-                    🛡️ Admin Shield, Anti-Badword, Anti-Link, 3-Warning Auto-Kick এবং Anti-Sticker Spam রিয়েল-টাইমে সক্রিয় আছে।
+                  <p className="hint text-xs leading-relaxed">
+                    {t.groupSecDesc}
                   </p>
                   <button
                     className="btn soft full"
-                    style={{ marginTop: '15px' }}
+                    style={{ marginTop: '12px' }}
                     onClick={() => {
                       setActivePage('security');
                       loadModerationData();
                     }}
                   >
-                    Manage Security Rules <ArrowRight size={15} />
+                    {t.manageRulesBtn} <ArrowRight size={13} />
                   </button>
                 </div>
               </div>
@@ -778,17 +905,17 @@ export default function App() {
             <section className="page active" id="security">
               <div className="page-head">
                 <div>
-                  <h1>Advanced Group Security & Moderation</h1>
-                  <p>রিয়েল-টাইম গ্রুপ সুরক্ষা, অ্যান্টি-স্প্যাম, গালি ফিল্টার ও অটো-কিক ইঞ্জিন।</p>
+                  <h1>{t.securityTitle}</h1>
+                  <p>{t.securitySub}</p>
                 </div>
                 <div className="flex gap-2">
                   <button className="btn outline" onClick={loadModerationData} disabled={isLogsLoading}>
-                    <RefreshCw size={15} className={isLogsLoading ? 'animate-spin' : ''} />
-                    <span className="btn-text">Refresh Rules</span>
+                    <RefreshCw size={13} className={isLogsLoading ? 'animate-spin' : ''} />
+                    <span className="btn-text">{t.refreshRules}</span>
                   </button>
                   <button className="btn danger" onClick={resetAllWarnings}>
-                    <RotateCcw size={15} />
-                    <span className="btn-text">Reset All Warnings</span>
+                    <RotateCcw size={13} />
+                    <span className="btn-text">{t.resetWarningsBtn}</span>
                   </button>
                 </div>
               </div>
@@ -797,11 +924,11 @@ export default function App() {
               <div className="card">
                 <div className="card-head">
                   <div>
-                    <h3>1. Admin Security Shield & Auto-Kick System</h3>
-                    <p>গ্রুপ অ্যাডমিনদের নিরাপত্তা ও ৩ সতর্কতা অটো-কিক নিয়মাবলী</p>
+                    <h3>{t.sec1Title}</h3>
+                    <p>{t.sec1Sub}</p>
                   </div>
                   <div className="symbol sg">
-                    <ShieldAlert size={19} />
+                    <ShieldAlert size={16} />
                   </div>
                 </div>
 
@@ -809,14 +936,12 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      Admin Security Shield
+                      {t.adminShieldTitle}
                       <span className={`badge ${settings.adminShield ? 'badge-green' : 'badge-amber'}`}>
-                        {settings.adminShield ? 'ON - SHIELDED' : 'OFF'}
+                        {settings.adminShield ? 'ON' : 'OFF'}
                       </span>
                     </h4>
-                    <p>
-                      কোনো Group Admin-কে কখনো Kick বা Warning দেবে না এবং তাদের কোনো মেসেজ ডিলিট করবে না। প্রতিটি পদক্ষেপের আগে অ্যাডমিন পারমিশন যাচাই করবে।
-                    </p>
+                    <p>{t.adminShieldDesc}</p>
                   </div>
                   <label className="switch">
                     <input
@@ -832,14 +957,12 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      Three Warning Auto Kick
+                      {t.autoKickTitle}
                       <span className={`badge ${settings.autoKick3Warnings ? 'badge-green' : 'badge-amber'}`}>
-                        {settings.autoKick3Warnings ? 'ACTIVE (3-STRIKES)' : 'OFF'}
+                        {settings.autoKick3Warnings ? 'ACTIVE' : 'OFF'}
                       </span>
                     </h4>
-                    <p>
-                      ১ম বার Warning 1, ২য় বার Warning 2, ৩য় বার Final Warning ও গ্রুপে ঘোষণা। বট গ্রুপ অ্যাডমিন হলে সদস্যকে বাস্তবে Kick করবে (ফেক সাকসেস দেখাবে না)।
-                    </p>
+                    <p>{t.autoKickDesc}</p>
                   </div>
                   <label className="switch">
                     <input
@@ -856,26 +979,24 @@ export default function App() {
               <div className="card">
                 <div className="card-head">
                   <div>
-                    <h3>2. Media Restrictions & Anti-Spam Lock</h3>
-                    <p>স্টিকার স্প্যাম, জিআইএফ, ভিডিও, ছবি ও ভিউ ওয়ান্স মডারেশন</p>
+                    <h3>{t.sec2Title}</h3>
+                    <p>{t.sec2Sub}</p>
                   </div>
                   <div className="symbol so">
-                    <Lock size={19} />
+                    <Lock size={16} />
                   </div>
                 </div>
 
-                {/* Anti-Sticker Spam (5s 3 stickers -> 10m lock) */}
+                {/* Anti-Sticker Spam */}
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      Anti-Sticker Spam (Auto 10m Group Lock)
+                      {t.antiStickerSpamTitle}
                       <span className={`badge ${settings.antiStickerSpam ? 'badge-green' : 'badge-amber'}`}>
                         {settings.antiStickerSpam ? 'ACTIVE' : 'OFF'}
                       </span>
                     </h4>
-                    <p>
-                      একজন সদস্য ৫ সেকেন্ডে ৩টি বা বেশি Sticker পাঠালে স্প্যাম শনাক্ত করে মেসেজ ডিলিট করবে এবং পুরো গ্রুপকে <b>১০ মিনিটের জন্য Announcement Mode-এ লক</b> করবে। ১০ মিনিট পর স্বয়ংক্রিয়ভাবে আনলক করবে।
-                    </p>
+                    <p>{t.antiStickerSpamDesc}</p>
                   </div>
                   <label className="switch">
                     <input
@@ -891,12 +1012,12 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      Anti-Sticker (All Stickers)
+                      {t.antiStickerTitle}
                       <span className={`badge ${settings.antiSticker ? 'badge-red' : 'badge-blue'}`}>
-                        {settings.antiSticker ? 'ALL BLOCKED' : 'ALLOWED'}
+                        {settings.antiSticker ? 'BLOCKED' : 'ALLOWED'}
                       </span>
                     </h4>
-                    <p>গ্রুপে সাধারণ যেকোনো WhatsApp Sticker পাঠালে সঙ্গে সঙ্গে ডিলিট ও সতর্ক করবে।</p>
+                    <p>{t.antiStickerDesc}</p>
                   </div>
                   <label className="switch">
                     <input
@@ -912,12 +1033,12 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      Anti-GIF (Animated GIF & Video GIFs)
+                      {t.antiGifTitle}
                       <span className={`badge ${settings.antiGif ? 'badge-green' : 'badge-amber'}`}>
                         {settings.antiGif ? 'BLOCKED' : 'ALLOWED'}
                       </span>
                     </h4>
-                    <p>যেকোনো GIF এবং Animated GIF Video শনাক্ত করে সঙ্গে সঙ্গে ডিলিট করবে।</p>
+                    <p>{t.antiGifDesc}</p>
                   </div>
                   <label className="switch">
                     <input
@@ -933,12 +1054,12 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      Anti-Video
+                      {t.antiVideoTitle}
                       <span className={`badge ${settings.antiVideo ? 'badge-red' : 'badge-blue'}`}>
                         {settings.antiVideo ? 'BLOCKED' : 'ALLOWED'}
                       </span>
                     </h4>
-                    <p>গ্রুপে যেকোনো Video Message শনাক্ত করে সঙ্গে সঙ্গে ডিলিট করবে।</p>
+                    <p>{t.antiVideoDesc}</p>
                   </div>
                   <label className="switch">
                     <input
@@ -954,12 +1075,12 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      Anti-Image / Photo
+                      {t.antiImageTitle}
                       <span className={`badge ${settings.antiImage ? 'badge-red' : 'badge-blue'}`}>
                         {settings.antiImage ? 'BLOCKED' : 'ALLOWED'}
                       </span>
                     </h4>
-                    <p>গ্রুপে যেকোনো Photo বা Image Message শনাক্ত করে সঙ্গে সঙ্গে ডিলিট করবে।</p>
+                    <p>{t.antiImageDesc}</p>
                   </div>
                   <label className="switch">
                     <input
@@ -975,12 +1096,12 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      Anti-View Once
+                      {t.antiViewOnceTitle}
                       <span className={`badge ${settings.antiViewOnce ? 'badge-green' : 'badge-amber'}`}>
                         {settings.antiViewOnce ? 'BLOCKED' : 'ALLOWED'}
                       </span>
                     </h4>
-                    <p>View Once Photo এবং View Once Video শনাক্ত করে ডিলিট ও সতর্ক করবে।</p>
+                    <p>{t.antiViewOnceDesc}</p>
                   </div>
                   <label className="switch">
                     <input
@@ -997,11 +1118,11 @@ export default function App() {
               <div className="card">
                 <div className="card-head">
                   <div>
-                    <h3>3. Multilingual Badword & Link Detection</h3>
-                    <p>বাংলা, সিলেটি, Banglish, Hindi, English, Arabic গালি ও ক্ষতিকর লিংক ফিল্টার</p>
+                    <h3>{t.sec3Title}</h3>
+                    <p>{t.sec3Sub}</p>
                   </div>
                   <div className="symbol sr">
-                    <Ban size={19} />
+                    <Ban size={16} />
                   </div>
                 </div>
 
@@ -1009,14 +1130,12 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      Advanced Multilingual Anti-Badword
+                      {t.antiBadwordTitle}
                       <span className={`badge ${settings.antiBadword ? 'badge-green' : 'badge-amber'}`}>
-                        {settings.antiBadword ? 'REAL-TIME FILTER ACTIVE' : 'OFF'}
+                        {settings.antiBadword ? 'ACTIVE' : 'OFF'}
                       </span>
                     </h4>
-                    <p>
-                      বাংলা, সিলেটি আঞ্চলিক ভাষা, Banglish, English, Hindi, Urdu, Arabic সব ধরনের গালি ও অপমানজনক শব্দ শনাক্ত করে সঙ্গে সঙ্গে ডিলিট ও ওয়ার্নিং কাউন্ট বাড়াবে। স্পেস দিয়ে লেখা (যেমন: খ া ন কি) ও অক্ষর পরিবর্তন স্বয়ংক্রিয়ভাবে শনাক্ত করে।
-                    </p>
+                    <p>{t.antiBadwordDesc}</p>
                   </div>
                   <label className="switch">
                     <input
@@ -1032,14 +1151,12 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      Anti-Link (All URLs & WhatsApp Invites)
+                      {t.antiLinkTitle}
                       <span className={`badge ${settings.antiLink ? 'badge-green' : 'badge-amber'}`}>
                         {settings.antiLink ? 'BLOCKED' : 'OFF'}
                       </span>
                     </h4>
-                    <p>
-                      Website URL, HTTP/HTTPS, WhatsApp Group Invites, Telegram, Facebook, YouTube, Shortened URLs ইত্যাদি শনাক্ত করে মুছে ফেলবে।
-                    </p>
+                    <p>{t.antiLinkDesc}</p>
                   </div>
                   <label className="switch">
                     <input
@@ -1055,14 +1172,12 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      Bot Mention / Name Calling Response
+                      {t.botReplyTitle}
                       <span className={`badge ${settings.botReply ? 'badge-green' : 'badge-amber'}`}>
                         {settings.botReply ? 'ACTIVE' : 'OFF'}
                       </span>
                     </h4>
-                    <p>
-                      বটকে ট্যাগ করলে বা "মায়া", "মায়ান", "WAGuard" নামে ডাকলে স্বয়ংক্রিয় শালীন ও নির্দেশনামূলক উত্তর দেবে।
-                    </p>
+                    <p>{t.botReplyDesc}</p>
                   </div>
                   <label className="switch">
                     <input
@@ -1075,21 +1190,21 @@ export default function App() {
                 </div>
 
                 {/* Custom Badword List Editor */}
-                <div className="form-group" style={{ marginTop: '16px' }}>
-                  <label>Custom Badword List (কাস্টম নিষিদ্ধ শব্দের তালিকা)</label>
-                  <p className="hint" style={{ marginBottom: '8px' }}>
-                    কমা (,) দিয়ে আলাদা করে শব্দ লিখুন। এটি সরাসরি মডারেশন ইঞ্জিনে কাজ করবে।
+                <div className="form-group" style={{ marginTop: '12px' }}>
+                  <label>{t.customBadwordsLabel}</label>
+                  <p className="hint" style={{ marginBottom: '6px' }}>
+                    {t.customBadwordsHint}
                   </p>
                   <textarea
                     className="field"
-                    style={{ height: '70px', padding: '8px 12px', resize: 'vertical' }}
+                    style={{ height: '60px', padding: '6px 10px', resize: 'vertical' }}
                     value={customBadwordsText}
                     onChange={(e) => setCustomBadwordsText(e.target.value)}
-                    placeholder="খারাপশব্দ1, খারাপশব্দ2, badword3, ..."
+                    placeholder="badword1, badword2, ..."
                   />
-                  <div className="form-actions">
+                  <div className="form-actions mt-2">
                     <button className="btn primary" onClick={saveCustomBadwords}>
-                      <Save size={15} /> Save Custom Badwords
+                      <Save size={13} /> {t.saveBadwordsBtn}
                     </button>
                   </div>
                 </div>
@@ -1099,15 +1214,15 @@ export default function App() {
               <div className="card">
                 <div className="card-head">
                   <div>
-                    <h3>Real-Time Moderation Activity Log</h3>
-                    <p>গ্রুপে ঘটা সকল ডিলিট, ওয়ার্নিং, অটো-কিক এবং গ্রুপ লকের লাইভ রেকর্ড</p>
+                    <h3>{t.activityTitle}</h3>
+                    <p>{t.activitySub}</p>
                   </div>
                   <div className="flex gap-2">
                     <button className="btn outline" onClick={loadModerationData}>
-                      <RefreshCw size={14} /> Refresh Logs
+                      <RefreshCw size={13} /> {t.refreshRules}
                     </button>
                     <button className="btn danger" onClick={clearLogs}>
-                      <Trash2 size={14} /> Clear Logs
+                      <Trash2 size={13} /> {t.clearLogsBtn}
                     </button>
                   </div>
                 </div>
@@ -1168,7 +1283,7 @@ export default function App() {
                       ) : (
                         <tr>
                           <td colSpan={5} className="empty">
-                            কোনো কার্যকলাপের লগ এখনো পাওয়া যায়নি। নতুন মেসেজ আসলে তা এখানে প্রদর্শিত হবে।
+                            {t.noLogsMsg}
                           </td>
                         </tr>
                       )}
@@ -1184,12 +1299,12 @@ export default function App() {
             <section className="page active" id="maya">
               <div className="page-head">
                 <div>
-                  <h1>Maya AI — Advanced Romantic Personality</h1>
-                  <p>মায়া (Maya) বটের স্মার্ট পারসোনালিটি, রোমান্টিক কথোপকথন ও স্বয়ংক্রিয় গ্রুপ অংশগ্রহণ নিয়ন্ত্রণ করুন।</p>
+                  <h1>{t.mayaTitle}</h1>
+                  <p>{t.mayaSub}</p>
                 </div>
                 <button className="btn outline" onClick={loadModerationData}>
-                  <RefreshCw size={15} />
-                  <span className="btn-text">Refresh Settings</span>
+                  <RefreshCw size={13} />
+                  <span className="btn-text">{t.refreshRules}</span>
                 </button>
               </div>
 
@@ -1197,54 +1312,70 @@ export default function App() {
                 <div className="card">
                   <div className="card-head">
                     <div>
-                      <h3>Maya AI Core Configuration</h3>
-                      <p>বট পারসোনালিটি ও রিপ্লাই ইঞ্জিন নিয়ন্ত্রণ</p>
+                      <h3>{t.mayaCoreTitle}</h3>
+                      <p>{t.mayaCoreSub}</p>
                     </div>
                     <div className="symbol sp">
-                      <Heart size={19} />
+                      <Heart size={16} />
                     </div>
                   </div>
 
                   <div className="toggle-row">
                     <div className="toggle-info">
-                      <h4>Maya AI Engine <span className={`badge ${settings.mayaAiEnabled ? 'badge-green' : 'badge-amber'}`}>{settings.mayaAiEnabled ? 'ACTIVE' : 'OFF'}</span></h4>
-                      <p>Gemini AI এর মাধ্যমে মায়ার স্মার্ট পারসোনালিটি সক্রিয় করুন। এটি বন্ধ থাকলে বট সাধারণ অটো-রিপ্লাই দেবে।</p>
+                      <h4>{t.mayaEngineTitle} <span className={`badge ${settings.mayaAiEnabled ? 'badge-green' : 'badge-amber'}`}>{settings.mayaAiEnabled ? 'ACTIVE' : 'OFF'}</span></h4>
+                      <p>{t.mayaEngineDesc}</p>
                     </div>
                     <label className="switch">
-                      <input type="checkbox" checked={settings.mayaAiEnabled} onChange={(e) => updateSettingToggle('mayaAiEnabled', e.target.checked)} />
+                      <input
+                        type="checkbox"
+                        checked={settings.mayaAiEnabled}
+                        onChange={(e) => updateSettingToggle('mayaAiEnabled', e.target.checked)}
+                      />
                       <span className="slider"></span>
                     </label>
                   </div>
 
                   <div className="toggle-row">
                     <div className="toggle-info">
-                      <h4>Romantic Personality <span className={`badge ${settings.mayaRomantic ? 'badge-green' : 'badge-amber'}`}>{settings.mayaRomantic ? 'ENABLED' : 'OFF'}</span></h4>
-                      <p>মায়াকে আরও রোমান্টিক, মিষ্টি ও যত্নশীল করে তুলুন। সে ব্যবহারকারীর আবেগ বুঝবে এবং সেভাবে উত্তর দেবে। ❤️</p>
+                      <h4>{t.romanticTitle} <span className={`badge ${settings.mayaRomantic ? 'badge-green' : 'badge-amber'}`}>{settings.mayaRomantic ? 'ON' : 'OFF'}</span></h4>
+                      <p>{t.romanticDesc}</p>
                     </div>
                     <label className="switch">
-                      <input type="checkbox" checked={settings.mayaRomantic} onChange={(e) => updateSettingToggle('mayaRomantic', e.target.checked)} />
+                      <input
+                        type="checkbox"
+                        checked={settings.mayaRomantic}
+                        onChange={(e) => updateSettingToggle('mayaRomantic', e.target.checked)}
+                      />
                       <span className="slider"></span>
                     </label>
                   </div>
 
                   <div className="toggle-row">
                     <div className="toggle-info">
-                      <h4>Funny & Mischievous <span className={`badge ${settings.mayaFunny ? 'badge-green' : 'badge-amber'}`}>{settings.mayaFunny ? 'ENABLED' : 'OFF'}</span></h4>
-                      <p>মায়াকে দুষ্টুমি ও হাসি-ঠাট্টায় অভ্যস্ত করুন। সে গ্রুপে মজার উত্তর দেবে এবং সবাইকে মাতিয়ে রাখবে। 🙈</p>
+                      <h4>{t.funnyTitle} <span className={`badge ${settings.mayaFunny ? 'badge-green' : 'badge-amber'}`}>{settings.mayaFunny ? 'ON' : 'OFF'}</span></h4>
+                      <p>{t.funnyDesc}</p>
                     </div>
                     <label className="switch">
-                      <input type="checkbox" checked={settings.mayaFunny} onChange={(e) => updateSettingToggle('mayaFunny', e.target.checked)} />
+                      <input
+                        type="checkbox"
+                        checked={settings.mayaFunny}
+                        onChange={(e) => updateSettingToggle('mayaFunny', e.target.checked)}
+                      />
                       <span className="slider"></span>
                     </label>
                   </div>
 
                   <div className="toggle-row">
                     <div className="toggle-info">
-                      <h4>Automatic Group Participation <span className={`badge ${settings.mayaAutoParticipate ? 'badge-green' : 'badge-amber'}`}>{settings.mayaAutoParticipate ? 'ON' : 'OFF'}</span></h4>
-                      <p>বট ট্যাগ করা ছাড়াই মায়া মাঝে মাঝে গ্রুপের কথা শুনে নিজে থেকে উত্তর দেবে। এটি স্প্যাম কমাতে প্রোবাবিলিটি ব্যবহার করে।</p>
+                      <h4>{t.autoPartTitle} <span className={`badge ${settings.mayaAutoParticipate ? 'badge-green' : 'badge-amber'}`}>{settings.mayaAutoParticipate ? 'ON' : 'OFF'}</span></h4>
+                      <p>{t.autoPartDesc}</p>
                     </div>
                     <label className="switch">
-                      <input type="checkbox" checked={settings.mayaAutoParticipate} onChange={(e) => updateSettingToggle('mayaAutoParticipate', e.target.checked)} />
+                      <input
+                        type="checkbox"
+                        checked={settings.mayaAutoParticipate}
+                        onChange={(e) => updateSettingToggle('mayaAutoParticipate', e.target.checked)}
+                      />
                       <span className="slider"></span>
                     </label>
                   </div>
@@ -1253,305 +1384,263 @@ export default function App() {
                 <div className="card">
                   <div className="card-head">
                     <div>
-                      <h3>Timing & Frequency</h3>
-                      <p>রিপ্লাই দেওয়ার সময় ও বারবার করার হার</p>
+                      <h3>Timing & Intelligence Settings</h3>
+                      <p>Control frequency & conversation memory</p>
                     </div>
                     <div className="symbol so">
-                      <CalendarClock size={19} />
+                      <CalendarClock size={16} />
                     </div>
                   </div>
 
                   <div className="form-group">
-                    <label>Reply Cooldown (সেকেন্ড)</label>
-                    <div className="flex items-center gap-3">
-                      <input 
-                        type="range" min="5" max="300" step="5" className="flex-1 h-2 bg-emerald-100 rounded-lg appearance-none cursor-pointer accent-emerald-600" 
-                        value={settings.mayaReplyCooldown} 
-                        onChange={(e) => setSettings({...settings, mayaReplyCooldown: parseInt(e.target.value)})}
-                        onMouseUp={() => callApi('/api/moderation/settings', 'POST', { mayaReplyCooldown: settings.mayaReplyCooldown })}
-                      />
-                      <span className="text-xs font-bold w-12 text-emerald-700">{settings.mayaReplyCooldown}s</span>
-                    </div>
-                    <p className="hint">একটি রিপ্লাই দেওয়ার পর কতক্ষণ বিরতি নেবে (অটো-পার্টিসিপেশনের জন্য)।</p>
+                    <label>Reply Frequency ({settings.mayaReplyFrequency}%)</label>
+                    <input
+                      type="range"
+                      className="w-full"
+                      min="1"
+                      max="100"
+                      value={settings.mayaReplyFrequency}
+                      onChange={(e) => updateSettingToggle('mayaReplyFrequency', parseInt(e.target.value))}
+                    />
                   </div>
 
                   <div className="form-group">
-                    <label>Reply Frequency (প্রোবাবিলিটি)</label>
-                    <div className="flex items-center gap-3">
-                      <input 
-                        type="range" min="1" max="100" step="1" className="flex-1 h-2 bg-emerald-100 rounded-lg appearance-none cursor-pointer accent-emerald-600" 
-                        value={settings.mayaReplyFrequency} 
-                        onChange={(e) => setSettings({...settings, mayaReplyFrequency: parseInt(e.target.value)})}
-                        onMouseUp={() => callApi('/api/moderation/settings', 'POST', { mayaReplyFrequency: settings.mayaReplyFrequency })}
-                      />
-                      <span className="text-xs font-bold w-12 text-emerald-700">{settings.mayaReplyFrequency}%</span>
-                    </div>
-                    <p className="hint">অটো-পার্টিসিপেশন সক্রিয় থাকলে কত শতাংশ মেসেজে মায়া উত্তর দেবে।</p>
+                    <label>Memory Limit ({settings.mayaMemoryLimit} msgs)</label>
+                    <input
+                      type="range"
+                      className="w-full"
+                      min="5"
+                      max="50"
+                      step="5"
+                      value={settings.mayaMemoryLimit}
+                      onChange={(e) => updateSettingToggle('mayaMemoryLimit', parseInt(e.target.value))}
+                    />
                   </div>
 
                   <div className="form-group">
                     <label>Preferred Language</label>
-                    <select 
-                      className="field" 
-                      value={settings.mayaLanguage} 
-                      onChange={(e) => updateSettingToggle('mayaLanguage' as any, e.target.value as any)}
+                    <select
+                      className="field"
+                      value={settings.mayaLanguage}
+                      onChange={(e) => updateSettingToggle('mayaLanguage', e.target.value)}
                     >
                       <option value="auto">Automatic (Smart Detection)</option>
                       <option value="bn">Bengali Only (বাংলা)</option>
                       <option value="en">English Only</option>
-                      <option value="banglish">Banglish (বাংলা রোমান অক্ষরে)</option>
+                      <option value="banglish">Banglish (Roman Bengali)</option>
                     </select>
-                  </div>
-
-                  <div className="form-group">
-                    <label>Memory Limit (মেসেজ সংখ্যা)</label>
-                    <select 
-                      className="field" 
-                      value={settings.mayaMemoryLimit} 
-                      onChange={(e) => updateSettingToggle('mayaMemoryLimit' as any, parseInt(e.target.value) as any)}
-                    >
-                      <option value={5}>5 Messages (Lite)</option>
-                      <option value={10}>10 Messages (Standard)</option>
-                      <option value={20}>20 Messages (Deep Context)</option>
-                      <option value={50}>50 Messages (Full History)</option>
-                    </select>
-                    <p className="hint">মায়া কতগুলো পূর্ববর্তী মেসেজ মনে রাখবে। বেশি হলে পারফরম্যান্সে প্রভাব পড়তে পারে।</p>
                   </div>
                 </div>
               </div>
 
+              {/* Test Maya AI Card */}
               <div className="card">
                 <div className="card-head">
                   <div>
-                    <h3>Test Maya AI (চ্যাট প্রিভিউ)</h3>
-                    <p>মায়ার সাথে সরাসরি কথা বলে তার বর্তমান মোড পরীক্ষা করুন।</p>
+                    <h3>{t.testMayaTitle}</h3>
+                    <p>{t.testMayaSub}</p>
                   </div>
                   <div className="symbol sp">
-                    <MessageSquareHeart size={19} />
+                    <MessageSquareHeart size={16} />
                   </div>
                 </div>
                 <div className="flex gap-2">
-                   <input type="text" className="field" placeholder="মায়াকে কিছু বলুন..." id="mayaTestInput" onKeyDown={(e) => e.key === 'Enter' && testAI()} />
-                   <button className="btn primary" onClick={testAI}>Send</button>
+                  <input
+                    type="text"
+                    className="field"
+                    id="mayaTestInput"
+                    placeholder={t.testMayaPlaceholder}
+                    onKeyDown={(e) => e.key === 'Enter' && testAI()}
+                  />
+                  <button className="btn primary" onClick={testAI}>
+                    {t.sendBtn}
+                  </button>
                 </div>
-                <div className="mt-3 p-4 bg-gray-50 rounded-xl border border-dashed border-gray-200 min-h-[60px] text-sm italic text-gray-600">
-                   💡 চ্যাট প্রিভিউ কাজ করার জন্য মায়া AI Engine এনাবল (ON) থাকতে হবে। গ্রুপে মায়াকে ট্যাগ করুন অথবা নাম ধরে ডাকুন (যেমন: মায়া, কেমন আছো?)
+                <div className="hint mt-2 p-2.5 bg-slate-50 rounded-lg border border-slate-200">
+                  💡 {isBn ? 'মেসেজ পাঠিয়ে মায়ার রোমান্টিক উত্তর দেখুন।' : 'Send a message to see Maya\'s reply.'}
                 </div>
               </div>
             </section>
           )}
 
-          {/* PAIRING PAGE (AUTHENTIC REAL 8-DIGIT PROTOCOL) */}
+          {/* PAIRING / CONNECT PAGE */}
           {activePage === 'pairing' && (
             <section className="page active" id="pairing">
               <div className="page-head">
                 <div>
-                  <h1>WhatsApp Connect</h1>
-                  <p>রিয়েল অফিশিয়াল Baileys সকেট ও ৮-ডিজিট পেয়ারিং কোড সিস্টেম।</p>
+                  <h1>{t.connectTitle}</h1>
+                  <p>{t.connectSub}</p>
                 </div>
               </div>
 
-              {/* Already Connected Screen */}
               {liveStatus.online ? (
-                <div className="card text-center max-w-[580px] mx-auto p-6">
-                  <div className="w-16 h-16 mx-auto mb-4 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center">
-                    <CheckCircle2 size={36} />
-                  </div>
-                  <h2 className="text-xl font-extrabold text-emerald-800">
-                    WhatsApp সফলভাবে যুক্ত রয়েছে!
-                  </h2>
-                  <p className="text-sm text-gray-600 mt-2">
-                    আপনার ডিভাইস রিয়েল Baileys সকেটের সাথে সার্বক্ষণিক সক্রিয় আছে।
-                  </p>
-                  <div className="mt-4 p-4 bg-emerald-50 rounded-xl border border-emerald-200 text-left text-sm text-emerald-900">
-                    <div><b>ব্যবহারকারী:</b> {liveStatus.user?.name || 'WhatsApp User'}</div>
-                    <div className="mt-1"><b>আইডি:</b> {liveStatus.user?.id || liveStatus.phoneNumber}</div>
-                    <div className="mt-1"><b>স্ট্যাটাস:</b> <span className="text-emerald-700 font-bold">Online & Active Moderation Engine</span></div>
+                <div className="card max-w-xl mx-auto overflow-hidden border border-emerald-200 bg-gradient-to-b from-emerald-50/90 via-white to-slate-50 p-6 rounded-2xl shadow-sm">
+                  {/* Connected Header Banner */}
+                  <div className="flex items-center justify-between border-b border-emerald-100 pb-4 mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-11 h-11 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-md shadow-emerald-600/20">
+                        <ShieldCheck size={22} />
+                      </div>
+                      <div className="text-left">
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-slate-900 text-base font-extrabold tracking-tight">
+                            {isBn ? 'WhatsApp একাউন্ট সফলভাবে যুক্ত' : 'WhatsApp Linked Successfully'}
+                          </h3>
+                          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
+                            Live
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 font-medium mt-0.5">
+                          {isBn ? 'Real Baileys Sockets মডারেশন ইঞ্জিন সক্রিয় আছে' : 'Real Baileys Socket Moderation Engine Active'}
+                        </p>
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="mt-6 flex justify-center gap-3">
-                    <button
-                      className="btn outline"
-                      onClick={() => setActivePage('home')}
-                    >
-                      <LayoutDashboard size={15} /> ড্যাশবোর্ডে যান
+                  {/* Account Info Box */}
+                  <div className="bg-white rounded-xl border border-emerald-100 p-4 shadow-2xs text-left mb-5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-400 text-white font-bold flex items-center justify-center text-sm shadow-sm">
+                          🌺
+                        </div>
+                        <div>
+                          <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400">
+                            {isBn ? 'সংযুক্ত হোয়াটসঅ্যাপ একাউন্ট' : 'CONNECTED WHATSAPP ACCOUNT'}
+                          </span>
+                          <h4 className="text-sm font-bold text-slate-900 flex items-center gap-1.5 mt-0.5">
+                            {liveStatus.user?.name || '🌺 Maya Ai 🌺'}
+                          </h4>
+                          <p className="text-xs font-mono text-emerald-700 font-medium">
+                            {liveStatus.phoneNumber || liveStatus.user?.id?.split(':')[0] || '8801838489457'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="inline-block px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 text-[11px] font-bold border border-emerald-200">
+                          ✓ Verified Socket
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Metric Chips inside the card */}
+                    <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-slate-100 text-center">
+                      <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                        <span className="text-[10px] text-slate-500 block">{isBn ? 'সার্ভার স্টেট' : 'Server State'}</span>
+                        <span className="text-xs font-bold text-emerald-700">Online</span>
+                      </div>
+                      <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                        <span className="text-[10px] text-slate-500 block">{isBn ? 'অটো মডারেশন' : 'Auto Moderation'}</span>
+                        <span className="text-xs font-bold text-slate-800">24/7 Active</span>
+                      </div>
+                      <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                        <span className="text-[10px] text-slate-500 block">{isBn ? 'মায়া AI' : 'Maya AI'}</span>
+                        <span className="text-xs font-bold text-teal-700">Ready</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex flex-wrap items-center justify-center gap-2.5">
+                    <button className="btn primary px-4 py-2 text-xs font-bold shadow-sm" onClick={() => setActivePage('home')}>
+                      <LayoutDashboard size={14} /> {isBn ? 'ড্যাশবোর্ডে যান' : 'Go to Dashboard'}
                     </button>
-                    <button
-                      className="btn outline"
-                      onClick={() => {
-                        setActivePage('security');
-                        loadModerationData();
-                      }}
-                    >
-                      <ShieldCheck size={15} /> সিকিউরিটি রুলস
+                    <button className="btn outline px-4 py-2 text-xs font-semibold" onClick={checkStatus}>
+                      <RefreshCw size={14} /> {isBn ? 'স্ট্যাটাস রিফ্রেশ' : 'Sync Status'}
                     </button>
-                    <button
-                      className="btn danger"
-                      onClick={handleDisconnect}
-                    >
-                      <LogOut size={15} /> ডিসকানেক্ট করুন
+                    <button className="btn danger px-4 py-2 text-xs font-semibold" onClick={handleDisconnect}>
+                      <LogOut size={14} /> {isBn ? 'ডিসকানেক্ট করুন' : 'Disconnect'}
                     </button>
                   </div>
                 </div>
               ) : (
-                /* Pairing Generator Form */
-                <div className="card" style={{ maxWidth: '620px', margin: 'auto', textAlign: 'center' }}>
-                  <div
-                    className="symbol sg"
-                    style={{ margin: '5px auto 15px', width: '64px', height: '64px' }}
-                  >
-                    <Smartphone size={30} />
+                <div className="card max-w-lg mx-auto text-center">
+                  <div className="symbol sg mx-auto mb-3 w-12 h-12">
+                    <Smartphone size={22} />
                   </div>
-                  <h3 style={{ fontSize: '19px', fontWeight: 800 }}>Link WhatsApp Device</h3>
-                  <p className="hint">
-                    আন্তর্জাতিক কান্ট্রি কোডসহ আপনার WhatsApp নম্বর দিন (যেমন: <b>88017XXXXXXXX</b>)।
+                  <h3 className="text-base font-extrabold">{t.linkDeviceHead}</h3>
+                  <p className="hint text-xs mt-1">
+                    {t.phoneInputHint}
                   </p>
 
-                  {/* Mode selector: 8-Digit Code vs QR Code */}
-                  <div className="flex justify-center gap-2 my-4">
+                  <div className="mode-switcher flex justify-center gap-2 my-3">
                     <button
-                      className={`btn ${pairingMode === 'code' ? 'primary' : 'outline'}`}
+                      className={`mode-btn ${pairingMode === 'code' ? 'active' : ''}`}
                       onClick={() => setPairingMode('code')}
                     >
-                      <KeyRound size={15} /> ৮-ডিজিট কোড
+                      <KeyRound size={13} /> {t.eightDigitCode}
                     </button>
                     <button
-                      className={`btn ${pairingMode === 'qr' ? 'primary' : 'outline'}`}
+                      className={`mode-btn ${pairingMode === 'qr' ? 'active' : ''}`}
                       onClick={() => setPairingMode('qr')}
                     >
-                      <QrIcon size={15} /> কিউআর কোড
+                      <QrIcon size={13} /> {t.qrCodeLabel}
                     </button>
                   </div>
 
-                  <div className="form-group" style={{ textAlign: 'left', marginTop: '12px' }}>
-                    <label>WhatsApp Phone Number</label>
+                  <div className="form-group text-left mt-3">
+                    <label>{t.phoneInputLabel}</label>
                     <input
-                      className="field"
-                      type="tel"
-                      inputMode="numeric"
+                      className="field font-mono"
                       value={phoneNumber}
                       onChange={(e) => setPhoneNumber(e.target.value)}
                       placeholder="8801XXXXXXXXX"
+                      type="tel"
                     />
-                    <p className="text-[11px] text-gray-500 mt-1">
-                      (বাংলাদেশী নম্বরে শুরুতে ৮৮ না দিলে সিস্টেম স্বয়ংক্রিয়ভাবে ৮৮ যোগ করে নেবে)
-                    </p>
                   </div>
 
                   {pairingError && (
-                    <div className="p-3 my-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-xs text-left">
-                      <b>ত্রুটি:</b> {pairingError}
+                    <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs p-2.5 rounded-lg text-left my-2">
+                      {pairingError}
                     </div>
                   )}
 
                   <button
-                    className={`btn primary full ${isPairingLoading ? 'is-loading' : ''}`}
-                    style={{ marginTop: '10px' }}
+                    className={`btn primary full mt-2 ${isPairingLoading ? 'is-loading' : ''}`}
                     onClick={handleStartPairing}
                     disabled={isPairingLoading}
                   >
-                    <span className="spinner"></span>
-                    <span className="btn-icon-holder">
-                      <KeyRound size={16} />
-                    </span>
-                    <span className="btn-text">
-                      {isPairingLoading ? 'WhatsApp সার্ভারের সাথে হ্যান্ডশেক হচ্ছে...' : 'Generate Real Pairing Code'}
-                    </span>
+                    <KeyRound size={13} /> {t.genPairCodeBtn}
                   </button>
 
-                  {/* Live Pairing Output */}
-                  {liveStatus.pairingCode && (
-                    <div id="pairResult" className="info" style={{ marginTop: '20px', display: 'block' }}>
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-emerald-800 tracking-wider">
-                          OFFICIAL WHATSAPP PAIRING CODE
-                        </span>
-                        {liveStatus.remainingSeconds > 0 && (
-                          <span className="text-xs bg-emerald-200/70 text-emerald-900 font-bold px-2 py-0.5 rounded-full">
-                            মেয়াদ: {liveStatus.remainingSeconds}s
-                          </span>
-                        )}
+                  {/* Display generated code or QR */}
+                  {(liveStatus.pairingCode || liveStatus.qrCode) && (
+                    <div className="info text-left mt-3">
+                      <div className="flex justify-between items-center text-xs font-bold">
+                        <span>OFFICIAL PAIRING CODE</span>
+                        <span className="bg-emerald-200 text-emerald-900 text-[10px] px-2 py-0.5 rounded-full">Active</span>
                       </div>
 
                       {pairingMode === 'code' ? (
                         <>
-                          <h2
-                            style={{
-                              letterSpacing: '8px',
-                              fontSize: '34px',
-                              margin: '14px 0',
-                              color: 'var(--green)',
-                              fontWeight: 900,
-                              fontFamily: 'monospace',
-                            }}
-                          >
+                          <h2 className="text-2xl font-mono font-extrabold tracking-widest text-emerald-700 text-center my-3">
                             {liveStatus.pairingCode}
                           </h2>
-
-                          <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
+                          <div className="flex justify-center gap-2">
                             <button className="btn soft" onClick={copyToClipboard}>
-                              {isCopied ? <Check size={15} /> : <Copy size={15} />}
-                              <span className="btn-text">{isCopied ? 'কপি হয়েছে!' : 'Copy Code'}</span>
+                              <Copy size={13} /> {isCopied ? (isBn ? 'কপি হয়েছে!' : 'Copied!') : t.copyCodeBtn}
                             </button>
                             <button className="btn outline" onClick={handleStartPairing}>
-                              <RefreshCw size={15} />
-                              <span className="btn-text">নতুন কোড নিন</span>
+                              <RefreshCw size={13} /> {t.getNewCodeBtn}
                             </button>
                           </div>
                         </>
                       ) : (
-                        <div className="my-4 text-center">
+                        <div className="my-3 text-center">
                           {liveStatus.qrCode ? (
                             <img
                               src={liveStatus.qrCode}
                               alt="WhatsApp QR Code"
-                              className="w-56 h-56 mx-auto rounded-xl border border-gray-200 shadow-sm"
+                              className="w-48 h-48 mx-auto rounded-xl border border-gray-200 p-1 bg-white shadow-xs"
                             />
                           ) : (
-                            <p className="text-xs text-gray-500 py-6">QR কোড লোড হচ্ছে...</p>
+                            <p className="text-xs text-gray-500 py-4">QR Loading...</p>
                           )}
-                          <p className="text-xs text-gray-600 mt-2">
-                            WhatsApp ওপেন করে Linked Devices &gt; স্ক্যান করুন।
-                          </p>
                         </div>
                       )}
-
-                      <div
-                        style={{
-                          marginTop: '16px',
-                          textAlign: 'left',
-                          background: '#ffffff',
-                          padding: '14px',
-                          borderRadius: '12px',
-                          fontSize: '12px',
-                          lineHeight: '1.7',
-                          border: '1px solid #d1fae5',
-                        }}
-                      >
-                        <strong className="text-emerald-900 block mb-1">
-                          কীভাবে ফোনে কানেক্ট করবেন:
-                        </strong>
-                        <ol style={{ paddingLeft: '18px', margin: 0 }}>
-                          <li>আপনার ফোনের <b>WhatsApp</b> অ্যাপ ওপেন করুন</li>
-                          <li>ডানদিকের ৩ ডট মেনু &gt; <b>Linked Devices</b> এ চাপুন</li>
-                          <li><b>&quot;Link a Device&quot;</b> বাটনে চাপ দিন</li>
-                          <li>স্ক্রিনের নিচে <b>&quot;Link with phone number instead&quot;</b> অপশনে চাপুন</li>
-                          <li>
-                            উপরের ৮-ডিজিটের কোডটি (<b>{liveStatus.pairingCode}</b>) টাইপ করুন
-                          </li>
-                        </ol>
-                      </div>
-
-                      <div className="mt-3 flex items-center justify-center gap-2 text-xs text-emerald-800 font-medium">
-                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping"></span>
-                        <span>{liveStatus.stepMessage}</span>
-                      </div>
                     </div>
                   )}
-
-                  <div className="notice" style={{ textAlign: 'left', marginTop: '16px' }}>
-                    💡 <b>রিয়েল পোর্ট সিস্টেম:</b> এটি সম্পূর্ণ লাইভ সকেটের মাধ্যমে WhatsApp এর অফিসিয়াল সার্ভারের সাথে যুক্ত থাকে। ফোনে কোড এন্টার করার সাথে সাথেই সার্ভার সেশন সংরক্ষণ করে স্বয়ংক্রিয়ভাবে কানেক্টেড হয়ে যাবে।
-                  </div>
                 </div>
               )}
             </section>
@@ -1562,15 +1651,15 @@ export default function App() {
             <section className="page active" id="groups">
               <div className="page-head">
                 <div>
-                  <h1>Group Management</h1>
-                  <p>View cloud connected WhatsApp groups & real protection status.</p>
+                  <h1>{t.groupsTitle}</h1>
+                  <p>{t.groupsSub}</p>
                 </div>
                 <button
                   className={`btn primary ${isGroupsLoading ? 'is-loading' : ''}`}
                   onClick={loadGroups}
                 >
-                  <RefreshCw size={15} />
-                  <span className="btn-text">Refresh</span>
+                  <RefreshCw size={13} />
+                  <span className="btn-text">{t.refresh}</span>
                 </button>
               </div>
 
@@ -1581,7 +1670,7 @@ export default function App() {
                     <p>Group details from live WhatsApp session</p>
                   </div>
                   <div className="symbol sb">
-                    <Users size={19} />
+                    <Users size={16} />
                   </div>
                 </div>
 
@@ -1589,9 +1678,9 @@ export default function App() {
                   <table>
                     <thead>
                       <tr>
-                        <th>GROUP NAME</th>
-                        <th>MEMBERS</th>
-                        <th>MODERATION STATUS</th>
+                        <th>{t.groupNameCol}</th>
+                        <th>{t.membersCol}</th>
+                        <th>{t.statusCol}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1606,7 +1695,7 @@ export default function App() {
                             <td>
                               <span className="status-tag good">
                                 <CheckCircle2 size={12} style={{ display: 'inline', marginRight: '4px' }} />
-                                Protected by WAGuard
+                                {t.protectedBadge}
                               </span>
                             </td>
                           </tr>
@@ -1614,7 +1703,7 @@ export default function App() {
                       ) : (
                         <tr>
                           <td colSpan={3} className="empty">
-                            কোনো গ্রুপ পাওয়া যায়নি
+                            No groups found
                           </td>
                         </tr>
                       )}
@@ -1643,7 +1732,7 @@ export default function App() {
                     <p>AI-powered moderation and personality</p>
                   </div>
                   <div className="symbol sp">
-                    <Sparkles size={19} />
+                    <Sparkles size={16} />
                   </div>
                 </div>
                 <div className="form-group">
@@ -1654,14 +1743,14 @@ export default function App() {
                       type={showGemini ? 'text' : 'password'}
                       value={geminiKey}
                       onChange={(e) => setGeminiKey(e.target.value)}
-                      placeholder="এখানে আপনার Gemini API Key দিন"
+                      placeholder="Enter Gemini API Key"
                     />
                     <button
                       className="reveal"
                       type="button"
                       onClick={() => setShowGemini(!showGemini)}
                     >
-                      {showGemini ? <EyeOff size={16} /> : <Eye size={16} />}
+                      {showGemini ? <EyeOff size={15} /> : <Eye size={15} />}
                     </button>
                   </div>
                 </div>
@@ -1672,93 +1761,33 @@ export default function App() {
                     value={geminiModel}
                     onChange={(e) => setGeminiModel(e.target.value)}
                   >
-                    <option value="gemini-2.5-flash">Gemini 2.5 Flash (Super Fast & Stable)</option>
+                    <option value="gemini-2.5-flash">Gemini 2.5 Flash (Fast & Stable)</option>
                     <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
                   </select>
                 </div>
                 <div className="form-actions">
                   <button className="btn primary" onClick={() => saveConfig('gemini')}>
-                    <Save size={15} /> Save Gemini Config
+                    <Save size={13} /> Save Gemini Config
                   </button>
                   <button className="btn outline" onClick={testAI}>
-                    <Activity size={15} /> Test AI
+                    <Activity size={13} /> Test AI
                   </button>
                 </div>
               </div>
 
-              {/* WhatsApp Cloud API (Meta) */}
+              {/* Groq Cloud AI */}
               <div className="card">
                 <div className="card-head">
                   <div>
-                    <h3>WhatsApp Cloud API (Meta)</h3>
-                    <p>মেটা অফিসিয়াল এপিআই ক্রেডেনশিয়াল (ঐচ্ছিক)</p>
-                  </div>
-                  <div className="symbol sg">
-                    <MessageCircle size={19} />
-                  </div>
-                </div>
-                <p className="hint" style={{ marginBottom: '12px' }}>
-                  ID কোথায় পাবেন? developers.facebook.com &gt; WhatsApp &gt; Getting Started
-                </p>
-                <div className="form-group">
-                  <label>ACCESS TOKEN (অ্যাক্সেস টোকেন)</label>
-                  <div className="fieldwrap">
-                    <input
-                      className="field secret"
-                      type={showWaToken ? 'text' : 'password'}
-                      value={waToken}
-                      onChange={(e) => setWaToken(e.target.value)}
-                      placeholder="EAAB..."
-                    />
-                    <button
-                      className="reveal"
-                      type="button"
-                      onClick={() => setShowWaToken(!showWaToken)}
-                    >
-                      {showWaToken ? <EyeOff size={16} /> : <Eye size={16} />}
-                    </button>
-                  </div>
-                </div>
-                <div className="form-grid">
-                  <div className="form-group">
-                    <label>PHONE ID (ফোন আইডি)</label>
-                    <input
-                      className="field"
-                      value={phoneId}
-                      onChange={(e) => setPhoneId(e.target.value)}
-                      placeholder="Phone ID"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>WABA ID (ওয়াবা আইডি)</label>
-                    <input
-                      className="field"
-                      value={wabaId}
-                      onChange={(e) => setWabaId(e.target.value)}
-                      placeholder="WABA ID"
-                    />
-                  </div>
-                </div>
-                <div className="form-actions">
-                  <button className="btn primary" onClick={() => saveConfig('meta')}>
-                    <Save size={15} /> Save Meta Config
-                  </button>
-                </div>
-              </div>
-
-              {/* Groq AI */}
-              <div className="card">
-                <div className="card-head">
-                  <div>
-                    <h3>Groq AI (Fast Fallback)</h3>
-                    <p>Lightning-fast Llama-3 fallback provider</p>
+                    <h3>Groq Cloud AI (GROQ_API_KEY / GROQ_API_KEYS)</h3>
+                    <p>High-speed Ultra-low latency Llama & Mixtral inference engine</p>
                   </div>
                   <div className="symbol so">
-                    <Zap size={19} />
+                    <Zap size={16} />
                   </div>
                 </div>
                 <div className="form-group">
-                  <label>GROQ API KEY</label>
+                  <label>GROQ API KEY (এপিআই কি)</label>
                   <div className="fieldwrap">
                     <input
                       className="field secret"
@@ -1772,26 +1801,26 @@ export default function App() {
                       type="button"
                       onClick={() => setShowGroq(!showGroq)}
                     >
-                      {showGroq ? <EyeOff size={16} /> : <Eye size={16} />}
+                      {showGroq ? <EyeOff size={15} /> : <Eye size={15} />}
                     </button>
                   </div>
                 </div>
                 <div className="form-actions">
                   <button className="btn primary" onClick={() => saveConfig('groq')}>
-                    <Save size={15} /> Save Groq Config
+                    <Save size={13} /> Save Groq Key
                   </button>
                 </div>
               </div>
 
-              {/* OpenRouter */}
+              {/* OpenRouter AI */}
               <div className="card">
                 <div className="card-head">
                   <div>
-                    <h3>OpenRouter (Alternative)</h3>
-                    <p>Access many AI models via OpenRouter</p>
+                    <h3>OpenRouter AI (OPENROUTER_API_KEY)</h3>
+                    <p>Multi-model AI router & unified API gateway</p>
                   </div>
                   <div className="symbol sb">
-                    <Cpu size={19} />
+                    <Cpu size={16} />
                   </div>
                 </div>
                 <div className="form-group">
@@ -1809,59 +1838,59 @@ export default function App() {
                       type="button"
                       onClick={() => setShowOpenrouter(!showOpenrouter)}
                     >
-                      {showOpenrouter ? <EyeOff size={16} /> : <Eye size={16} />}
+                      {showOpenrouter ? <EyeOff size={15} /> : <Eye size={15} />}
                     </button>
                   </div>
                 </div>
                 <div className="form-actions">
                   <button className="btn primary" onClick={() => saveConfig('openrouter')}>
-                    <Save size={15} /> Save OpenRouter Config
+                    <Save size={13} /> Save OpenRouter Key
                   </button>
                 </div>
               </div>
 
-              {/* Supabase Config */}
+              {/* Supabase Database & Auth */}
               <div className="card">
                 <div className="card-head">
                   <div>
-                    <h3>Supabase (Free Persistence)</h3>
-                    <p>Sync logs and stats to a persistent database</p>
+                    <h3>Supabase Cloud Database (SUPABASE_URL & SUPABASE_ANON_KEY)</h3>
+                    <p>Cloud Postgres persistence & user auth storage</p>
                   </div>
-                  <div className="symbol sr">
-                    <Database size={19} />
+                  <div className="symbol sp">
+                    <Database size={16} />
                   </div>
                 </div>
                 <div className="form-group">
-                  <label>SUPABASE URL</label>
+                  <label>SUPABASE_URL</label>
                   <input
                     className="field"
                     value={supabaseUrl}
                     onChange={(e) => setSupabaseUrl(e.target.value)}
-                    placeholder="https://xyz.supabase.co"
+                    placeholder="https://your-project.supabase.co"
                   />
                 </div>
                 <div className="form-group">
-                  <label>SUPABASE ANON KEY</label>
+                  <label>SUPABASE_ANON_KEY (SUPABASE_KEY)</label>
                   <div className="fieldwrap">
                     <input
                       className="field secret"
                       type={showSupabase ? 'text' : 'password'}
                       value={supabaseKey}
                       onChange={(e) => setSupabaseKey(e.target.value)}
-                      placeholder="eyJhbGci..."
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR..."
                     />
                     <button
                       className="reveal"
                       type="button"
                       onClick={() => setShowSupabase(!showSupabase)}
                     >
-                      {showSupabase ? <EyeOff size={16} /> : <Eye size={16} />}
+                      {showSupabase ? <EyeOff size={15} /> : <Eye size={15} />}
                     </button>
                   </div>
                 </div>
                 <div className="form-actions">
                   <button className="btn primary" onClick={() => saveConfig('supabase')}>
-                    <Save size={15} /> Save Supabase Config
+                    <Save size={13} /> Save Supabase Credentials
                   </button>
                 </div>
               </div>
@@ -1871,10 +1900,10 @@ export default function App() {
                 <div className="card-head">
                   <div>
                     <h3>Baileys Socket Server URL</h3>
-                    <p>Connect to your live backend server</p>
+                    <p>Connect to live backend server</p>
                   </div>
                   <div className="symbol sb">
-                    <Server size={19} />
+                    <Server size={16} />
                   </div>
                 </div>
                 <div className="form-group">
@@ -1885,14 +1914,14 @@ export default function App() {
                     onChange={(e) => setBaileysUrl(e.target.value)}
                     placeholder="https://your-server.com"
                   />
-                  <p className="hint">ফাঁকা রাখলে বিল্ট-ইন রিয়েল সার্ভার ব্যবহৃত হবে</p>
+                  <p className="hint">Leave empty to use built-in server</p>
                 </div>
                 <div className="form-actions">
                   <button className="btn primary" onClick={saveBaileysConfig}>
-                    <Save size={15} /> Save URL
+                    <Save size={13} /> Save URL
                   </button>
                   <button className="btn outline" onClick={resetBaileysConfig}>
-                    <RotateCcw size={15} /> Reset to Default
+                    <RotateCcw size={13} /> Reset to Default
                   </button>
                 </div>
               </div>
@@ -1905,7 +1934,7 @@ export default function App() {
                     <p className="text-emerald-800 text-xs">গিটহাব পেজেসে ডিপ্লয় করলে হোয়াইট পেজ আসার সমস্যার সমাধান</p>
                   </div>
                   <div className="symbol sg">
-                    <CheckCircle2 size={19} />
+                    <CheckCircle2 size={16} />
                   </div>
                 </div>
                 <div className="text-xs text-emerald-950 leading-relaxed space-y-2">
@@ -1915,7 +1944,7 @@ export default function App() {
                   <p>
                     এখন প্রজেক্টটি GitHub Pages (e.g. <code>username.github.io/repo-name/</code>) এ ডিপ্লয় করলে কোনো ব্ল্যাঙ্ক বা ফাঁকা সাদা পেজ আসবে না।
                   </p>
-                  <div className="p-3 bg-white rounded-lg border border-emerald-200 font-mono text-[11px] text-gray-800">
+                  <div className="p-2.5 bg-white rounded-lg border border-emerald-200 font-mono text-[11px] text-gray-800">
                     npm run build &nbsp;&nbsp;&mdash; Generates GitHub Pages ready build with relative assets
                   </div>
                 </div>
@@ -1931,8 +1960,7 @@ export default function App() {
           className={activePage === 'home' ? 'active' : ''}
           onClick={() => setActivePage('home')}
         >
-          <LayoutDashboard size={19} />
-          <span>হোম</span>
+          <LayoutDashboard size={16} /> {t.home}
         </button>
         <button
           className={activePage === 'security' ? 'active' : ''}
@@ -1941,8 +1969,7 @@ export default function App() {
             loadModerationData();
           }}
         >
-          <ShieldCheck size={19} />
-          <span>সিকিউরিটি</span>
+          <ShieldCheck size={16} /> {t.security}
         </button>
         <button
           className={activePage === 'maya' ? 'active' : ''}
@@ -1951,22 +1978,19 @@ export default function App() {
             loadModerationData();
           }}
         >
-          <Heart size={19} />
-          <span>মায়া AI</span>
+          <Heart size={16} /> {t.maya}
         </button>
         <button
           className={activePage === 'integrations' ? 'active' : ''}
           onClick={() => setActivePage('integrations')}
         >
-          <Plug size={19} />
-          <span>API</span>
+          <Plug size={16} /> {t.integrations}
         </button>
         <button
           className={activePage === 'pairing' ? 'active' : ''}
           onClick={() => setActivePage('pairing')}
         >
-          <Smartphone size={19} />
-          <span>কানেক্ট</span>
+          <Smartphone size={16} /> {t.connect}
         </button>
         <button
           className={activePage === 'groups' ? 'active' : ''}
@@ -1975,17 +1999,9 @@ export default function App() {
             loadGroups();
           }}
         >
-          <Users size={19} />
-          <span>গ্রুপ</span>
+          <Users size={16} /> {t.groups}
         </button>
       </nav>
-
-      {/* Toast */}
-      {showToast && (
-        <div className="toast" style={{ display: 'block' }}>
-          {toastMessage}
-        </div>
-      )}
     </div>
   );
 }

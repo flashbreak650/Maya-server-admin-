@@ -400,13 +400,22 @@ export function isViewOnceMessage(rawMsg: proto.IWebMessageInfo, realMsg: proto.
   return false;
 }
 
+export function normalizeJid(jid: string): string {
+  if (!jid) return '';
+  const parts = jid.split('@');
+  if (parts.length < 2) return jid;
+  const user = parts[0].split(':')[0]; // strip device suffix like :12
+  const domain = parts[1];
+  return `${user}@${domain}`;
+}
+
 // -------------------------------------------------------------
 // GROUP ADMIN VERIFICATION
 // -------------------------------------------------------------
-export async function getGroupMeta(sock: WASocket, groupId: string) {
+export async function getGroupMeta(sock: WASocket, groupId: string, forceRefresh = false) {
   const cached = groupMetaCache[groupId];
   const now = Date.now();
-  if (cached && now - cached.fetchedAt < 30000) {
+  if (!forceRefresh && cached && now - cached.fetchedAt < 30000) {
     return cached.meta;
   }
   try {
@@ -419,16 +428,25 @@ export async function getGroupMeta(sock: WASocket, groupId: string) {
   }
 }
 
-export async function checkPermissions(sock: WASocket, groupId: string, senderJid: string): Promise<{ isSenderAdmin: boolean; isBotAdmin: boolean; groupSubject: string }> {
+export async function checkPermissions(
+  sock: WASocket,
+  groupId: string,
+  senderJid: string,
+  forceRefresh = false
+): Promise<{ isSenderAdmin: boolean; isBotAdmin: boolean; groupSubject: string }> {
   try {
-    const meta = await getGroupMeta(sock, groupId);
+    const meta = await getGroupMeta(sock, groupId, forceRefresh);
     if (!meta || !meta.participants) {
       return { isSenderAdmin: false, isBotAdmin: false, groupSubject: 'WhatsApp Group' };
     }
 
-    const cleanSender = senderJid.split('@')[0].split(':')[0];
-    const botJid = sock.user?.id || '';
-    const cleanBot = botJid.split('@')[0].split(':')[0];
+    const senderClean = senderJid.split('@')[0].split(':')[0];
+
+    const botId = sock.user?.id || '';
+    const botLid = sock.user?.lid || '';
+
+    const botPhoneClean = botId.split('@')[0].split(':')[0];
+    const botLidClean = botLid ? botLid.split('@')[0].split(':')[0] : '';
 
     let isSenderAdmin = false;
     let isBotAdmin = false;
@@ -437,20 +455,30 @@ export async function checkPermissions(sock: WASocket, groupId: string, senderJi
       const pClean = p.id.split('@')[0].split(':')[0];
       const isAdmin = p.admin === 'admin' || p.admin === 'superadmin';
 
-      if (pClean === cleanSender && isAdmin) {
+      if ((pClean === senderClean || p.id === senderJid) && isAdmin) {
         isSenderAdmin = true;
       }
-      if (pClean === cleanBot && isAdmin) {
+
+      if (
+        isAdmin &&
+        (pClean === botPhoneClean ||
+         (botLidClean && pClean === botLidClean) ||
+         p.id === botId ||
+         p.id === botLid)
+      ) {
         isBotAdmin = true;
       }
     }
+
+    console.log(`[Admin Verification] Group: "${meta.subject}" | Bot Phone: ${botPhoneClean} | Bot LID: ${botLidClean} | isBotAdmin: ${isBotAdmin}`);
 
     return {
       isSenderAdmin,
       isBotAdmin,
       groupSubject: meta.subject || 'WhatsApp Group',
     };
-  } catch {
+  } catch (err: any) {
+    console.error('[checkPermissions error]:', err.message);
     return { isSenderAdmin: false, isBotAdmin: false, groupSubject: 'WhatsApp Group' };
   }
 }
@@ -747,18 +775,25 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
         warningCount: 2,
       });
     } else if (warningCount >= 3) {
-      // 3rd Warning -> Final Warning & Auto Kick
+      // 3rd Warning -> Final Warning & Auto Kick Execution
       if (settings.autoKick3Warnings) {
-        if (isBotAdmin) {
+        // Force fresh metadata check from WhatsApp server to ensure admin status is up-to-date
+        const freshPerms = await checkPermissions(sock, remoteJid, senderJid, true);
+        const canKick = freshPerms.isBotAdmin;
+
+        if (canKick) {
           try {
+            // Normalize target JID (strips device suffix like :12)
+            const targetJid = normalizeJid(senderJid);
+
             await sock.sendMessage(remoteJid, {
               text: `🚨 [চূড়ান্ত অ্যাকশন - ৩য় সতর্কতা]\nসদস্য @${cleanPhone} ৩ বার গ্রুপের নিয়ম লঙ্ঘন করেছেন (${violationDetails})।\nনিরাপত্তার স্বার্থে তাকে গ্রুপ থেকে রিমুভ (Kick) করা হচ্ছে!`,
               mentions: [senderJid],
             });
 
-            // Real participant removal
-            const kickResult = await sock.groupParticipantsUpdate(remoteJid, [senderJid], 'remove');
-            console.log(`Real Kick result for @${cleanPhone}:`, kickResult);
+            console.log(`[Baileys Kick Action] Executing groupParticipantsUpdate for target ${targetJid} in group ${remoteJid}...`);
+            const kickResult = await sock.groupParticipantsUpdate(remoteJid, [targetJid], 'remove');
+            console.log(`[Baileys Kick Action SUCCESS] Result for @${cleanPhone}:`, kickResult);
 
             db.stats.kickedMembers++;
             delete db.warnings[warningKey];
@@ -767,7 +802,7 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
             addActivityLog({
               groupId: remoteJid,
               groupName: groupSubject,
-              senderJid,
+              senderJid: targetJid,
               senderPhone: cleanPhone,
               action: 'kicked',
               reason: `৩ বার সতর্কতা অতিক্রান্ত (${violationType})`,
@@ -775,23 +810,29 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
               warningCount: 3,
             });
           } catch (kickErr: any) {
-            console.error('Failed to kick member:', kickErr.message);
+            console.error('[Baileys Kick Action FAILED]:', kickErr);
+            const errCode = kickErr?.output?.statusCode || kickErr?.code || 'ERROR';
+            const errMsg = kickErr?.message || String(kickErr);
+
             await sock.sendMessage(remoteJid, {
-              text: `⚠️ [ত্রুটি] সদস্য @${cleanPhone} ৩টি সতর্কতা অতিক্রম করেছেন, কিন্তু WhatsApp সিস্টেমে কিক করার সময় ত্রুটি দেখা দিয়েছে (${kickErr.message})।`,
+              text: `⚠️ [কিক ত্রুটি - Code: ${errCode}]\nসদস্য @${cleanPhone} ৩টি সতর্কতা অতিক্রম করেছেন, কিন্তু কিক করার সময় ত্রুটি দেখা দিয়েছে: ${errMsg}`,
               mentions: [senderJid],
             });
+
             addActivityLog({
               groupId: remoteJid,
               groupName: groupSubject,
               senderJid,
               senderPhone: cleanPhone,
               action: 'error',
-              reason: `Kick Failed: ${kickErr.message}`,
+              reason: `Kick Failed (${errCode}): ${errMsg}`,
               warningCount: 3,
             });
           }
         } else {
-          // Bot is NOT admin - show REAL error, do not fake success!
+          // Bot is genuinely NOT admin in group metadata
+          console.warn(`[Kick Cancelled] Bot is NOT listed as admin in fresh groupMetadata for ${groupSubject} (${remoteJid}). Bot ID: ${sock.user?.id}, LID: ${sock.user?.lid}`);
+
           await sock.sendMessage(remoteJid, {
             text: `⚠️ [সতর্কবার্তা ৩/৩ - অ্যাডমিন আবশ্যক]\nসদস্য @${cleanPhone} ৩টি নিয়ম লঙ্ঘন করেছেন! কিন্তু WAGuard বট এই গ্রুপের অ্যাডমিন না হওয়ায় সদস্যকে বাস্তবে কিক করা সম্ভব হয়নি। দয়া করে গ্রুপ অ্যাডমিন বটকে অ্যাডমিন পারমিশন দিন।`,
             mentions: [senderJid],
@@ -803,7 +844,7 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
             senderJid,
             senderPhone: cleanPhone,
             action: 'error',
-            reason: 'Bot is not group admin; cannot kick member.',
+            reason: 'Bot is not admin in fresh group metadata.',
             warningCount: 3,
           });
         }
@@ -824,37 +865,63 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
   if (settings.botReply && settings.mayaAiEnabled && messageText) {
     const lower = messageText.toLowerCase();
     const botJid = sock.user?.id || '';
+    const botLid = sock.user?.lid || '';
     const cleanBot = botJid.split('@')[0].split(':')[0];
+    const cleanBotLid = botLid ? botLid.split('@')[0].split(':')[0] : '';
 
-    // 1. Determine if bot should reply when called by name or tagged in group
+    const contextInfo = (realMsg as any)?.extendedTextMessage?.contextInfo ||
+                        (realMsg as any)?.imageMessage?.contextInfo ||
+                        (realMsg as any)?.videoMessage?.contextInfo;
+
+    // Check if the user is quoting Maya's previous message
+    const quotedParticipant = contextInfo?.participant || '';
+    const isQuotingBot = quotedParticipant ? (
+      quotedParticipant.includes(cleanBot) ||
+      (cleanBotLid && quotedParticipant.includes(cleanBotLid)) ||
+      quotedParticipant === botJid ||
+      quotedParticipant === botLid
+    ) : false;
+
+    // Direct mention or name calling ("Maya", "মায়া", "এই মায়া", etc.)
     const isDirectMention =
-      msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.includes(botJid) ||
+      contextInfo?.mentionedJid?.includes(botJid) ||
+      (botLid && contextInfo?.mentionedJid?.includes(botLid)) ||
       lower.includes('@' + cleanBot) ||
       lower.includes('maya') ||
       lower.includes('মায়া') ||
       lower.includes('মায়া') ||
-      lower.includes('waguard');
+      lower.includes('waguard') ||
+      isQuotingBot;
 
     const isDirectCall = 
+      lower.includes('এই মায়া') ||
+      lower.includes('এই মায়া') ||
+      lower.includes('মায়া শুনছো') ||
+      lower.includes('মায়া কোথায়') ||
+      lower.includes('মায়া কেমন আছো') ||
       lower.includes('মায়ান') || 
       lower.includes('মায়ান') || 
       lower.includes('বট') || 
       lower.includes('bot');
 
-    const shouldAttemptReply = isDirectMention || isDirectCall || (settings.mayaAutoParticipate && Math.random() * 100 < settings.mayaReplyFrequency);
+    const shouldAttemptReply = 
+      isDirectMention || 
+      isDirectCall || 
+      isQuotingBot || 
+      (settings.mayaAutoParticipate && Math.random() * 100 < settings.mayaReplyFrequency) ||
+      (settings.botReply && Math.random() * 100 <= (settings.mayaReplyFrequency || 50));
 
     if (shouldAttemptReply) {
-      // 2. Check cooldown
       const now = Date.now();
       const lastReply = lastAiReplyTime[remoteJid] || 0;
       const cooldownMs = settings.mayaReplyCooldown * 1000;
 
-      // Mentions always bypass cooldown
-      if (!isDirectMention && !isDirectCall && now - lastReply < cooldownMs) {
-        return; // Still in cooldown for automatic participation
+      // Mentions, direct calls, and quoted messages ALWAYS bypass cooldown for fluid conversation
+      if (!isDirectMention && !isDirectCall && !isQuotingBot && now - lastReply < cooldownMs) {
+        return; // Still in cooldown for unprompted background chat participation
       }
 
-      console.log(`[Maya AI] Processing reply for ${groupSubject} (Direct: ${isDirectMention || isDirectCall})`);
+      console.log(`[Maya AI Response Engine] Processing for ${groupSubject} (Direct/Quoting: ${isDirectMention || isDirectCall || isQuotingBot})`);
       
       try {
         const userName = msg.pushName || 'User';
@@ -888,7 +955,7 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
             senderJid,
             senderPhone: cleanPhone,
             action: 'replied',
-            reason: isDirectMention || isDirectCall ? 'বট মেনশন বা সরাসরি রিকোয়েস্ট' : 'স্বয়ংক্রিয় গ্রুপ অংশগ্রহণ (Auto Participate)',
+            reason: isDirectMention || isDirectCall || isQuotingBot ? 'মায়া সরাসরি চ্যাট / নেম কল' : 'স্বয়ংক্রিয় গ্রুপ মেসেজ রিপ্লাই',
             details: aiResponse.slice(0, 60),
           });
         }
