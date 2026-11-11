@@ -12,9 +12,39 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+      // 1. GitHub Pages Trailing-Slash Enforcer:
+      // Prevents blank screen when visiting https://<user>.github.io/<repo> without trailing slash
+      (function() {
+        var path = window.location.pathname;
+        if (path && !path.endsWith('/') && !path.split('/').pop().includes('.')) {
+          window.location.replace(window.location.protocol + '//' + window.location.host + path + '/' + window.location.search + window.location.hash);
+        }
+      })();
+
+      // 2. GitHub Pages SPA redirect decoder (from 404.html)
+      (function(l) {
+        if (l.search[1] === '/' ) {
+          var decoded = l.search.slice(1).split('&').map(function(s) { 
+            return s.replace(/~and~/g, '&')
+          }).join('?');
+          window.history.replaceState(null, null,
+              l.pathname.slice(0, -1) + decoded + l.hash
+          );
+        }
+      }(window.location));
+    </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Fallback indicator preventing white screen during initial asset loading -->
+      <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:Inter,'Hind Siliguri',system-ui,sans-serif;background:#f5f7f6;color:#087f55;">
+        <div style="width:40px;height:40px;border:3px solid #e9f7ef;border-top-color:#087f55;border-radius:50%;animation:spin .8s linear infinite;margin-bottom:14px;"></div>
+        <div style="font-size:16px;font-weight:700;letter-spacing:-0.5px;">WAGuard Loading...</div>
+        <div style="font-size:12px;color:#84938a;margin-top:4px;">দয়া করে অপেক্ষা করুন...</div>
+        <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

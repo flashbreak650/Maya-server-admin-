@@ -27,8 +27,20 @@ export interface ModerationSettings {
   autoKick3Warnings: boolean;
   botReply: boolean;
   customBadwords: string[];
+  // Individual Temporary Mute (Auto-Delete Interception for Sticker Spammers)
+  individualMuteEnabled: boolean;
+  individualMuteStickerLimit: number;
+  individualMuteTimeWindow: number; // in seconds
+  individualMuteDurationMinutes: number; // in minutes
   // Maya AI Settings
   mayaAiEnabled: boolean;
+  mayaPrivateReply: boolean; // Auto reply to individual private WhatsApp messages
+  mayaGroupReply: boolean;   // Auto reply to group WhatsApp messages
+  aiProvider: 'gemini' | 'groq' | 'openrouter' | 'auto';
+  geminiModel?: string;
+  geminiApiKey?: string;
+  groqApiKey?: string;
+  openrouterApiKey?: string;
   mayaRomantic: boolean;
   mayaFunny: boolean;
   mayaAutoParticipate: boolean;
@@ -45,7 +57,7 @@ export interface ActivityLog {
   groupName: string;
   senderJid: string;
   senderPhone: string;
-  action: 'deleted' | 'warned' | 'kicked' | 'locked' | 'unlocked' | 'error' | 'replied';
+  action: 'deleted' | 'warned' | 'kicked' | 'locked' | 'unlocked' | 'error' | 'replied' | 'restricted' | 'unmuted';
   reason: string;
   details?: string;
   warningCount?: number;
@@ -65,10 +77,22 @@ export interface GroupLock {
   timerActive?: boolean;
 }
 
+export interface RestrictedUser {
+  groupId: string;
+  groupName: string;
+  senderJid: string;
+  senderPhone: string;
+  restrictedAt: number;
+  expiresAt: number;
+  reason: string;
+  violationCount: number;
+}
+
 export interface ModerationDB {
   settings: ModerationSettings;
   warnings: Record<string, UserWarning>; // key: `${groupId}:${senderJid}`
   groupLocks: Record<string, GroupLock>; // key: groupId
+  restrictedUsers: Record<string, RestrictedUser>; // key: `${groupId}:${normalizeJid(senderJid)}`
   activityLogs: ActivityLog[];
   stats: {
     messagesChecked: number;
@@ -76,6 +100,8 @@ export interface ModerationDB {
     deletedMessages: number;
     kickedMembers: number;
     groupLocksTriggered: number;
+    individualMutesTriggered?: number;
+    restrictedMessagesBlocked?: number;
   };
 }
 
@@ -92,14 +118,25 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   autoKick3Warnings: true,
   botReply: true,
   customBadwords: [],
+  individualMuteEnabled: true,
+  individualMuteStickerLimit: 3,
+  individualMuteTimeWindow: 5,
+  individualMuteDurationMinutes: 10,
   mayaAiEnabled: true,
+  mayaPrivateReply: true,
+  mayaGroupReply: true,
+  aiProvider: 'auto',
+  geminiModel: 'gemini-3.1-flash-lite',
+  geminiApiKey: '',
+  groqApiKey: '',
+  openrouterApiKey: '',
   mayaRomantic: true,
   mayaFunny: true,
-  mayaAutoParticipate: false,
-  mayaReplyCooldown: 30,
-  mayaReplyFrequency: 15,
+  mayaAutoParticipate: true,
+  mayaReplyCooldown: 10,
+  mayaReplyFrequency: 100,
   mayaLanguage: 'auto',
-  mayaMemoryLimit: 10,
+  mayaMemoryLimit: 20,
 };
 
 // In-memory runtime database
@@ -107,6 +144,7 @@ let db: ModerationDB = {
   settings: { ...DEFAULT_SETTINGS },
   warnings: {},
   groupLocks: {},
+  restrictedUsers: {},
   activityLogs: [],
   stats: {
     messagesChecked: 0,
@@ -114,6 +152,8 @@ let db: ModerationDB = {
     deletedMessages: 0,
     kickedMembers: 0,
     groupLocksTriggered: 0,
+    individualMutesTriggered: 0,
+    restrictedMessagesBlocked: 0,
   },
 };
 
@@ -126,6 +166,7 @@ export function loadDatabase() {
         settings: { ...DEFAULT_SETTINGS, ...(data.settings || {}) },
         warnings: data.warnings || {},
         groupLocks: data.groupLocks || {},
+        restrictedUsers: data.restrictedUsers || {},
         activityLogs: Array.isArray(data.activityLogs) ? data.activityLogs.slice(-100) : [],
         stats: {
           messagesChecked: data.stats?.messagesChecked || 0,
@@ -133,9 +174,11 @@ export function loadDatabase() {
           deletedMessages: data.stats?.deletedMessages || 0,
           kickedMembers: data.stats?.kickedMembers || 0,
           groupLocksTriggered: data.stats?.groupLocksTriggered || 0,
+          individualMutesTriggered: data.stats?.individualMutesTriggered || 0,
+          restrictedMessagesBlocked: data.stats?.restrictedMessagesBlocked || 0,
         },
       };
-      console.log('Moderation DB loaded successfully. Logs count:', db.activityLogs.length);
+      console.log('Moderation DB loaded successfully. Logs count:', db.activityLogs.length, 'Restricted users:', Object.keys(db.restrictedUsers).length);
     } else {
       saveDatabase();
     }
@@ -210,6 +253,204 @@ export function addActivityLog(log: Omit<ActivityLog, 'id' | 'timestamp'>) {
   }
   saveDatabase();
 }
+
+// -------------------------------------------------------------
+// INDIVIDUAL TEMPORARY MUTE ENGINE (Auto-Delete Interception)
+// -------------------------------------------------------------
+export function getRestrictedUserKey(groupId: string, senderJid: string): string {
+  return `${groupId}:${normalizeJid(senderJid)}`;
+}
+
+export function isUserRestricted(
+  groupId: string,
+  senderJid: string
+): { restricted: boolean; remainingMs: number; restriction?: RestrictedUser } {
+  if (!db.restrictedUsers) {
+    db.restrictedUsers = {};
+    return { restricted: false, remainingMs: 0 };
+  }
+
+  const key = getRestrictedUserKey(groupId, senderJid);
+  const rawKey = `${groupId}:${senderJid}`;
+  let restriction = db.restrictedUsers[key] || db.restrictedUsers[rawKey];
+
+  if (!restriction) {
+    return { restricted: false, remainingMs: 0 };
+  }
+
+  const now = Date.now();
+  if (now >= restriction.expiresAt) {
+    // Restriction duration has elapsed! Automatically remove
+    delete db.restrictedUsers[key];
+    delete db.restrictedUsers[rawKey];
+    saveDatabase();
+
+    addActivityLog({
+      groupId,
+      groupName: restriction.groupName || 'WhatsApp Group',
+      senderJid: restriction.senderJid,
+      senderPhone: restriction.senderPhone,
+      action: 'unmuted',
+      reason: 'সাময়িক রেস্ট্রিকশনের মেয়াদ শেষ হয়েছে (Auto Lifted)',
+    });
+
+    return { restricted: false, remainingMs: 0 };
+  }
+
+  return {
+    restricted: true,
+    remainingMs: restriction.expiresAt - now,
+    restriction,
+  };
+}
+
+export function restrictUser(
+  groupId: string,
+  groupName: string,
+  senderJid: string,
+  senderPhone: string,
+  durationMinutes: number = 10,
+  reason: string = 'অতিরিক্ত স্টিকার স্প্যাম'
+): RestrictedUser {
+  if (!db.restrictedUsers) db.restrictedUsers = {};
+
+  const now = Date.now();
+  const expiresAt = now + Math.max(1, durationMinutes) * 60 * 1000;
+  const key = getRestrictedUserKey(groupId, senderJid);
+
+  const prevCount = db.restrictedUsers[key]?.violationCount || 0;
+
+  const restriction: RestrictedUser = {
+    groupId,
+    groupName,
+    senderJid: normalizeJid(senderJid),
+    senderPhone,
+    restrictedAt: now,
+    expiresAt,
+    reason,
+    violationCount: prevCount + 1,
+  };
+
+  db.restrictedUsers[key] = restriction;
+  db.stats.individualMutesTriggered = (db.stats.individualMutesTriggered || 0) + 1;
+  saveDatabase();
+
+  addActivityLog({
+    groupId,
+    groupName,
+    senderJid,
+    senderPhone,
+    action: 'restricted',
+    reason: `Individual Temporary Mute (${durationMinutes} মিনিট): ${reason}`,
+    details: `${durationMinutes} মিনিটের জন্য গ্রুপের সকল নতুন মেসেজ স্বয়ংক্রিয়ভাবে মুছে দেওয়া হবে`,
+  });
+
+  return restriction;
+}
+
+export function unrestrictUser(groupId: string, senderJid: string): boolean {
+  if (!db.restrictedUsers) return false;
+
+  const key = getRestrictedUserKey(groupId, senderJid);
+  const rawKey = `${groupId}:${senderJid}`;
+
+  const restriction = db.restrictedUsers[key] || db.restrictedUsers[rawKey];
+  if (restriction) {
+    delete db.restrictedUsers[key];
+    delete db.restrictedUsers[rawKey];
+    saveDatabase();
+
+    addActivityLog({
+      groupId,
+      groupName: restriction.groupName || 'WhatsApp Group',
+      senderJid: restriction.senderJid,
+      senderPhone: restriction.senderPhone,
+      action: 'unmuted',
+      reason: 'ম্যানুয়ালি রেস্ট্রিকশন তুলে দেওয়া হয়েছে (Manual Unmute)',
+    });
+    return true;
+  }
+  return false;
+}
+
+export function getActiveRestrictedUsers(): Array<RestrictedUser & { remainingSeconds: number; remainingText: string }> {
+  if (!db.restrictedUsers) return [];
+
+  const now = Date.now();
+  const list: Array<RestrictedUser & { remainingSeconds: number; remainingText: string }> = [];
+
+  for (const [key, user] of Object.entries(db.restrictedUsers)) {
+    if (now >= user.expiresAt) {
+      delete db.restrictedUsers[key];
+      saveDatabase();
+    } else {
+      const remainingSec = Math.max(0, Math.ceil((user.expiresAt - now) / 1000));
+      const mins = Math.floor(remainingSec / 60);
+      const secs = remainingSec % 60;
+      const remainingText = mins > 0 ? `${mins} মি. ${secs} সে.` : `${secs} সেকেন্ড`;
+
+      list.push({
+        ...user,
+        remainingSeconds: remainingSec,
+        remainingText,
+      });
+    }
+  }
+
+  return list.sort((a, b) => a.expiresAt - b.expiresAt);
+}
+
+// Check sticker spam within configurable time window
+export function recordStickerAndCheckIndividualSpam(
+  groupId: string,
+  senderJid: string,
+  timeWindowSec: number = 5,
+  limit: number = 3
+): boolean {
+  const key = `${groupId}:${senderJid}`;
+  const now = Date.now();
+  if (!stickerTimestamps[key]) {
+    stickerTimestamps[key] = [];
+  }
+
+  const windowMs = Math.max(1, timeWindowSec) * 1000;
+  stickerTimestamps[key] = stickerTimestamps[key].filter((t) => now - t <= windowMs);
+  stickerTimestamps[key].push(now);
+
+  return stickerTimestamps[key].length >= limit;
+}
+
+// Background monitor to lift expired restrictions automatically
+export function startRestrictedUsersMonitor() {
+  setInterval(() => {
+    if (!db.restrictedUsers) return;
+    const now = Date.now();
+    let changed = false;
+
+    for (const [key, user] of Object.entries(db.restrictedUsers)) {
+      if (now >= user.expiresAt) {
+        delete db.restrictedUsers[key];
+        changed = true;
+        console.log(`[Individual Mute] Restriction expired for @${user.senderPhone} in ${user.groupName}. Auto-lifted.`);
+        addActivityLog({
+          groupId: user.groupId,
+          groupName: user.groupName,
+          senderJid: user.senderJid,
+          senderPhone: user.senderPhone,
+          action: 'unmuted',
+          reason: 'সাময়িক রেস্ট্রিকশনের মেয়াদ শেষ হয়েছে (Auto Lifted)',
+        });
+      }
+    }
+
+    if (changed) {
+      saveDatabase();
+    }
+  }, 10000);
+}
+
+// Start auto-lift timer
+startRestrictedUsersMonitor();
 
 // -------------------------------------------------------------
 // MULTILINGUAL ANTI-BADWORD MATCHING ENGINE
@@ -409,6 +650,26 @@ export function normalizeJid(jid: string): string {
   return `${user}@${domain}`;
 }
 
+export async function safeSendMessage(
+  sock: WASocket,
+  jid: string,
+  content: any,
+  options?: any
+): Promise<boolean> {
+  try {
+    await sock.sendMessage(jid, content, options);
+    return true;
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    if (msg.includes('Connection Closed') || msg.includes('Closed') || msg.includes('not connected')) {
+      console.warn(`[Baileys Socket Warn] Cannot send message to ${jid} because connection was closed/reconnecting.`);
+    } else {
+      console.error(`[Baileys Socket Error] Failed to send message to ${jid}:`, msg);
+    }
+    return false;
+  }
+}
+
 // -------------------------------------------------------------
 // GROUP ADMIN VERIFICATION
 // -------------------------------------------------------------
@@ -455,7 +716,12 @@ export async function checkPermissions(
       const pClean = p.id.split('@')[0].split(':')[0];
       const isAdmin = p.admin === 'admin' || p.admin === 'superadmin';
 
-      if ((pClean === senderClean || p.id === senderJid) && isAdmin) {
+      if (
+        (pClean === senderClean ||
+         p.id === senderJid ||
+         normalizeJid(p.id) === normalizeJid(senderJid)) &&
+        isAdmin
+      ) {
         isSenderAdmin = true;
       }
 
@@ -540,19 +806,24 @@ export function startGroupLockMonitor(sockGetter: () => WASocket | null) {
 }
 
 // -------------------------------------------------------------
-// MAIN REAL-TIME MODERATION PROCESSING PIPELINE
+// MAIN REAL-TIME MODERATION & AI PROCESSING PIPELINE
 // -------------------------------------------------------------
 export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMessageInfo) {
   if (!msg.key || !msg.message) return;
 
   const remoteJid = msg.key.remoteJid;
-  if (!remoteJid || !remoteJid.endsWith('@g.us')) {
-    // Only moderate WhatsApp groups
+  if (!remoteJid || remoteJid === 'status@broadcast') {
+    // Ignore WhatsApp status broadcasts
     return;
   }
 
   // Ignore bot's own messages
   if (msg.key.fromMe) return;
+
+  // Ignore protocol messages, reactions, and poll updates
+  if (msg.message.protocolMessage || msg.message.reactionMessage || msg.message.pollUpdateMessage) {
+    return;
+  }
 
   const msgId = msg.key.id;
   if (msgId && processedMsgIds.has(msgId)) {
@@ -566,44 +837,187 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
     }
   }
 
+  const isGroup = remoteJid.endsWith('@g.us');
+  const isPrivate = remoteJid.endsWith('@s.whatsapp.net') || remoteJid.endsWith('@lid');
+
+  if (!isGroup && !isPrivate) {
+    return;
+  }
+
   // Update total messages checked
   db.stats.messagesChecked++;
   saveDatabase();
 
+  const settings = getSettings();
+  const realMsg = extractRealMessage(msg.message);
+  if (!realMsg) return;
+  const messageText = extractMessageText(realMsg);
+
+  // -------------------------------------------------------------
+  // 1. INDIVIDUAL PRIVATE INBOX CHAT SYSTEM (1-ON-1 WHATSAPP)
+  // -------------------------------------------------------------
+  if (isPrivate) {
+    if (!settings.mayaAiEnabled || !settings.mayaPrivateReply) {
+      return;
+    }
+
+    if (!messageText || messageText.trim().length === 0) {
+      return; // Skip media without captions in private chats
+    }
+
+    const senderJid = remoteJid;
+    const cleanPhone = senderJid.split('@')[0].split(':')[0];
+    const userName = msg.pushName || 'Friend';
+    // Strictly isolate private conversation history per user
+    const memoryKey = `private:${normalizeJid(senderJid)}`;
+
+    console.log(`[Maya AI Private Inbox] Incoming message from @${cleanPhone} (${userName}): "${messageText}"`);
+
+    try {
+      const aiResult = await getMayaResponse(
+        messageText,
+        cleanPhone,
+        userName,
+        'Private Chat',
+        memoryKey,
+        {
+          romantic: settings.mayaRomantic,
+          funny: settings.mayaFunny,
+          language: settings.mayaLanguage,
+          memoryLimit: settings.mayaMemoryLimit,
+          aiProvider: settings.aiProvider,
+          geminiModel: settings.geminiModel,
+          geminiApiKey: settings.geminiApiKey,
+          groqApiKey: settings.groqApiKey,
+          openrouterApiKey: settings.openrouterApiKey,
+          isPrivate: true,
+        }
+      );
+
+      if (aiResult.reply) {
+        const sent = await safeSendMessage(
+          sock,
+          remoteJid,
+          { text: aiResult.reply },
+          { quoted: msg as any }
+        );
+
+        if (sent) {
+          addActivityLog({
+            groupId: 'private',
+            groupName: `Private (${userName})`,
+            senderJid: remoteJid,
+            senderPhone: cleanPhone,
+            action: 'replied',
+            reason: `Private Chat Reply [${aiResult.provider.toUpperCase()}]`,
+            details: aiResult.reply.slice(0, 60),
+          });
+
+          console.log(
+            `[Maya AI Private Inbox SUCCESS] Replied to @${cleanPhone} via ${aiResult.provider} (${aiResult.latencyMs}ms)`
+          );
+        }
+      }
+    } catch (err: any) {
+      console.error(`[Maya AI Private Inbox ERROR]:`, err.message);
+    }
+    return;
+  }
+
+  // -------------------------------------------------------------
+  // 2. GROUP MODERATION & AUTO-REPLY SYSTEM
+  // -------------------------------------------------------------
   const senderJid = msg.key.participant || msg.participant || '';
   if (!senderJid) return;
 
   const cleanPhone = senderJid.split('@')[0].split(':')[0];
-  const settings = getSettings();
 
   // 1. Verify Admin Permissions
   const { isSenderAdmin, isBotAdmin, groupSubject } = await checkPermissions(sock, remoteJid, senderJid);
 
-  // 1. FEATURE 1: ADMIN SECURITY SHIELD
-  if (settings.adminShield && isSenderAdmin) {
-    // Never moderate admins
-    return;
-  }
+  // -------------------------------------------------------------
+  // FEATURE 0: ACTIVE INDIVIDUAL RESTRICTION (MESSAGE INTERCEPTION & AUTO-DELETE)
+  // -------------------------------------------------------------
+  if (settings.individualMuteEnabled) {
+    const restrictionCheck = isUserRestricted(remoteJid, senderJid);
+    if (restrictionCheck.restricted) {
+      // Group Admins are never restricted if Admin Shield is active
+      if (settings.adminShield && isSenderAdmin) {
+        console.log(`[Individual Mute] @${cleanPhone} is an Admin with Admin Shield active. Lifting restriction.`);
+        unrestrictUser(remoteJid, senderJid);
+      } else {
+        const remainingSec = Math.round(restrictionCheck.remainingMs / 1000);
+        console.log(`[Individual Mute ACTIVE] Intercepted message from restricted user @${cleanPhone} in "${groupSubject}". Auto-deleting message (${remainingSec}s remaining)...`);
 
-  const realMsg = extractRealMessage(msg.message);
-  if (!realMsg) return;
+        try {
+          await sock.sendMessage(remoteJid, { delete: msg.key });
+          db.stats.deletedMessages++;
+          db.stats.restrictedMessagesBlocked = (db.stats.restrictedMessagesBlocked || 0) + 1;
+          saveDatabase();
+        } catch (delErr: any) {
+          console.error('[Individual Mute] Failed to delete message from restricted user:', delErr.message);
+        }
+
+        // Halts all processing! Message deleted instantly, other members chat freely.
+        return;
+      }
+    }
+  }
 
   const isSticker = Boolean(realMsg.stickerMessage);
   const isGif = Boolean(realMsg.videoMessage?.gifPlayback || realMsg.imageMessage?.mimetype === 'image/gif' || realMsg.videoMessage?.mimetype === 'image/gif');
   const isVideo = Boolean(realMsg.videoMessage) && !isGif;
   const isImage = Boolean(realMsg.imageMessage) && !isGif;
   const isViewOnce = isViewOnceMessage(msg, realMsg);
-  const messageText = extractMessageText(realMsg);
 
   // -------------------------------------------------------------
-  // FEATURE 3: ANTI-STICKER SPAM (5s >= 3 stickers -> 10m Group Lock)
+  // FEATURE 3: INDIVIDUAL STICKER SPAM DETECTION & 10-MINUTE RESTRICTION
+  // (Note: Never locks the group! Intercepts and auto-deletes the restricted member's messages)
   // -------------------------------------------------------------
-  if (settings.antiStickerSpam && isSticker) {
+  if (settings.individualMuteEnabled && isSticker) {
+    const isProtected = settings.adminShield && isSenderAdmin;
+    if (!isProtected) {
+      const timeWindow = settings.individualMuteTimeWindow || 5;
+      const limit = settings.individualMuteStickerLimit || 3;
+      const durationMin = settings.individualMuteDurationMinutes || 10;
+
+      const isSpam = recordStickerAndCheckIndividualSpam(remoteJid, senderJid, timeWindow, limit);
+      if (isSpam) {
+        console.log(`[Individual Mute Triggered] Sticker spam detected: @${cleanPhone} sent ${limit}+ stickers in ${timeWindow}s in ${groupSubject}`);
+
+        // 1. Delete the spam sticker immediately
+        try {
+          await sock.sendMessage(remoteJid, { delete: msg.key });
+          db.stats.deletedMessages++;
+        } catch (delErr: any) {
+          console.error('[Individual Mute] Failed to delete spam sticker:', delErr.message);
+        }
+
+        // 2. Individual Restrict the user for durationMin (DO NOT LOCK THE GROUP)
+        restrictUser(
+          remoteJid,
+          groupSubject,
+          senderJid,
+          cleanPhone,
+          durationMin,
+          `${timeWindow} সেকেন্ডে ${limit}+ স্টিকার পাঠানো`
+        );
+
+        // 3. Send the exact required notification to the group
+        await safeSendMessage(sock, remoteJid, {
+          text: `⚠️ STICKER SPAM DETECTED!\nএকজন সদস্য অতিরিক্ত স্টিকার পাঠানোর কারণে ${durationMin} মিনিটের জন্য Restrict করা হয়েছে।`,
+          mentions: [senderJid],
+        });
+
+        return; // Finished handling spam sticker
+      }
+    }
+  } else if (!settings.individualMuteEnabled && settings.antiStickerSpam && isSticker) {
+    // Legacy fallback: only if Individual Mute is turned off but whole-group lock is desired
     const isSpam = recordStickerAndCheckSpam(remoteJid, senderJid);
     if (isSpam) {
-      console.log(`[Anti-Sticker Spam] Detected 3+ stickers in 5s by @${cleanPhone} in ${groupSubject}`);
+      console.log(`[Legacy Group Lock Anti-Sticker Spam] Detected 3+ stickers in 5s by @${cleanPhone} in ${groupSubject}`);
 
-      // Delete the spam sticker
       try {
         await sock.sendMessage(remoteJid, { delete: msg.key });
         db.stats.deletedMessages++;
@@ -611,15 +1025,12 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
         console.error('Failed to delete spam sticker:', err.message);
       }
 
-      // Lock group to Announcement Mode (Only Admins can send)
-      const lockDurationMs = 10 * 60 * 1000; // 10 minutes
+      const lockDurationMs = 10 * 60 * 1000;
       const lockedUntil = Date.now() + lockDurationMs;
 
-      let lockSuccess = false;
       if (isBotAdmin) {
         try {
           await sock.groupSettingUpdate(remoteJid, 'announcement');
-          lockSuccess = true;
           db.groupLocks[remoteJid] = {
             groupId: remoteJid,
             lockedUntil,
@@ -630,28 +1041,11 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
           saveDatabase();
 
           await sock.sendMessage(remoteJid, {
-            text: `⚠️ [WAGuard Anti-Sticker Spam Alert]\n🚫 সদস্য @${cleanPhone} কর্তৃক ৫ সেকেন্ডে অতিরিক্ত স্টিকার স্প্যাম শনাক্ত হয়েছে!\n🔒 পুরো গ্রুপটিকে ১০ মিনিটের জন্য Announcement Mode-এ লক করা হলো।\n⏰ শুধু অ্যাডমিন মেসেজ পাঠাতে পারবেন। ১০ মিনিট পর স্বয়ংক্রিয়ভাবে গ্রুপটি পুনরায় উন্মুক্ত হবে।`,
+            text: `⚠️ [WAGuard Anti-Sticker Spam Alert]\n🚫 সদস্য @${cleanPhone} কর্তৃক অতিরিক্ত স্টিকার স্প্যাম শনাক্ত হয়েছে!\n🔒 গ্রুপটিকে ১০ মিনিটের জন্য Announcement Mode-এ লক করা হলো।`,
             mentions: [senderJid],
           });
-
-          addActivityLog({
-            groupId: remoteJid,
-            groupName: groupSubject,
-            senderJid,
-            senderPhone: cleanPhone,
-            action: 'locked',
-            reason: '৫ সেকেন্ডে ৩+ স্টিকার স্প্যামের কারণে গ্রুপ ১০ মিনিট লক করা হয়েছে।',
-          });
-        } catch (err: any) {
-          console.error('Failed to lock group:', err.message);
-        }
-      } else {
-        await sock.sendMessage(remoteJid, {
-          text: `⚠️ [WAGuard Alert] @${cleanPhone} স্টিকার স্প্যাম করেছেন! তবে WAGuard বট অ্যাডমিন না থাকায় গ্রুপটি লক করা সম্ভব হয়নি। দয়া করে বটকে অ্যাডমিন পারমিশন দিন।`,
-          mentions: [senderJid],
-        });
+        } catch (err: any) {}
       }
-
       return;
     }
   }
@@ -662,45 +1056,50 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
   let violationType: string | null = null;
   let violationDetails = '';
 
-  // Feature 2: ANTI-STICKER
-  if (settings.antiSticker && isSticker) {
-    violationType = 'Anti-Sticker';
-    violationDetails = 'স্টিকার পাঠানো নিষিদ্ধ';
-  }
-  // Feature 4: ANTI-GIF
-  else if (settings.antiGif && isGif) {
-    violationType = 'Anti-GIF';
-    violationDetails = 'GIF এবং এনিমেটেড ভিডিও পাঠানো নিষিদ্ধ';
-  }
-  // Feature 5: ANTI-VIDEO
-  else if (settings.antiVideo && isVideo) {
-    violationType = 'Anti-Video';
-    violationDetails = 'ভিডিও পাঠানো নিষিদ্ধ';
-  }
-  // Feature 6: ANTI-IMAGE
-  else if (settings.antiImage && isImage) {
-    violationType = 'Anti-Image';
-    violationDetails = 'ছবি বা ফটো পাঠানো নিষিদ্ধ';
-  }
-  // Feature 7: ANTI-VIEW ONCE
-  else if (settings.antiViewOnce && isViewOnce) {
-    violationType = 'Anti-View Once';
-    violationDetails = 'View Once মিডিয়া পাঠানো নিষিদ্ধ';
-  }
-  // Feature 9: ANTI-LINK
-  else if (settings.antiLink && messageText) {
-    const linkCheck = checkLinkViolation(messageText);
-    if (linkCheck.isLink) {
-      violationType = 'Anti-Link';
-      violationDetails = `লিংক পাঠানো নিষিদ্ধ (${linkCheck.matchedLink})`;
+  // Feature 1: Admin Security Shield (Admins are never penalized)
+  const isProtectedAdmin = settings.adminShield && isSenderAdmin;
+
+  if (!isProtectedAdmin) {
+    // Feature 2: ANTI-STICKER
+    if (settings.antiSticker && isSticker) {
+      violationType = 'Anti-Sticker';
+      violationDetails = 'স্টিকার পাঠানো নিষিদ্ধ';
     }
-  }
-  // Feature 8: ADVANCED MULTILINGUAL ANTI-BADWORD
-  if (!violationType && settings.antiBadword && messageText) {
-    const badwordCheck = checkBadwordViolation(messageText, settings.customBadwords);
-    if (badwordCheck.isBad) {
-      violationType = 'Anti-Badword';
-      violationDetails = `অপমানজনক বা গালি শব্দ শনাক্ত হয়েছে (${badwordCheck.matchedWord})`;
+    // Feature 4: ANTI-GIF
+    else if (settings.antiGif && isGif) {
+      violationType = 'Anti-GIF';
+      violationDetails = 'GIF এবং এনিমেটেড ভিডিও পাঠানো নিষিদ্ধ';
+    }
+    // Feature 5: ANTI-VIDEO
+    else if (settings.antiVideo && isVideo) {
+      violationType = 'Anti-Video';
+      violationDetails = 'ভিডিও পাঠানো নিষিদ্ধ';
+    }
+    // Feature 6: ANTI-IMAGE
+    else if (settings.antiImage && isImage) {
+      violationType = 'Anti-Image';
+      violationDetails = 'ছবি বা ফটো পাঠানো নিষিদ্ধ';
+    }
+    // Feature 7: ANTI-VIEW ONCE
+    else if (settings.antiViewOnce && isViewOnce) {
+      violationType = 'Anti-View Once';
+      violationDetails = 'View Once মিডিয়া পাঠানো নিষিদ্ধ';
+    }
+    // Feature 9: ANTI-LINK
+    else if (settings.antiLink && messageText) {
+      const linkCheck = checkLinkViolation(messageText);
+      if (linkCheck.isLink) {
+        violationType = 'Anti-Link';
+        violationDetails = `লিংক পাঠানো নিষিদ্ধ (${linkCheck.matchedLink})`;
+      }
+    }
+    // Feature 8: ADVANCED MULTILINGUAL ANTI-BADWORD
+    if (!violationType && settings.antiBadword && messageText) {
+      const badwordCheck = checkBadwordViolation(messageText, settings.customBadwords);
+      if (badwordCheck.isBad) {
+        violationType = 'Anti-Badword';
+        violationDetails = `অপমানজনক বা গালি শব্দ শনাক্ত হয়েছে (${badwordCheck.matchedWord})`;
+      }
     }
   }
 
@@ -779,6 +1178,17 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
       if (settings.autoKick3Warnings) {
         // Force fresh metadata check from WhatsApp server to ensure admin status is up-to-date
         const freshPerms = await checkPermissions(sock, remoteJid, senderJid, true);
+        
+        // Under NO circumstances should any Group Admin ever be kicked by WAGuard
+        if (freshPerms.isSenderAdmin) {
+          console.warn(`[Kick Blocked] Target user @${cleanPhone} is a Group Admin in ${groupSubject}. Group Admins cannot be kicked.`);
+          await safeSendMessage(sock, remoteJid, {
+            text: `🛡️ [অ্যাডমিন সুরক্ষা Notice]\nসদস্য @${cleanPhone} ৩টি সতর্কতা অতিক্রম করেছেন। তবে তিনি একজন গ্রুপ অ্যাডমিন (Group Admin) হওয়ায় তাকে কিক (Kick) করা সম্ভব নয়।`,
+            mentions: [senderJid],
+          });
+          return;
+        }
+
         const canKick = freshPerms.isBotAdmin;
 
         if (canKick) {
@@ -860,9 +1270,9 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
   }
 
   // -------------------------------------------------------------
-  // MAYA AI PERSONALITY & AUTO-REPLY ENGINE
+  // MAYA AI PERSONALITY & GROUP AUTO-REPLY ENGINE
   // -------------------------------------------------------------
-  if (settings.botReply && settings.mayaAiEnabled && messageText) {
+  if (settings.botReply && settings.mayaAiEnabled && settings.mayaGroupReply && messageText) {
     const lower = messageText.toLowerCase();
     const botJid = sock.user?.id || '';
     const botLid = sock.user?.lid || '';
@@ -925,9 +1335,9 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
       
       try {
         const userName = msg.pushName || 'User';
-        const memoryKey = `${remoteJid}:${senderJid}`;
+        const memoryKey = `group:${remoteJid}`;
         
-        const aiResponse = await getMayaResponse(
+        const aiResult = await getMayaResponse(
           messageText,
           cleanPhone,
           userName,
@@ -937,30 +1347,47 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
             romantic: settings.mayaRomantic,
             funny: settings.mayaFunny,
             language: settings.mayaLanguage,
-            memoryLimit: settings.mayaMemoryLimit
+            memoryLimit: settings.mayaMemoryLimit,
+            aiProvider: settings.aiProvider,
+            geminiModel: settings.geminiModel,
+            geminiApiKey: settings.geminiApiKey,
+            groqApiKey: settings.groqApiKey,
+            openrouterApiKey: settings.openrouterApiKey,
+            isPrivate: false,
           }
         );
 
-        if (aiResponse) {
+        if (aiResult.reply) {
           lastAiReplyTime[remoteJid] = now;
 
-          await sock.sendMessage(remoteJid, {
-            text: aiResponse,
-            mentions: [senderJid],
-          }, { quoted: msg as any });
+          const sent = await safeSendMessage(
+            sock,
+            remoteJid,
+            {
+              text: aiResult.reply,
+              mentions: [senderJid],
+            },
+            { quoted: msg as any }
+          );
 
-          addActivityLog({
-            groupId: remoteJid,
-            groupName: groupSubject,
-            senderJid,
-            senderPhone: cleanPhone,
-            action: 'replied',
-            reason: isDirectMention || isDirectCall || isQuotingBot ? 'মায়া সরাসরি চ্যাট / নেম কল' : 'স্বয়ংক্রিয় গ্রুপ মেসেজ রিপ্লাই',
-            details: aiResponse.slice(0, 60),
-          });
+          if (sent) {
+            addActivityLog({
+              groupId: remoteJid,
+              groupName: groupSubject,
+              senderJid,
+              senderPhone: cleanPhone,
+              action: 'replied',
+              reason: isDirectMention || isDirectCall || isQuotingBot
+                ? `Group AI Direct [${aiResult.provider.toUpperCase()}]`
+                : `Group AI Chat [${aiResult.provider.toUpperCase()}]`,
+              details: aiResult.reply.slice(0, 60),
+            });
+
+            console.log(`[Maya AI Group SUCCESS] Replied in ${groupSubject} via ${aiResult.provider} in ${aiResult.latencyMs}ms`);
+          }
         }
       } catch (err: any) {
-        console.error('Failed to get Maya AI response:', err.message);
+        console.error('Failed to get Maya AI response in group:', err.message);
       }
     }
   }

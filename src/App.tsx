@@ -43,7 +43,23 @@ import {
   CalendarClock,
   Coins,
   Globe,
+  UserX,
+  VolumeX,
+  Clock,
 } from 'lucide-react';
+
+export interface RestrictedUser {
+  groupId: string;
+  groupName: string;
+  senderJid: string;
+  senderPhone: string;
+  restrictedAt: number;
+  expiresAt: number;
+  reason: string;
+  violationCount?: number;
+  remainingSeconds?: number;
+  remainingText?: string;
+}
 
 interface GroupItem {
   id: string;
@@ -78,8 +94,20 @@ interface ModerationSettings {
   autoKick3Warnings: boolean;
   botReply: boolean;
   customBadwords: string[];
+  // Individual Temporary Mute Settings
+  individualMuteEnabled: boolean;
+  individualMuteStickerLimit: number;
+  individualMuteTimeWindow: number;
+  individualMuteDurationMinutes: number;
   // Maya AI Settings
   mayaAiEnabled: boolean;
+  mayaPrivateReply: boolean;
+  mayaGroupReply: boolean;
+  aiProvider: 'gemini' | 'groq' | 'openrouter' | 'auto';
+  geminiModel?: string;
+  geminiApiKey?: string;
+  groqApiKey?: string;
+  openrouterApiKey?: string;
   mayaRomantic: boolean;
   mayaFunny: boolean;
   mayaAutoParticipate: boolean;
@@ -96,7 +124,7 @@ interface ActivityLog {
   groupName: string;
   senderJid: string;
   senderPhone: string;
-  action: 'deleted' | 'warned' | 'kicked' | 'locked' | 'unlocked' | 'error' | 'replied';
+  action: 'deleted' | 'warned' | 'kicked' | 'locked' | 'unlocked' | 'error' | 'replied' | 'restricted' | 'unmuted';
   reason: string;
   details?: string;
   warningCount?: number;
@@ -178,6 +206,22 @@ export default function App() {
 
     sec2Title: isBn ? '২. মিডিয়া ফিল্টার ও অ্যান্টি-স্প্যাম লক' : '2. Media Restrictions & Anti-Spam Lock',
     sec2Sub: isBn ? 'স্টিকার স্প্যাম, জিআইএফ, ভিডিও, ছবি ও ভিউ ওয়ান্স মডারেশন' : 'Sticker spam, GIF, video, photo & view-once moderation',
+    // Individual Temporary Mute Translations
+    indMuteCardTitle: isBn ? 'Individual Temporary Mute (ব্যক্তিগত সাময়িক মিউট)' : 'Individual Temporary Mute',
+    indMuteCardSub: isBn ? 'স্টিকার স্প্যামারকে পুরো গ্রুপ লক না করে নির্দিষ্ট সময়ের জন্য মেসেজ ইন্টারসেপ্ট ও অটো-ডিলিট' : 'Intercepts and auto-deletes messages of sticker spammers without locking the group.',
+    indMuteToggleTitle: isBn ? 'Individual Mute System (সদস্যের সাময়িক মিউট)' : 'Individual Mute System',
+    indMuteToggleDesc: isBn ? 'সদস্য নির্ধারিত সময়ের মধ্যে অতিরিক্ত স্টিকার পাঠালে পুরো গ্রুপ লক না করে শুধু ওই সদস্যকে সাময়িকভাবে রেস্ট্রিক্ট করবে।' : 'Restricts only the offending member instead of locking the entire group.',
+    stickerLimitLabel: isBn ? 'Sticker Spam Limit (স্টিকার সীমা)' : 'Sticker Spam Limit',
+    timeWindowLabel: isBn ? 'Detection Window (সময় সীমা - সেকেন্ড)' : 'Detection Window (seconds)',
+    durationMinutesLabel: isBn ? 'Restriction Duration (রেস্ট্রিকশন মেয়াদ - মিনিট)' : 'Restriction Duration (minutes)',
+    activeRestrictedTitle: isBn ? 'Active Restricted Users (সাময়িকভাবে রেস্ট্রিক্টেড সদস্যবৃন্দ)' : 'Active Restricted Users',
+    noRestrictedUsers: isBn ? 'বর্তমানে কোনো সদস্য রেস্ট্রিকশনে নেই। কোনো সদস্য স্টিকার স্প্যাম করলে তার তথ্য এখানে লাইভ দেখা যাবে।' : 'No members currently restricted. Violators will appear here in real time.',
+    unmuteBtn: isBn ? 'রেস্ট্রিকশন তুলুন' : 'Unmute',
+    unmutingText: isBn ? 'আনমিউট হচ্ছে...' : 'Unmuting...',
+    saveIndMuteBtn: isBn ? 'মিউট সেটিংস সেভ' : 'Save Mute Settings',
+    offlineNoteTitle: isBn ? 'টেকনিক্যাল রিকোয়ারমেন্ট ও সীমাবদ্ধতা' : 'Technical Requirements & Limitations',
+    offlineNoteDesc: isBn ? 'WhatsApp-এ কোনো নির্দিষ্ট সদস্যকে Native Mute করার অফিশিয়াল সুবিধা না থাকায় WAGuard বট মেসেজ ইন্টারসেপ্ট করে অটো-ডিলিট করার মাধ্যমে এই Individual Restriction নিশ্চিত করে। অন্য সদস্যরা সাধারণভাবেই মেসেজ করতে পারবে।' : 'WhatsApp has no native individual mute API. WAGuard enforces restriction via message interception and automatic deletion. Other members can chat normally.',
+    offlineWarningBadge: isBn ? '⚠️ বট অফলাইন: বট অফলাইনে থাকায় এই মেসেজ অটো-ডিলিট ও সাময়িক মিউট কার্যকর হতে পারবে না!' : '⚠️ Bot is offline: Message auto-delete cannot function while offline!',
     antiStickerSpamTitle: isBn ? 'Anti-Sticker Spam (১০ মিনিট গ্রুপ লক)' : 'Anti-Sticker Spam (Auto 10m Group Lock)',
     antiStickerSpamDesc: isBn ? '৫ সেকেন্ডে ৩টি বা বেশি Sticker পাঠালে মেসেজ ডিলিট ও পুরো গ্রুপ ১০ মিনিটের জন্য লক হবে।' : '3+ stickers in 5 seconds locks group for 10 minutes.',
     antiStickerTitle: isBn ? 'Anti-Sticker (সকল স্টিকার নিষিদ্ধ)' : 'Anti-Sticker (All Stickers)',
@@ -215,7 +259,12 @@ export default function App() {
     mayaCoreTitle: isBn ? 'Maya AI Core Configuration' : 'Maya AI Core Configuration',
     mayaCoreSub: isBn ? 'বট পারসোনালিটি ও রিপ্লাই ইঞ্জিন নিয়ন্ত্রণ' : 'Control bot personality & reply engine',
     mayaEngineTitle: isBn ? 'Maya AI Engine' : 'Maya AI Engine State',
-    mayaEngineDesc: isBn ? 'Gemini AI এর মাধ্যমে মায়ার স্মার্ট পারসোনালিটি সক্রিয় করুন।' : 'Enable Maya\'s smart AI personality via Gemini.',
+    mayaEngineDesc: isBn ? 'Gemini ও ক্লাউড এআই এর মাধ্যমে মায়ার স্মার্ট পারসোনালিটি সক্রিয় করুন।' : 'Enable Maya\'s smart real AI personality via Gemini & Groq.',
+    privateInboxAiTitle: isBn ? 'Private Inbox AI (ব্যক্তিগত ইনবক্স এআই)' : 'Private Inbox AI (1-on-1 Personal Chats)',
+    privateInboxAiDesc: isBn ? 'WhatsApp এর ব্যক্তিগত ইনবক্সে যেকেউ মেসেজ দিলে এআই মায়া সরাসরি মানুষের মতো উত্তর দেবে।' : 'Auto-replies dynamically to private individual WhatsApp chats.',
+    groupAiTitle: isBn ? 'Group AI (গ্রুপ মেসেজ এআই)' : 'Group AI (Community Messages)',
+    groupAiDesc: isBn ? 'গ্রুপে সদস্যদের কথোপকথনে এআই মায়া প্রাসঙ্গিকভাবে অংশ নিয়ে উত্তর দেবে।' : 'Auto-replies dynamically to group conversations.',
+    aiProviderLabel: isBn ? 'AI ব্রেইন ইঞ্জিন' : 'AI Brain Engine Provider',
     romanticTitle: isBn ? 'Romantic Mode (রোমান্টিক মোড)' : 'Romantic Mode',
     romanticDesc: isBn ? 'মায়াকে আরও রোমান্টিক, মিষ্টি ও যত্নশীল করে তুলুন। ❤️' : 'Make Maya sweet, caring, and romantic. ❤️',
     funnyTitle: isBn ? 'Funny & Mischievous (দুষ্টুমি ও হাসি-ঠাট্টা)' : 'Funny & Mischievous',
@@ -290,16 +339,28 @@ export default function App() {
     autoKick3Warnings: true,
     botReply: true,
     customBadwords: [],
+    individualMuteEnabled: true,
+    individualMuteStickerLimit: 3,
+    individualMuteTimeWindow: 5,
+    individualMuteDurationMinutes: 10,
     mayaAiEnabled: true,
+    mayaPrivateReply: true,
+    mayaGroupReply: true,
+    aiProvider: 'auto',
+    geminiApiKey: '',
+    groqApiKey: '',
+    openrouterApiKey: '',
     mayaRomantic: true,
     mayaFunny: true,
-    mayaAutoParticipate: false,
-    mayaReplyCooldown: 30,
-    mayaReplyFrequency: 15,
+    mayaAutoParticipate: true,
+    mayaReplyCooldown: 10,
+    mayaReplyFrequency: 100,
     mayaLanguage: 'auto',
-    mayaMemoryLimit: 10,
+    mayaMemoryLimit: 20,
   });
   const [customBadwordsText, setCustomBadwordsText] = useState('');
+  const [restrictedUsers, setRestrictedUsers] = useState<RestrictedUser[]>([]);
+  const [isUnmuting, setIsUnmuting] = useState<string | null>(null);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [isLogsLoading, setIsLogsLoading] = useState(false);
 
@@ -312,7 +373,13 @@ export default function App() {
 
   // Configuration settings
   const [geminiKey, setGeminiKey] = useState(localStorage.getItem('wg_gemini_key') || '');
-  const [geminiModel, setGeminiModel] = useState(localStorage.getItem('wg_gemini_model') || 'gemini-2.5-flash');
+  const [geminiModel, setGeminiModel] = useState(() => {
+    const saved = localStorage.getItem('wg_gemini_model');
+    if (!saved || saved === 'gemini-flash-latest' || saved.includes('1.5') || saved.includes('2.0') || saved.includes('2.5')) {
+      return 'gemini-3.1-flash-lite';
+    }
+    return saved;
+  });
   const [waToken, setWaToken] = useState(localStorage.getItem('wg_watoken') || '');
   const [phoneId, setPhoneId] = useState(localStorage.getItem('wg_phoneid') || '');
   const [wabaId, setWabaId] = useState(localStorage.getItem('wg_wabaid') || '');
@@ -356,7 +423,17 @@ export default function App() {
         credentials: 'include',
       });
       
-      const data = await res.json();
+      const rawText = await res.text();
+      let data: any = {};
+      try {
+        data = rawText ? JSON.parse(rawText) : {};
+      } catch {
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}: Static host or endpoint unavailable`);
+        }
+        return { success: false, raw: rawText };
+      }
+
       if (!res.ok) {
         throw new Error(data.error || `HTTP ${res.status}`);
       }
@@ -370,7 +447,13 @@ export default function App() {
           body: body ? JSON.stringify(body) : undefined,
           credentials: 'same-origin',
         });
-        const fallbackData = await fallbackRes.json();
+        const fallbackText = await fallbackRes.text();
+        let fallbackData: any = {};
+        try {
+          fallbackData = fallbackText ? JSON.parse(fallbackText) : {};
+        } catch {
+          throw new Error(`HTTP ${fallbackRes.status}`);
+        }
         if (!fallbackRes.ok) {
           throw new Error(fallbackData.error || `HTTP ${fallbackRes.status}`);
         }
@@ -403,6 +486,9 @@ export default function App() {
         setSettings(data.moderation.settings);
         setCustomBadwordsText((data.moderation.settings.customBadwords || []).join(', '));
       }
+      if (data.moderation?.restrictedUsers) {
+        setRestrictedUsers(data.moderation.restrictedUsers);
+      }
       await checkStatus();
     } catch {
       // non-blocking
@@ -412,22 +498,101 @@ export default function App() {
   const loadModerationData = async () => {
     setIsLogsLoading(true);
     try {
-      const [settingsRes, logsRes] = await Promise.all([
+      const [settingsRes, logsRes, restrictedRes] = await Promise.all([
         callApi('/api/moderation/settings'),
         callApi('/api/moderation/logs?limit=50'),
+        callApi('/api/moderation/restricted-users'),
       ]);
       if (settingsRes.settings) {
         setSettings(settingsRes.settings);
         setCustomBadwordsText((settingsRes.settings.customBadwords || []).join(', '));
+        if (settingsRes.settings.geminiApiKey) {
+          setGeminiKey(settingsRes.settings.geminiApiKey);
+          localStorage.setItem('wg_gemini_key', settingsRes.settings.geminiApiKey);
+        }
+        if (settingsRes.settings.geminiModel && settingsRes.settings.geminiModel !== 'gemini-flash-latest') {
+          setGeminiModel(settingsRes.settings.geminiModel);
+          localStorage.setItem('wg_gemini_model', settingsRes.settings.geminiModel);
+        }
+        if (settingsRes.settings.groqApiKey) {
+          setGroqKey(settingsRes.settings.groqApiKey);
+          localStorage.setItem('wg_groq_key', settingsRes.settings.groqApiKey);
+        }
+        if (settingsRes.settings.openrouterApiKey) {
+          setOpenrouterKey(settingsRes.settings.openrouterApiKey);
+          localStorage.setItem('wg_openrouter_key', settingsRes.settings.openrouterApiKey);
+        }
       }
       if (logsRes.logs) {
         setActivityLogs(logsRes.logs);
+      }
+      if (restrictedRes?.restrictedUsers) {
+        setRestrictedUsers(restrictedRes.restrictedUsers);
       }
       showNotification(isBn ? 'সেটিংস ও লগ প্রস্তুত' : 'Settings & Logs Synced');
     } catch (err: any) {
       showNotification((isBn ? 'ডাটা লোড ত্রুটি: ' : 'Failed to load data: ') + err.message);
     } finally {
       setIsLogsLoading(false);
+    }
+  };
+
+  // Real-time ticking for remaining restriction time
+  useEffect(() => {
+    if (restrictedUsers.length === 0) return;
+    const interval = setInterval(() => {
+      setRestrictedUsers((prev) =>
+        prev
+          .map((u) => {
+            const remSec = Math.max(0, Math.ceil((u.expiresAt - Date.now()) / 1000));
+            const mins = Math.floor(remSec / 60);
+            const secs = remSec % 60;
+            const remainingText = mins > 0 ? `${mins} মি. ${secs} সে.` : `${secs} সেকেন্ড`;
+            return {
+              ...u,
+              remainingSeconds: remSec,
+              remainingText,
+            };
+          })
+          .filter((u) => (u.remainingSeconds || 0) > 0)
+      );
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [restrictedUsers.length]);
+
+  const handleManualUnmute = async (groupId: string, senderJid: string) => {
+    setIsUnmuting(senderJid);
+    try {
+      const res = await callApi('/api/moderation/unmute', 'POST', { groupId, senderJid });
+      if (res.restrictedUsers) {
+        setRestrictedUsers(res.restrictedUsers);
+      } else {
+        setRestrictedUsers((prev) => prev.filter((u) => !(u.senderJid === senderJid && u.groupId === groupId)));
+      }
+      showNotification(res.message || (isBn ? 'সদস্যকে আনমিউট করা হয়েছে' : 'User unmuted successfully'));
+    } catch (err: any) {
+      showNotification((isBn ? 'আনমিউট ব্যর্থ: ' : 'Unmute failed: ') + err.message);
+    } finally {
+      setIsUnmuting(null);
+    }
+  };
+
+  const saveIndividualMuteSettings = async (
+    limit: number,
+    timeWindow: number,
+    durationMinutes: number
+  ) => {
+    const patch = {
+      individualMuteStickerLimit: Math.max(1, limit),
+      individualMuteTimeWindow: Math.max(1, timeWindow),
+      individualMuteDurationMinutes: Math.max(1, durationMinutes),
+    };
+    setSettings((prev) => ({ ...prev, ...patch }));
+    try {
+      await callApi('/api/moderation/settings', 'POST', patch);
+      showNotification(isBn ? 'Individual Mute সেটিংস সংরক্ষিত হয়েছে!' : 'Individual Mute settings saved!');
+    } catch (err: any) {
+      showNotification((isBn ? 'সংরক্ষণ ব্যর্থ: ' : 'Save failed: ') + err.message);
     }
   };
 
@@ -553,26 +718,34 @@ export default function App() {
     }
   };
 
-  const saveConfig = (type: string) => {
-    if (type === 'gemini') {
-      localStorage.setItem('wg_gemini_key', geminiKey);
-      localStorage.setItem('wg_gemini_model', geminiModel);
-      showNotification('Gemini Config Saved!');
-    } else if (type === 'groq') {
-      localStorage.setItem('wg_groq_key', groqKey);
-      showNotification('Groq API Key Saved!');
-    } else if (type === 'openrouter') {
-      localStorage.setItem('wg_openrouter_key', openrouterKey);
-      showNotification('OpenRouter API Key Saved!');
-    } else if (type === 'supabase') {
-      localStorage.setItem('wg_supabase_url', supabaseUrl);
-      localStorage.setItem('wg_supabase_key', supabaseKey);
-      showNotification('Supabase Credentials Saved!');
-    } else if (type === 'meta') {
-      localStorage.setItem('wg_watoken', waToken);
-      localStorage.setItem('wg_phoneid', phoneId);
-      localStorage.setItem('wg_wabaid', wabaId);
-      showNotification('Meta Config Saved!');
+  const saveConfig = async (type: string) => {
+    try {
+      if (type === 'gemini') {
+        const safeModel = geminiModel === 'gemini-flash-latest' ? 'gemini-3.1-flash-lite' : geminiModel;
+        localStorage.setItem('wg_gemini_key', geminiKey);
+        localStorage.setItem('wg_gemini_model', safeModel);
+        await callApi('/api/moderation/settings', 'POST', { geminiApiKey: geminiKey, geminiModel: safeModel });
+        showNotification(isBn ? 'Gemini এপিআই কি সার্ভারে সেভ হয়েছে!' : 'Gemini Config Saved to Backend!');
+      } else if (type === 'groq') {
+        localStorage.setItem('wg_groq_key', groqKey);
+        await callApi('/api/moderation/settings', 'POST', { groqApiKey: groqKey });
+        showNotification(isBn ? 'Groq এপিআই কি সার্ভারে সেভ হয়েছে!' : 'Groq API Key Saved to Backend!');
+      } else if (type === 'openrouter') {
+        localStorage.setItem('wg_openrouter_key', openrouterKey);
+        await callApi('/api/moderation/settings', 'POST', { openrouterApiKey: openrouterKey });
+        showNotification(isBn ? 'OpenRouter এপিআই কি সার্ভারে সেভ হয়েছে!' : 'OpenRouter API Key Saved to Backend!');
+      } else if (type === 'supabase') {
+        localStorage.setItem('wg_supabase_url', supabaseUrl);
+        localStorage.setItem('wg_supabase_key', supabaseKey);
+        showNotification('Supabase Credentials Saved!');
+      } else if (type === 'meta') {
+        localStorage.setItem('wg_watoken', waToken);
+        localStorage.setItem('wg_phoneid', phoneId);
+        localStorage.setItem('wg_wabaid', wabaId);
+        showNotification('Meta Config Saved!');
+      }
+    } catch (err: any) {
+      showNotification((isBn ? 'সেভ ব্যর্থ: ' : 'Save failed: ') + err.message);
     }
   };
 
@@ -585,16 +758,24 @@ export default function App() {
        try {
          const res = await callApi('/api/maya/test', 'POST', { 
            text: testInput,
-           settings: settings
+           settings: {
+             ...settings,
+             geminiModel: geminiModel === 'gemini-flash-latest' ? 'gemini-3.1-flash-lite' : geminiModel,
+             geminiApiKey: geminiKey,
+             groqApiKey: groqKey,
+             openrouterApiKey: openrouterKey,
+           }
          });
          
          const hintEl = testInputEl.parentElement?.nextElementSibling;
          if (hintEl) {
-            hintEl.innerHTML = `<b>Maya:</b> ${res.reply}`;
+            const providerTag = res.provider ? ` [${res.provider.toUpperCase()} - ${res.latencyMs || 0}ms]` : '';
+            const errorInfo = (res.provider === 'fallback' || res.provider === 'none') && res.error ? `<div class="mt-1 text-[9px] text-rose-500 font-mono">Debug: ${res.error}</div>` : '';
+            hintEl.innerHTML = `<div><b>Maya${providerTag}:</b> ${res.reply}</div>${errorInfo}`;
             hintEl.classList.remove('italic', 'text-gray-600');
             hintEl.classList.add('text-emerald-800');
          }
-         showNotification(isBn ? 'মায়া উত্তর দিয়েছে!' : 'Maya replied!');
+         showNotification(isBn ? `মায়া উত্তর দিয়েছে! (${res.provider || 'AI'})` : `Maya replied! (${res.provider || 'AI'})`);
          testInputEl.value = '';
        } catch (err: any) {
          showNotification('Maya Test Error: ' + err.message);
@@ -975,6 +1156,234 @@ export default function App() {
                 </div>
               </div>
 
+              {/* INDIVIDUAL TEMPORARY MUTE CARD (AUTO-DELETE INTERCEPTION) */}
+              <div className="card">
+                <div className="card-head">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3>{t.indMuteCardTitle}</h3>
+                      <span className="badge badge-purple text-[10px]">ANTI-SPAM MUTE</span>
+                    </div>
+                    <p>{t.indMuteCardSub}</p>
+                  </div>
+                  <div className="symbol sp">
+                    <UserX size={16} />
+                  </div>
+                </div>
+
+                {/* Individual Mute Toggle */}
+                <div className="toggle-row">
+                  <div className="toggle-info">
+                    <h4>
+                      {t.indMuteToggleTitle}
+                      <span className={`badge ${settings.individualMuteEnabled ? 'badge-green' : 'badge-amber'}`}>
+                        {settings.individualMuteEnabled ? 'ACTIVE' : 'OFF'}
+                      </span>
+                    </h4>
+                    <p>{t.indMuteToggleDesc}</p>
+                  </div>
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.individualMuteEnabled}
+                      onChange={(e) => updateSettingToggle('individualMuteEnabled', e.target.checked)}
+                    />
+                    <span className="slider"></span>
+                  </label>
+                </div>
+
+                {/* Technical Requirements & Limitation Note */}
+                <div className="mt-3 p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-xs">
+                  <div className="flex items-start gap-2 text-indigo-300">
+                    <Sparkles size={14} className="mt-0.5 shrink-0 text-indigo-400" />
+                    <div>
+                      <span className="font-semibold block text-indigo-200">{t.offlineNoteTitle}</span>
+                      <p className="text-gray-300 mt-0.5 text-[11px] leading-relaxed">
+                        {t.offlineNoteDesc}
+                      </p>
+                      {!liveStatus.online && (
+                        <div className="mt-2 py-1 px-2 rounded bg-amber-500/20 border border-amber-500/30 text-amber-300 font-semibold text-[11px] flex items-center gap-1.5">
+                          <AlertTriangle size={12} className="shrink-0" />
+                          <span>{t.offlineWarningBadge}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Settings Inputs: Limit, Window, Duration */}
+                {settings.individualMuteEnabled && (
+                  <div className="mt-4 pt-4 border-t border-white/5">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="form-group mb-0">
+                        <label className="text-xs font-semibold text-gray-300 flex items-center justify-between">
+                          <span>{t.stickerLimitLabel}</span>
+                          <span className="text-[10px] text-indigo-400 font-mono">Count</span>
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={30}
+                          className="field mt-1 w-full"
+                          value={settings.individualMuteStickerLimit || 3}
+                          onChange={(e) =>
+                            setSettings((prev) => ({
+                              ...prev,
+                              individualMuteStickerLimit: parseInt(e.target.value, 10) || 1,
+                            }))
+                          }
+                        />
+                        <span className="text-[10px] text-gray-500 block mt-1">Default: 3 Stickers</span>
+                      </div>
+
+                      <div className="form-group mb-0">
+                        <label className="text-xs font-semibold text-gray-300 flex items-center justify-between">
+                          <span>{t.timeWindowLabel}</span>
+                          <span className="text-[10px] text-indigo-400 font-mono">Seconds</span>
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={120}
+                          className="field mt-1 w-full"
+                          value={settings.individualMuteTimeWindow || 5}
+                          onChange={(e) =>
+                            setSettings((prev) => ({
+                              ...prev,
+                              individualMuteTimeWindow: parseInt(e.target.value, 10) || 1,
+                            }))
+                          }
+                        />
+                        <span className="text-[10px] text-gray-500 block mt-1">Default: 5 Seconds</span>
+                      </div>
+
+                      <div className="form-group mb-0">
+                        <label className="text-xs font-semibold text-gray-300 flex items-center justify-between">
+                          <span>{t.durationMinutesLabel}</span>
+                          <span className="text-[10px] text-indigo-400 font-mono">Minutes</span>
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={1440}
+                          className="field mt-1 w-full"
+                          value={settings.individualMuteDurationMinutes || 10}
+                          onChange={(e) =>
+                            setSettings((prev) => ({
+                              ...prev,
+                              individualMuteDurationMinutes: parseInt(e.target.value, 10) || 1,
+                            }))
+                          }
+                        />
+                        <span className="text-[10px] text-gray-500 block mt-1">Default: 10 Minutes</span>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        className="btn primary text-xs py-1.5 px-3 flex items-center gap-1.5"
+                        onClick={() =>
+                          saveIndividualMuteSettings(
+                            settings.individualMuteStickerLimit || 3,
+                            settings.individualMuteTimeWindow || 5,
+                            settings.individualMuteDurationMinutes || 10
+                          )
+                        }
+                      >
+                        <Save size={12} />
+                        <span>{t.saveIndMuteBtn}</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Active Restricted Users Table & Live Countdown */}
+                <div className="mt-5 pt-4 border-t border-white/5">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-sm font-semibold text-gray-200 flex items-center gap-2">
+                      <Clock size={14} className="text-amber-400" />
+                      <span>{t.activeRestrictedTitle}</span>
+                      <span className={`badge ${restrictedUsers.length > 0 ? 'badge-red' : 'badge-green'}`}>
+                        {restrictedUsers.length} Active
+                      </span>
+                    </h4>
+                    <button
+                      className="btn outline text-xs py-1 px-2"
+                      onClick={async () => {
+                        const res = await callApi('/api/moderation/restricted-users');
+                        if (res?.restrictedUsers) setRestrictedUsers(res.restrictedUsers);
+                      }}
+                    >
+                      <RefreshCw size={11} /> Refresh
+                    </button>
+                  </div>
+
+                  <div className="tablewrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>MEMBER (SENDER)</th>
+                          <th>GROUP</th>
+                          <th>REMAINING TIME</th>
+                          <th>REASON</th>
+                          <th>ACTION</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {restrictedUsers.length > 0 ? (
+                          restrictedUsers.map((user) => (
+                            <tr key={`${user.groupId}:${user.senderJid}`}>
+                              <td>
+                                <span className="font-mono text-xs font-semibold text-rose-400">
+                                  @{user.senderPhone}
+                                </span>
+                              </td>
+                              <td>
+                                <span className="text-xs text-gray-300 font-medium">{user.groupName}</span>
+                              </td>
+                              <td>
+                                <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-amber-300">
+                                  <Clock size={12} className="animate-pulse text-amber-400" />
+                                  <span>{user.remainingText || `${user.remainingSeconds}s`}</span>
+                                </div>
+                              </td>
+                              <td>
+                                <span className="text-xs text-gray-400">{user.reason}</span>
+                              </td>
+                              <td>
+                                <button
+                                  className="btn danger text-xs py-1 px-2.5 flex items-center gap-1"
+                                  disabled={isUnmuting === user.senderJid}
+                                  onClick={() => handleManualUnmute(user.groupId, user.senderJid)}
+                                >
+                                  {isUnmuting === user.senderJid ? (
+                                    <>
+                                      <RefreshCw size={11} className="animate-spin" />
+                                      <span>{t.unmutingText}</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <VolumeX size={11} />
+                                      <span>{t.unmuteBtn}</span>
+                                    </>
+                                  )}
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={5} className="empty text-center py-4 text-xs text-gray-400">
+                              {t.noRestrictedUsers}
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
               {/* SECTION 2: SPAM & MEDIA RESTRICTIONS */}
               <div className="card">
                 <div className="card-head">
@@ -1256,7 +1665,7 @@ export default function App() {
                             <td>
                               <span
                                 className={`badge ${
-                                  log.action === 'kicked'
+                                  log.action === 'kicked' || log.action === 'restricted'
                                     ? 'badge-red'
                                     : log.action === 'locked'
                                     ? 'badge-amber'
@@ -1266,6 +1675,8 @@ export default function App() {
                                     ? 'badge-red'
                                     : log.action === 'replied'
                                     ? 'badge-blue'
+                                    : log.action === 'unmuted'
+                                    ? 'badge-green'
                                     : 'badge-green'
                                 }`}
                               >
@@ -1320,6 +1731,7 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Master AI Engine Switch */}
                   <div className="toggle-row">
                     <div className="toggle-info">
                       <h4>{t.mayaEngineTitle} <span className={`badge ${settings.mayaAiEnabled ? 'badge-green' : 'badge-amber'}`}>{settings.mayaAiEnabled ? 'ACTIVE' : 'OFF'}</span></h4>
@@ -1330,6 +1742,38 @@ export default function App() {
                         type="checkbox"
                         checked={settings.mayaAiEnabled}
                         onChange={(e) => updateSettingToggle('mayaAiEnabled', e.target.checked)}
+                      />
+                      <span className="slider"></span>
+                    </label>
+                  </div>
+
+                  {/* Private Inbox AI Toggle */}
+                  <div className="toggle-row">
+                    <div className="toggle-info">
+                      <h4>{t.privateInboxAiTitle} <span className={`badge ${settings.mayaPrivateReply ? 'badge-green' : 'badge-amber'}`}>{settings.mayaPrivateReply ? 'ACTIVE' : 'OFF'}</span></h4>
+                      <p>{t.privateInboxAiDesc}</p>
+                    </div>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={settings.mayaPrivateReply}
+                        onChange={(e) => updateSettingToggle('mayaPrivateReply', e.target.checked)}
+                      />
+                      <span className="slider"></span>
+                    </label>
+                  </div>
+
+                  {/* Group AI Toggle */}
+                  <div className="toggle-row">
+                    <div className="toggle-info">
+                      <h4>{t.groupAiTitle} <span className={`badge ${settings.mayaGroupReply ? 'badge-green' : 'badge-amber'}`}>{settings.mayaGroupReply ? 'ACTIVE' : 'OFF'}</span></h4>
+                      <p>{t.groupAiDesc}</p>
+                    </div>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={settings.mayaGroupReply}
+                        onChange={(e) => updateSettingToggle('mayaGroupReply', e.target.checked)}
                       />
                       <span className="slider"></span>
                     </label>
@@ -1390,6 +1834,21 @@ export default function App() {
                     <div className="symbol so">
                       <CalendarClock size={16} />
                     </div>
+                  </div>
+
+                  {/* AI Provider Selector */}
+                  <div className="form-group">
+                    <label>{t.aiProviderLabel}</label>
+                    <select
+                      className="field font-medium"
+                      value={settings.aiProvider || 'auto'}
+                      onChange={(e) => updateSettingToggle('aiProvider', e.target.value)}
+                    >
+                      <option value="auto">Auto (Gemini &rarr; Groq &rarr; OpenRouter Fallback)</option>
+                      <option value="gemini">Google Gemini AI (Official Primary)</option>
+                      <option value="groq">Groq Cloud AI (High-Speed Llama 3.3)</option>
+                      <option value="openrouter">OpenRouter AI (Multi-Model Gateway)</option>
+                    </select>
                   </div>
 
                   <div className="form-group">
@@ -1761,8 +2220,8 @@ export default function App() {
                     value={geminiModel}
                     onChange={(e) => setGeminiModel(e.target.value)}
                   >
-                    <option value="gemini-2.5-flash">Gemini 2.5 Flash (Fast & Stable)</option>
-                    <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                    <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (High Quota & Ultra Fast - Recommended)</option>
+                    <option value="gemini-3.8-flash">Gemini 3.8 Flash (High Intelligence - 20 RPD Free)</option>
                   </select>
                 </div>
                 <div className="form-actions">
@@ -1927,25 +2386,38 @@ export default function App() {
               </div>
 
               {/* GitHub Pages Deployment Card */}
-              <div className="card border border-emerald-200 bg-emerald-50/60">
+              <div className="card border border-emerald-300 bg-emerald-50/70">
                 <div className="card-head">
                   <div>
-                    <h3 className="text-emerald-950 font-bold">GitHub Pages Deployment (Blank Screen Fixed)</h3>
-                    <p className="text-emerald-800 text-xs">গিটহাব পেজেসে ডিপ্লয় করলে হোয়াইট পেজ আসার সমস্যার সমাধান</p>
+                    <h3 className="text-emerald-950 font-bold">GitHub Pages Deployment (Blank Screen 100% Fixed)</h3>
+                    <p className="text-emerald-800 text-xs">গিটহাব পেজেসে ডিপ্লয় করলে কোনো হোয়াইট/ব্ল্যাঙ্ক পেজ আসবে না</p>
                   </div>
                   <div className="symbol sg">
                     <CheckCircle2 size={16} />
                   </div>
                 </div>
-                <div className="text-xs text-emerald-950 leading-relaxed space-y-2">
-                  <p>
-                    <b>✅ Relative Asset Base Path:</b> <code>vite.config.ts</code> এ <code>base: &#39;./&#39;</code> কনফিগার করা হয়েছে।
+                <div className="text-xs text-emerald-950 leading-relaxed space-y-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                    <div className="p-2 bg-white rounded-lg border border-emerald-200">
+                      <b>✅ 1. Relative Asset Path:</b> <code>base: &#39;./&#39;</code> কনফিগার করা হয়েছে।
+                    </div>
+                    <div className="p-2 bg-white rounded-lg border border-emerald-200">
+                      <b>✅ 2. Trailing Slash Enforcer:</b> <code>index.html</code> এ স্বয়ংক্রিয় রিডাইরেক্ট কোড যুক্ত।
+                    </div>
+                    <div className="p-2 bg-white rounded-lg border border-emerald-200">
+                      <b>✅ 3. Jekyll Bypass:</b> <code>.nojekyll</code> ফাইল যুক্ত যাতে কোনো ফাইল মিসিং না হয়।
+                    </div>
+                    <div className="p-2 bg-white rounded-lg border border-emerald-200">
+                      <b>✅ 4. SPA 404 Routing:</b> <code>404.html</code> দেওয়া হয়েছে যাতে রিফ্রেশে পেজ না হারায়।
+                    </div>
+                  </div>
+
+                  <p className="pt-1">
+                    <b>💡 গুরুত্বপূর্ণ নোট:</b> GitHub Pages শুধুমাত্র ফ্রন্টএন্ড স্ট্যাটিক ফাইল হোস্ট করে। লাইভ WhatsApp সকেট (Baileys) ও মায়া AI ২৪/৭ সচল রাখতে প্রজেক্টটির ব্যাকএন্ড Render/Railway/VPS-এ চালিয়ে উপরের <b>Baileys Socket Server URL</b> বক্সে আপনার সার্ভার লিঙ্ক সেভ করুন।
                   </p>
-                  <p>
-                    এখন প্রজেক্টটি GitHub Pages (e.g. <code>username.github.io/repo-name/</code>) এ ডিপ্লয় করলে কোনো ব্ল্যাঙ্ক বা ফাঁকা সাদা পেজ আসবে না।
-                  </p>
+
                   <div className="p-2.5 bg-white rounded-lg border border-emerald-200 font-mono text-[11px] text-gray-800">
-                    npm run build &nbsp;&nbsp;&mdash; Generates GitHub Pages ready build with relative assets
+                    npm run build &nbsp;&nbsp;&mdash; Generates GitHub Pages ready build in <b>dist/</b>
                   </div>
                 </div>
               </div>

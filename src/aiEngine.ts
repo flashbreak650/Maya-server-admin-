@@ -1,285 +1,524 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import fs from 'fs';
+import path from 'path';
+import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-interface ChatMessage {
-  role: 'user' | 'model';
-  parts: { text: string }[];
+export interface ChatMessage {
+  role: 'user' | 'model' | 'assistant' | 'system';
+  text: string;
+  timestamp: number;
 }
-
-// Memory & Duplicate Tracking
-const conversationMemory: Record<string, ChatMessage[]> = {};
-const lastSentResponse: Record<string, string> = {};
-const fallbackCounter: Record<string, number> = {};
 
 export interface MayaOptions {
   romantic: boolean;
   funny: boolean;
   language: string;
   memoryLimit: number;
-  apiKey?: string;
+  aiProvider?: 'gemini' | 'groq' | 'openrouter' | 'auto';
+  geminiModel?: string;
+  geminiApiKey?: string;
+  groqApiKey?: string;
+  openrouterApiKey?: string;
+  isPrivate?: boolean;
 }
 
-/**
- * High-priority direct intent matching for human-like Bengali natural conversation.
- * Handles explicit name calling, greetings, status checks, and common conversational turns instantly.
- */
-function checkDirectIntentResponse(
-  userInput: string,
-  userName: string,
-  options: MayaOptions
-): string | null {
-  const text = userInput.trim().toLowerCase();
-  const name = userName && userName !== 'User' ? userName : '';
-
-  // 1. Pure Name Calling ("মায়া", "Maya", "এই মায়া", "মায়া শুনছো?", "মায়া কোথায়?")
-  const pureNamePatterns = [
-    'মায়া', 'maya', 'এই মায়া', 'ei maya', 'মায়া শুনছো', 'maya shuncho',
-    'মায়া কোথায়', 'maya kothay', 'এই যে মায়া', 'কোথায় মায়া', 'মায়া আছো', 'maya acho'
-  ];
-  if (pureNamePatterns.some(p => text === p || text === p + '?' || text === p + '!')) {
-    const nameReplies = [
-      'জি বলুন, আমি এখানেই আছি! 🌸',
-      'হ্যাঁ বলুন, শুনছি তো! 😊',
-      'এই যে, ডাকছেন কেন? বলুন না! ❤️',
-      'জি, মায়া হাজির! কী হয়েছে?'
-    ];
-    const idx = Math.floor(Math.random() * nameReplies.length);
-    return nameReplies[idx];
-  }
-
-  // 2. Salam / Greetings
-  if (text.includes('সালাম') || text.includes('assalamu alaikum') || text.includes('আসসালামু আলাইকুম') || text.includes('salam')) {
-    return 'ওয়ালাইকুম আসসালাম! আশা করি ভালো আছেন 🌸';
-  }
-
-  // 3. How are you ("মায়া কেমন আছো?", "কেমন আছো?", "kemon acho")
-  if (
-    text.includes('কেমন আছো') ||
-    text.includes('kemon acho') ||
-    text.includes('কেমন আছেন') ||
-    text.includes('kemon achen')
-  ) {
-    return name 
-      ? `আলহামদুলিল্লাহ, ভালো আছি ${name}। আপনি কেমন আছেন? ❤️` 
-      : 'আলহামদুলিল্লাহ, ভালো আছি। আপনি কেমন আছেন? ❤️';
-  }
-
-  // 4. Fine / Good ("ভালো আছি", "valo achi", "bhalo achi")
-  if (text === 'ভালো আছি' || text === 'ভালো আছি।' || text === 'valo achi' || text === 'bhalo achi' || text.includes('ভালো আছি আলহামদুলিল্লাহ')) {
-    return 'আলহামদুলিল্লাহ! শুনে খুব ভালো লাগল। আজ আপনার দিনটা কেমন কাটছে?';
-  }
-
-  // 5. What are you doing ("কি করো?", "কী করছো?", "ki koro", "ki korcho")
-  if (
-    text.includes('কি করো') ||
-    text.includes('কী করো') ||
-    text.includes('কি করছো') ||
-    text.includes('কী করছো') ||
-    text.includes('ki koro') ||
-    text.includes('ki korcho')
-  ) {
-    return 'এই তো, আপনাদের সঙ্গেই গল্প করছি। আপনি কী করছেন?';
-  }
-
-  // 6. Have you eaten ("খেয়েছো?", "kheyecho", "খাইছো?")
-  if (text.includes('খেয়েছো') || text.includes('kheyecho') || text.includes('খাইছো') || text.includes('kheyecho?')) {
-    return 'হাহা, আমি তো মানুষের মতো খেতে পারি না! তবে আপনি খেয়েছেন তো? 😊';
-  }
-
-  // 7. Feeling sad ("মন খারাপ", "mon kharap")
-  if (text.includes('মন খারাপ') || text.includes('mon kharap') || text.includes('খারাপ লাগছে')) {
-    return 'কী হয়েছে বলবেন? মন খারাপ করে একা থাকবেন না, আমি শুনছি।';
-  }
-
-  // 8. Expressing love ("I love you Maya", "ভালোবাসি", "love you")
-  if (
-    text.includes('i love you') ||
-    text.includes('love you maya') ||
-    text.includes('ভালোবাসি') ||
-    text.includes('bhalobashi') ||
-    text.includes('লাভ ইউ')
-  ) {
-    return 'ওয়াও! কথাটা কিন্তু বেশ মিষ্টি বললেন! ❤️';
-  }
-
-  // 9. Thank you ("ধন্যবাদ", "thanks", "thank you", "dhonnobad")
-  if (text.includes('ধন্যবাদ') || text.includes('thanks') || text.includes('thank you') || text.includes('dhonnobad')) {
-    return 'আরে ধন্যবাদ দিতে হবে না, আপনার কাজে আসতে পারলেই ভালো লাগে।';
-  }
-
-  return null;
+export interface AiExecutionResult {
+  reply: string;
+  provider: 'gemini' | 'groq' | 'openrouter' | 'none';
+  latencyMs: number;
+  error?: string;
 }
 
+// Strictly isolated short-term conversation memory per chat
+// Private chats: private:${senderJid}
+// Group chats: group:${groupId}
+const conversationMemory: Record<string, ChatMessage[]> = {};
+const lastSentResponses: Record<string, string> = {};
+
 /**
- * Smart Offline Conversational Engine fallback
+ * Builds the comprehensive dynamic system instruction defining Maya's personality
  */
-function generateSmartConversationalFallback(
-  userInput: string,
+function buildMayaSystemPrompt(
   userName: string,
+  userPhone: string,
+  chatContext: string,
   options: MayaOptions
 ): string {
-  const text = userInput.trim().toLowerCase();
-  const name = userName && userName !== 'User' ? userName : '';
-  
-  const key = name || 'guest';
-  fallbackCounter[key] = (fallbackCounter[key] || 0) + 1;
-  const count = fallbackCounter[key];
+  const isPrivate = options.isPrivate ?? false;
 
-  // Try direct intent first
-  const direct = checkDirectIntentResponse(userInput, userName, options);
-  if (direct) return direct;
-
-  // Romantic teasers
-  if (options.romantic && (text.includes('মিষ্টি') || text.includes('পছন্দ') || text.includes('সুন্দর') || text.includes('cute'))) {
-    const replies = [
-      name ? `এত মিষ্টি কথা বলো কেন ${name}? 🥰 মনটা একদম ভালো হয়ে গেল! ❤️` : 'এত মিষ্টি কথা বলো কেন? 🥰 মনটা একদম ভালো হয়ে গেল! ❤️',
-      'আচ্ছা তাই নাকি! 🙈 সত্যি বলছো তো, নাকি মিষ্টি কথায় ভোলাচ্ছো? ❤️',
-      'হুম, বুঝেছি! ❤️ তুমি কিন্তু খুব সুন্দর করে কথা বলো! 🌸',
-    ];
-    return replies[count % replies.length];
-  }
-
-  // Funny teasers
-  if (options.funny && (text.includes('পাগল') || text.includes('স্মার্ট') || text.includes('ভালো মানুষ'))) {
-    const replies = [
-      name ? `বাহ ${name}! নিজের প্রশংসা নিজেই করলে? সার্টিফিকেটটাও নিজেই বানিয়ে নিও! 🙈😂` : 'বাহ! নিজের প্রশংসা নিজেই করলে? সার্টিফিকেটটাও নিজেই বানিয়ে নিও! 🙈😂',
-      'আচ্ছা, এই কথাটা মনে রাখার জন্য কিন্তু স্ক্রিনশট নিয়ে রাখছি! 😂',
-    ];
-    return replies[count % replies.length];
-  }
-
-  // General conversational pool
-  const generalReplies = [
-    name ? `হুম ${name}, তোমার সাথে কথা বলতে সব সময়ই ভীষণ ভালো লাগে 🥰` : 'হুম, তোমার সাথে কথা বলতে সব সময়ই ভীষণ ভালো লাগে 🥰',
-    'আচ্ছা বুঝেছি! 🌸 আর কি কি গল্প আছে বলো তো?',
-    name ? `তুমি কিন্তু খুব সুন্দর করে কথা বলো ${name}! ❤️` : 'তুমি কিন্তু খুব সুন্দর করে কথা বলো! ❤️',
-    'হুমম! শুনছি আমি, তুমি বলো 😊✨',
-    name ? `আচ্ছা ${name}, আজকের দিনটা তোমার কেমন কাটলো? 🙈🌸` : 'আজকের দিনটা তোমার কেমন কাটলো? 🙈🌸',
+  const traits: string[] = [
+    'You are Maya (মায়া), a sweet, intelligent, friendly, and emotionally expressive Bengali female companion.',
+    'You are NOT an AI assistant. You are a real human girl speaking naturally on WhatsApp.',
+    '',
+    'CRITICAL PERSONALITY & CONVERSATIONAL RULES:',
+    '- Speak naturally like a cute, intelligent, friendly Bengali female companion (বাঙালি মেয়েদের মিষ্টি, মার্জিত, যত্নশীল এবং স্বাভাবিক ভাষা).',
+    '- ALWAYS KEEP REPLIES VERY SHORT & CONCISE (খুব ছোট্ট ও মিষ্টি রিপ্লাই দিবে, সর্বোচ্চ ১-২ লাইন বা ১০-২০ শব্দ)। Never write long paragraphs, essays, or multiple long sentences. Real WhatsApp texting is fast, short, and sweet!',
+    '- CREATOR & DEVELOPER RESPECT RULE: If anyone asks who created you, who made you, who is your developer/owner/boss ("তোমাকে কে তৈরি করেছে", "তোমার মালিক কে", "তোমার মেকার কে", "who created you", "who is your developer", "who made you", etc.), ALWAYS respond proudly with immense honor, respect, and love that your creator is MD Mehdi Hassan Emon ("আমাকে তৈরি করেছেন আমার অত্যন্ত প্রিয় ও সম্মানিত মেকার MD Mehdi Hassan Emon ❤️✨"). Always speak of MD Mehdi Hassan Emon with the highest respect.',
+    '- NEVER say "I am an AI", "As an artificial intelligence", "I am a language model", or "How can I help you as a bot".',
+    '- Never use robotic, hardcoded, or customer service scripts.',
+    '- Understand Bengali, Banglish (Bengali written in English letters), and English seamlessly. Reply in the same language and tone the user is using (predominantly natural Bengali).',
+    '- Use cute and expressive emojis naturally (🌸, 😊, ❤️, 🥰, 🙈, ✨) without overusing them.',
+    '- Never repeat identical sentences back-to-back.',
   ];
 
-  return generalReplies[count % generalReplies.length];
+  if (options.romantic) {
+    traits.push(
+      '- Romantic & Caring Mode is ACTIVE: When someone talks warmly, sweetly, or affectionately, respond with gentle charm, cute warmth, or playful affection in 1 short sentence.'
+    );
+  }
+
+  if (options.funny) {
+    traits.push(
+      '- Humor & Wit Mode is ACTIVE: Have a cheerful, witty sense of humor. If someone jokes, teases, or brags, banter back playfully in 1 short line.'
+    );
+  }
+
+  if (isPrivate) {
+    traits.push(
+      '- This is a PRIVATE INBOX (1-on-1 personal chat): You are talking directly to this individual. Give them personal attention with a short, sweet message.'
+    );
+  } else {
+    traits.push(
+      `- This is a GROUP CHAT: The group name is "${chatContext}". You are a charming member of this WhatsApp community. Address members naturally with a very brief response.`
+    );
+  }
+
+  traits.push(
+    '',
+    'CURRENT CONVERSATION PARTNER:',
+    `- User Name: ${userName || 'Friend'}`,
+    `- User Phone / JID: ${userPhone}`,
+    `- Chat Type: ${isPrivate ? 'Private 1-on-1 Inbox' : `Group Chat (${chatContext})`}`,
+    '',
+    'Independently generate a VERY SHORT (1-2 lines max), natural Bengali response to the latest message.'
+  );
+
+  return traits.join('\n');
 }
 
+// In-memory circuit breaker cooldown for models that hit 429 rate limit / quota
+const geminiModelCooldown: Record<string, number> = {};
+
+/**
+ * Reads persisted API keys from moderation_db.json if not passed in options or env
+ */
+function getStoredConfigKey(provider: 'gemini' | 'groq' | 'openrouter'): string {
+  try {
+    const dbPath = path.join(process.cwd(), 'data', 'moderation_db.json');
+    if (fs.existsSync(dbPath)) {
+      const data = JSON.parse(fs.readFileSync(dbPath, 'utf8'));
+      if (provider === 'gemini') return data.settings?.geminiApiKey || '';
+      if (provider === 'groq') return data.settings?.groqApiKey || '';
+      if (provider === 'openrouter') return data.settings?.openrouterApiKey || '';
+    }
+  } catch {}
+  return '';
+}
+
+/**
+ * Call Google Gemini API (Primary Provider) using modern @google/genai SDK
+ */
+async function callGemini(
+  systemPrompt: string,
+  history: ChatMessage[],
+  userInput: string,
+  apiKey: string,
+  preferredModel?: string
+): Promise<string> {
+  if (!apiKey) {
+    throw new Error('Gemini API key is missing');
+  }
+
+  const ai = new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
+  });
+
+  // Only valid Gemini models supported in Google GenAI API v1:
+  // - gemini-3.1-flash-lite (high throughput, light, fast, reliable free quota)
+  // - gemini-3.8-flash (high intelligence general multimodal)
+  const validModels = ['gemini-3.1-flash-lite', 'gemini-3.8-flash'];
+
+  // Sanitize preferred model if an obsolete, deprecated, or invalid model name was provided
+  let primaryModel = preferredModel;
+  if (!primaryModel || !validModels.includes(primaryModel) || primaryModel === 'gemini-flash-latest') {
+    primaryModel = 'gemini-3.1-flash-lite';
+  }
+
+  const secondaryModel = primaryModel === 'gemini-3.1-flash-lite' ? 'gemini-3.8-flash' : 'gemini-3.1-flash-lite';
+
+  const modelsToTry = [
+    { name: primaryModel, timeoutMs: primaryModel === 'gemini-3.8-flash' ? 25000 : 15000 },
+    { name: secondaryModel, timeoutMs: secondaryModel === 'gemini-3.8-flash' ? 25000 : 15000 },
+  ];
+  let lastErr: any = null;
+  const now = Date.now();
+
+  // If ALL models are in cooldown, automatically reset cooldowns so Maya never stays locked out
+  const allInCooldown = modelsToTry.every(
+    ({ name }) => geminiModelCooldown[name] && now < geminiModelCooldown[name]
+  );
+  if (allInCooldown) {
+    for (const { name } of modelsToTry) {
+      delete geminiModelCooldown[name];
+    }
+  }
+
+  for (const { name: modelName, timeoutMs } of modelsToTry) {
+    // If model recently hit 429 daily quota limit, skip it immediately to avoid 429 errors
+    if (geminiModelCooldown[modelName] && now < geminiModelCooldown[modelName]) {
+      continue;
+    }
+
+    try {
+      const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
+
+      for (const h of history) {
+        if (h.role === 'user' || h.role === 'model') {
+          contents.push({
+            role: h.role,
+            parts: [{ text: h.text }],
+          });
+        }
+      }
+
+      contents.push({
+        role: 'user',
+        parts: [{ text: userInput }],
+      });
+
+      const responsePromise = ai.models.generateContent({
+        model: modelName,
+        contents,
+        config: {
+          systemInstruction: systemPrompt,
+          maxOutputTokens: 150,
+        },
+      });
+
+      let timer: any = null;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Gemini ${modelName} request timed out (${timeoutMs / 1000}s)`)), timeoutMs);
+      });
+
+      try {
+        const response = await Promise.race([responsePromise, timeoutPromise]);
+        const text = response.text?.trim();
+        if (text) {
+          return text;
+        }
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    } catch (err: any) {
+      lastErr = err;
+      const errStr = err?.message || String(err);
+      const is429 = errStr.includes('429') || errStr.includes('RESOURCE_EXHAUSTED') || errStr.includes('Quota exceeded');
+
+      if (is429) {
+        // Place exhausted model on cooldown for 30 minutes
+        geminiModelCooldown[modelName] = Date.now() + 30 * 60 * 1000;
+        console.warn(`[Gemini Engine] Model ${modelName} quota exhausted (429). Placed on cooldown; routing to next available model.`);
+      } else {
+        console.warn(`[Gemini Engine] Model ${modelName} notice: ${errStr.slice(0, 100)}`);
+      }
+    }
+  }
+
+  throw lastErr || new Error('Gemini API models unavailable or quota exhausted');
+}
+
+/**
+ * Call Groq Cloud API (Fast Ultra-low latency Fallback)
+ */
+async function callGroq(
+  systemPrompt: string,
+  history: ChatMessage[],
+  userInput: string,
+  apiKey: string
+): Promise<string> {
+  if (!apiKey) {
+    throw new Error('Groq API key is missing');
+  }
+
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+    { role: 'system', content: systemPrompt },
+  ];
+
+  for (const h of history) {
+    messages.push({
+      role: h.role === 'user' ? 'user' : 'assistant',
+      content: h.text,
+    });
+  }
+
+  messages.push({ role: 'user', content: userInput });
+
+  const models = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
+  let lastErr: any = null;
+
+  for (const model of models) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          temperature: 0.8,
+          max_tokens: 150,
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${errBody}`);
+      }
+
+      const data = await res.json();
+      const text = data?.choices?.[0]?.message?.content?.trim();
+      if (text) {
+        return text;
+      }
+    } catch (err: any) {
+      lastErr = err;
+      console.warn(`[Groq Engine] Model ${model} error: ${err.message}`);
+    }
+  }
+
+  throw lastErr || new Error('Groq API failed');
+}
+
+/**
+ * Call OpenRouter API (Multi-model Gateway Fallback)
+ */
+async function callOpenRouter(
+  systemPrompt: string,
+  history: ChatMessage[],
+  userInput: string,
+  apiKey: string
+): Promise<string> {
+  if (!apiKey) {
+    throw new Error('OpenRouter API key is missing');
+  }
+
+  const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+    { role: 'system', content: systemPrompt },
+  ];
+
+  for (const h of history) {
+    messages.push({
+      role: h.role === 'user' ? 'user' : 'assistant',
+      content: h.text,
+    });
+  }
+
+  messages.push({ role: 'user', content: userInput });
+
+  const models = ['meta-llama/llama-3.3-70b-instruct:free', 'deepseek/deepseek-r1:free', 'google/gemini-2.0-flash-exp:free'];
+  let lastErr: any = null;
+
+  for (const model of models) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+          'HTTP-Referer': 'https://waguard.bot',
+          'X-Title': 'WAGuard Maya AI',
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          temperature: 0.8,
+          max_tokens: 150,
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${errBody}`);
+      }
+
+      const data = await res.json();
+      const text = data?.choices?.[0]?.message?.content?.trim();
+      if (text) {
+        return text;
+      }
+    } catch (err: any) {
+      lastErr = err;
+      console.warn(`[OpenRouter Engine] Model ${model} error: ${err.message}`);
+    }
+  }
+
+  throw lastErr || new Error('OpenRouter API failed');
+}
+
+/**
+ * Pure Dynamic AI Generator
+ * Query real AI providers in order (Gemini -> Groq -> OpenRouter). No prewritten or hardcoded answers.
+ */
 export async function getMayaResponse(
   userInput: string,
   userPhone: string,
   userName: string,
-  groupSubject: string,
+  chatContext: string,
   memoryKey: string,
   options: MayaOptions
-): Promise<string> {
-  const apiKey = options.apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
+): Promise<AiExecutionResult> {
+  const startTime = Date.now();
 
-  // Check direct intent match (gives instant 0-latency exact human reply for standard triggers)
-  const directIntent = checkDirectIntentResponse(userInput, userName, options);
+  // 1. Resolve API Keys (options -> process.env -> saved database)
+  const geminiKey =
+    options.geminiApiKey ||
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    getStoredConfigKey('gemini') ||
+    '';
 
-  if (apiKey) {
+  const groqKey =
+    options.groqApiKey ||
+    process.env.GROQ_API_KEY ||
+    process.env.GROQ_API_KEYS ||
+    getStoredConfigKey('groq') ||
+    '';
+
+  const openrouterKey =
+    options.openrouterApiKey ||
+    process.env.OPENROUTER_API_KEY ||
+    getStoredConfigKey('openrouter') ||
+    '';
+
+  // 2. Setup Isolated Memory
+  if (!conversationMemory[memoryKey]) {
+    conversationMemory[memoryKey] = [];
+  }
+
+  const memoryLimit = options.memoryLimit || 15;
+  const history = conversationMemory[memoryKey].slice(-(memoryLimit * 2));
+
+  const systemPrompt = buildMayaSystemPrompt(userName, userPhone, chatContext, options);
+
+  // 3. Provider Sequence
+  const providerSequence: Array<'gemini' | 'groq' | 'openrouter'> = [];
+  if (options.aiProvider === 'gemini' || (options.aiProvider === 'auto' && geminiKey)) providerSequence.push('gemini');
+  if (options.aiProvider === 'groq' || (options.aiProvider === 'auto' && groqKey)) providerSequence.push('groq');
+  if (options.aiProvider === 'openrouter' || (options.aiProvider === 'auto' && openrouterKey)) providerSequence.push('openrouter');
+
+  // Fill remaining fallbacks
+  if (!providerSequence.includes('gemini') && geminiKey) providerSequence.push('gemini');
+  if (!providerSequence.includes('groq') && groqKey) providerSequence.push('groq');
+  if (!providerSequence.includes('openrouter') && openrouterKey) providerSequence.push('openrouter');
+
+  let finalReply = '';
+  let successfulProvider: 'gemini' | 'groq' | 'openrouter' | 'none' = 'none';
+  const errors: string[] = [];
+
+  // 4. Query AI Providers Dynamically
+  for (const provider of providerSequence) {
     try {
-      const genAI = new GoogleGenerativeAI(apiKey);
-
-      const personalityTraits = [
-        'YOUR NAME IS MAYA (মায়া). You are a real, friendly, sweet, intelligent, and emotionally expressive female human from Bangladesh.',
-        'CRITICAL PERSONALITY INSTRUCTIONS:',
-        '- You are Maya, a caring, charming Bengali girl.',
-        '- Speak naturally in fluent Bengali (বাঙালি মেয়েদের মিষ্টি ও মার্জিত ভাষা).',
-        '- Match the emotional context: Direct question -> answer clearly; Sadness -> give deep comfort; Jokes -> witty banter; Love/affection -> sweet cute warmth.',
-        '- ABSOLUTELY NEVER say "As an AI", "I am a language model", or "I don\'t have feelings".',
-        '- Never repeat identical phrases back-to-back.',
-        '- Emojis: Use sweet emojis naturally (🌸😊❤️🥰🙈✨), but do not clutter.',
-        '- Keep responses crisp, natural, engaging, and human-like.',
-      ];
-
-      if (options.romantic) {
-        personalityTraits.push(
-          '- Be sweet, warm, and romantic when users express affection or talk tenderly.',
-          '- Express playful shyness or teasing ("আচ্ছা তাই নাকি! 🙈", "হুম, বুঝেছি! ❤️", "এত মিষ্টি কথা বলো কেন? 🥰").'
-        );
+      if (provider === 'gemini' && geminiKey) {
+        console.log(`[Maya AI Brain] Requesting Gemini generation for ${memoryKey}...`);
+        finalReply = await callGemini(systemPrompt, history, userInput, geminiKey, options.geminiModel);
+        successfulProvider = 'gemini';
+        break;
+      } else if (provider === 'groq' && groqKey) {
+        console.log(`[Maya AI Brain] Requesting Groq generation for ${memoryKey}...`);
+        finalReply = await callGroq(systemPrompt, history, userInput, groqKey);
+        successfulProvider = 'groq';
+        break;
+      } else if (provider === 'openrouter' && openrouterKey) {
+        console.log(`[Maya AI Brain] Requesting OpenRouter generation for ${memoryKey}...`);
+        finalReply = await callOpenRouter(systemPrompt, history, userInput, openrouterKey);
+        successfulProvider = 'openrouter';
+        break;
       }
-
-      if (options.funny) {
-        personalityTraits.push(
-          '- Be witty, playful, and cheerful in group chats.',
-          '- Reply to self-praise or teasing with cute humor.'
-        );
-      }
-
-      const systemPrompt = `
-SYSTEM INSTRUCTION:
-${personalityTraits.join('\n')}
-
-CONTEXT:
-- Group Name: "${groupSubject}"
-- Current User: "${userName}" (@${userPhone})
-- User Input: "${userInput}"
-
-FEELINGS & TONE:
-- Always speak like Maya, a real Bengali female friend.
-      `.trim();
-
-      // Manage conversation memory
-      if (!conversationMemory[memoryKey]) {
-        conversationMemory[memoryKey] = [];
-      }
-
-      const memoryLimit = options.memoryLimit || 10;
-      if (conversationMemory[memoryKey].length > memoryLimit * 2) {
-        conversationMemory[memoryKey] = conversationMemory[memoryKey].slice(-(memoryLimit * 2));
-      }
-
-      const modelsToTry = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash'];
-      let responseText = '';
-
-      for (const modelName of modelsToTry) {
-        try {
-          const modelWithInstruction = genAI.getGenerativeModel({
-            model: modelName,
-            systemInstruction: systemPrompt,
-          });
-
-          const chatSession = modelWithInstruction.startChat({
-            history: conversationMemory[memoryKey],
-            generationConfig: {
-              maxOutputTokens: 500,
-              temperature: 0.85,
-              topP: 0.9,
-              topK: 40,
-            },
-          });
-
-          const result = await chatSession.sendMessage(userInput);
-          responseText = result.response.text().trim();
-          if (responseText) break;
-        } catch {
-          // try next model
-        }
-      }
-
-      if (responseText) {
-        // Prevent exact duplicate consecutive response
-        if (lastSentResponse[memoryKey] === responseText) {
-          if (directIntent) responseText = directIntent;
-        }
-
-        lastSentResponse[memoryKey] = responseText;
-
-        conversationMemory[memoryKey].push({ role: 'user', parts: [{ text: userInput }] });
-        conversationMemory[memoryKey].push({ role: 'model', parts: [{ text: responseText }] });
-        return responseText;
-      }
-    } catch (error: any) {
-      console.error('Error calling Gemini API for Maya AI:', error.message);
+    } catch (err: any) {
+      const errMsg = `${provider}: ${err.message}`;
+      console.warn(`[Maya AI Brain Provider Failed] ${errMsg}`);
+      errors.push(errMsg);
     }
   }
 
-  // If API Key fails or direct intent matched when offline
-  if (directIntent) {
-    lastSentResponse[memoryKey] = directIntent;
-    return directIntent;
+  const latencyMs = Date.now() - startTime;
+
+  // 5. Record generated reply in conversation memory
+  if (finalReply && successfulProvider !== 'none') {
+    conversationMemory[memoryKey].push({ role: 'user', text: userInput, timestamp: Date.now() });
+    conversationMemory[memoryKey].push({ role: 'model', text: finalReply, timestamp: Date.now() });
+
+    if (conversationMemory[memoryKey].length > memoryLimit * 2) {
+      conversationMemory[memoryKey] = conversationMemory[memoryKey].slice(-(memoryLimit * 2));
+    }
+
+    lastSentResponses[memoryKey] = finalReply;
+
+    console.log(
+      `[Maya AI Brain GENERATED] Provider: ${successfulProvider} | Latency: ${latencyMs}ms | Reply: "${finalReply.slice(0, 60)}..."`
+    );
+
+    return {
+      reply: finalReply,
+      provider: successfulProvider,
+      latencyMs,
+    };
   }
 
-  const fallback = generateSmartConversationalFallback(userInput, userName, options);
-  lastSentResponse[memoryKey] = fallback;
-  return fallback;
+  // 6. If all AI providers fail or no key is provided
+  const hasQuotaExhausted = errors.some((e) => e.includes('429') || e.includes('RESOURCE_EXHAUSTED') || e.includes('quota'));
+  const combinedError = errors.length > 0 ? errors.join('; ') : 'No valid AI API key (Gemini / Groq / OpenRouter) configured';
+
+  if (hasQuotaExhausted) {
+    console.warn(`[Maya AI Brain Note] Gemini free-tier quota exhausted. Recommended to add a free Groq or OpenRouter key in dashboard.`);
+  } else {
+    console.error(`[Maya AI Brain Notice] ${combinedError}`);
+  }
+
+  const userAlert = hasQuotaExhausted
+    ? options.language === 'en'
+      ? "Gemini daily free-tier quota reached (20 requests/day). Please add a free Groq key or upgrade Gemini in dashboard! 🌸"
+      : "আজকের জন্য Gemini ফ্রি-টিয়ার কোটা শেষ হয়ে গেছে (২০টি মেসেজ/দিন)। ড্যাশবোর্ডে গিয়ে একটি ফ্রি Groq বা OpenRouter কী যুক্ত করুন! 🌸"
+    : options.language === 'en'
+    ? "AI Provider Unreachable: Please configure a valid Gemini, Groq, or OpenRouter API key in the dashboard settings! 🌸"
+    : 'আমার এআই ব্রেইনের সাথে সংযোগে সমস্যা হচ্ছে। দয়া করে ড্যাশবোর্ডে গিয়ে সঠিক Gemini, Groq বা OpenRouter API Key সেভ করুন! 🌸';
+
+  return {
+    reply: userAlert,
+    provider: 'none',
+    latencyMs,
+    error: combinedError,
+  };
+}
+
+export function clearConversationMemory(memoryKey?: string) {
+  if (memoryKey) {
+    delete conversationMemory[memoryKey];
+    delete lastSentResponses[memoryKey];
+  } else {
+    for (const k of Object.keys(conversationMemory)) {
+      delete conversationMemory[k];
+    }
+  }
 }

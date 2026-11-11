@@ -25,6 +25,8 @@ import {
   resetWarnings as resetAllWarnings,
   clearActivityLogs,
   loadDatabase,
+  getActiveRestrictedUsers,
+  unrestrictUser,
 } from './src/moderationEngine.ts';
 
 dotenv.config();
@@ -484,6 +486,7 @@ app.get('/api/dashboard', (req: Request, res: Response) => {
     moderation: {
       settings: modSettings,
       stats: modStats,
+      restrictedUsers: getActiveRestrictedUsers(),
     },
   });
 });
@@ -497,6 +500,29 @@ app.post('/api/moderation/settings', (req: Request, res: Response) => {
   try {
     const updated = updateModerationSettings(req.body);
     res.json({ success: true, settings: updated, message: 'Settings saved and active in real-time' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Individual Temporary Mute (Restricted Users) Endpoints
+app.get('/api/moderation/restricted-users', (req: Request, res: Response) => {
+  res.json({ success: true, restrictedUsers: getActiveRestrictedUsers() });
+});
+
+app.post('/api/moderation/unmute', (req: Request, res: Response) => {
+  try {
+    const { groupId, senderJid } = req.body;
+    if (!groupId || !senderJid) {
+      return res.status(400).json({ success: false, error: 'groupId and senderJid are required' });
+    }
+    const unmuted = unrestrictUser(groupId, senderJid);
+    res.json({
+      success: true,
+      unmuted,
+      message: unmuted ? 'সদস্যের রেস্ট্রিকশন তুলে দেওয়া হয়েছে (Unmuted successfully)' : 'সদস্য রেস্ট্রিকশন তালিকায় পাওয়া যায়নি বা ইতিমধ্যে মেয়াদ শেষ হয়েছে',
+      restrictedUsers: getActiveRestrictedUsers(),
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -584,23 +610,36 @@ app.post('/api/maya/test', async (req: Request, res: Response) => {
     const { text, settings: mayaSettings } = req.body;
     if (!text) return res.status(400).json({ error: 'Text is required' });
 
+    const currentSettings = getModerationSettings();
     const { getMayaResponse } = await import('./src/aiEngine.ts');
     
-    const reply = await getMayaResponse(
+    const aiResult = await getMayaResponse(
       text,
-      'TEST-USER',
+      'ADMIN',
       'Dashboard Admin',
-      'Admin Control Panel',
-      'ADMIN:TEST',
+      'Dashboard Test Sandbox',
+      'ADMIN:SANDBOX',
       {
-        romantic: mayaSettings?.mayaRomantic ?? true,
-        funny: mayaSettings?.mayaFunny ?? true,
-        language: mayaSettings?.mayaLanguage ?? 'auto',
-        memoryLimit: mayaSettings?.mayaMemoryLimit ?? 10
+        romantic: mayaSettings?.mayaRomantic ?? currentSettings.mayaRomantic ?? true,
+        funny: mayaSettings?.mayaFunny ?? currentSettings.mayaFunny ?? true,
+        language: mayaSettings?.mayaLanguage ?? currentSettings.mayaLanguage ?? 'auto',
+        memoryLimit: mayaSettings?.mayaMemoryLimit ?? currentSettings.mayaMemoryLimit ?? 10,
+        aiProvider: mayaSettings?.aiProvider ?? currentSettings.aiProvider ?? 'auto',
+        geminiModel: mayaSettings?.geminiModel || currentSettings.geminiModel || 'gemini-3.1-flash-lite',
+        geminiApiKey: mayaSettings?.geminiApiKey || currentSettings.geminiApiKey,
+        groqApiKey: mayaSettings?.groqApiKey || currentSettings.groqApiKey,
+        openrouterApiKey: mayaSettings?.openrouterApiKey || currentSettings.openrouterApiKey,
+        isPrivate: true,
       }
     );
 
-    res.json({ success: true, reply });
+    res.json({
+      success: true,
+      reply: aiResult.reply,
+      provider: aiResult.provider,
+      latencyMs: aiResult.latencyMs,
+      error: aiResult.error,
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
