@@ -7,6 +7,7 @@ export default defineConfig(() => {
   return {
     base: './',
     plugins: [react(), tailwindcss()],
+    base: '/waguard/',
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
