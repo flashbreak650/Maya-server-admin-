@@ -7,7 +7,7 @@ export default defineConfig(() => {
   return {
     base: './',
     plugins: [react(), tailwindcss()],
-    base: '/waguard/',
+    base: '/Maya-server-admin-/',
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
