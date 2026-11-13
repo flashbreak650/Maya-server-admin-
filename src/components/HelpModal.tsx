@@ -83,7 +83,7 @@ export const HelpModal: React.FC<HelpModalProps> = ({
       onClick={onClose}
     >
       <div 
-        className="bg-white max-w-[320px] w-full border-2 border-emerald-600 shadow-2xl flex flex-col overflow-hidden animate-appear rounded-none"
+        className="bg-white max-w-[320px] w-full border-2 border-emerald-600 shadow-2xl flex flex-col overflow-hidden rounded-none"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header Section */}

@@ -166,7 +166,7 @@ export default function App() {
         e.stopPropagation();
         openHelp(id);
       }}
-      className="inline-flex items-center justify-center w-6 h-6 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 border border-emerald-500/20 transition-all cursor-pointer shrink-0 active:scale-90"
+      className="inline-flex items-center justify-center w-6 h-6 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 border border-emerald-500/20 transition-colors cursor-pointer shrink-0"
       title={isBn ? 'বিস্তারিত জানুন' : 'Help & Info'}
     >
       <Info size={12} className="stroke-[3]" />
@@ -1021,7 +1021,7 @@ export default function App() {
         </div>
         <div className="header-right">
           <div
-            className={`flex items-center gap-1.5 px-2.5 py-1  text-[11px] font-semibold ${
+            className={`flex items-center gap-1.5 px-2 py-1 text-[10px] sm:text-[11px] font-semibold whitespace-nowrap shrink-0 ${
               liveStatus.online
                 ? 'bg-[#e9f7ef] text-[#108255]'
                 : liveStatus.status === 'pairing'
@@ -1030,8 +1030,8 @@ export default function App() {
             }`}
           >
             <span
-              className={`w-2 h-2  ${
-                liveStatus.online ? 'bg-[#108255]' : liveStatus.status === 'pairing' ? 'bg-amber-500 animate-ping' : 'bg-gray-400'
+              className={`w-2 h-2 shrink-0 ${
+                liveStatus.online ? 'bg-[#108255]' : liveStatus.status === 'pairing' ? 'bg-amber-500' : 'bg-gray-400'
               }`}
             ></span>
             <span>
@@ -1045,11 +1045,11 @@ export default function App() {
 
           {/* Bengali / English Language Switcher Button */}
           <button
-            className="flex items-center gap-1.5 px-2.5 py-1  border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-extrabold transition-all cursor-pointer shadow-xs shrink-0"
+            className="flex items-center gap-1 px-2 py-1 border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-[11px] sm:text-xs font-extrabold transition-colors cursor-pointer shadow-xs shrink-0 whitespace-nowrap"
             onClick={toggleUiLang}
             title={isBn ? 'Switch UI to English' : 'বাংলায় পরিবর্তন করুন'}
           >
-            <Globe size={13} className="text-emerald-700" />
+            <Globe size={12} className="text-emerald-700 shrink-0" />
             <span>{isBn ? 'English' : 'বাংলা'}</span>
           </button>
 
@@ -1122,7 +1122,7 @@ export default function App() {
 
           <div className="side-bottom">
             <div className="flex items-center gap-1.5">
-              <Radio size={16} className="text-[#087f55] animate-pulse" />
+              <Radio size={16} className="text-[#087f55]" />
               <strong>REAL BAILEYS</strong>
             </div>
             <p className="mt-1 text-[10px]">
@@ -1149,7 +1149,7 @@ export default function App() {
 
               {/* Static Host Backend Warning */}
               {isStaticHost && !baileysUrl && (
-                <div className="mb-5 p-4  border border-rose-200 bg-rose-50 text-rose-900 flex items-start gap-3 shadow-sm animate-appear">
+                <div className="mb-5 p-4  border border-rose-200 bg-rose-50 text-rose-900 flex items-start gap-3 shadow-sm">
                   <div className="w-8 h-8  bg-rose-100 flex items-center justify-center shrink-0 text-rose-600">
                     <Plug size={18} />
                   </div>
@@ -2191,7 +2191,7 @@ export default function App() {
                             {isBn ? 'WhatsApp একাউন্ট সফলভাবে যুক্ত' : 'WhatsApp Linked Successfully'}
                           </h3>
                           <span className="flex items-center gap-1 px-2 py-0.5  bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                            <span className="w-1.5 h-1.5  bg-emerald-600 animate-pulse"></span>
+                            <span className="w-1.5 h-1.5  bg-emerald-600"></span>
                             Live
                           </span>
                         </div>
@@ -2471,7 +2471,7 @@ export default function App() {
 
                     <div className="mt-5 p-2.5 bg-black/20  border border-white/10 flex items-center justify-between">
                        <div className="flex items-center gap-2">
-                          <div className={`w-2 h-2  ${settings.aiAutoRotate ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'}`} />
+                          <div className={`w-2 h-2  ${settings.aiAutoRotate ? 'bg-emerald-400' : 'bg-slate-400'}`} />
                           <span className="text-[10px] font-bold">Auto-Rotation: <span className={settings.aiAutoRotate ? 'text-emerald-300' : 'text-slate-300'}>{settings.aiAutoRotate ? 'ACTIVE (চালু)' : 'OFF (বন্ধ)'}</span></span>
                        </div>
                        {(() => {
@@ -2509,7 +2509,7 @@ export default function App() {
                     <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1 custom-scrollbar mt-2">
                        {(settings.aiKeys || []).some(k => k.lastError) ? (
                           settings.aiKeys?.filter(k => k.lastError).map(k => (
-                             <div key={k.id} className="p-2.5 bg-slate-50  border border-slate-200 flex items-start gap-3 group animate-appear hover:border-rose-200 transition-colors">
+                             <div key={k.id} className="p-2.5 bg-slate-50  border border-slate-200 flex items-start gap-3 group hover:border-rose-200 transition-colors">
                                 <div className={`px-2 py-0.5 text-[8px] font-black uppercase tracking-tighter shrink-0 mt-0.5 shadow-sm ${
                                    k.provider === 'gemini' ? 'bg-emerald-100 text-emerald-700' :
                                    k.provider === 'groq' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'
