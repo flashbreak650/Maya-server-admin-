@@ -39,7 +39,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = createServer(app);
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // Enable CORS for all origins, supporting credentials and preflight OPTIONS
 app.use((req: Request, res: Response, next) => {
