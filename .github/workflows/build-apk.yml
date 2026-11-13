@@ -20,16 +20,38 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '22'
 
       - name: Setup Java 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '21'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        run: |
+          if [ -d "/usr/local/lib/android/sdk/platforms/android-36" ] && [ -d "/usr/local/lib/android/sdk/build-tools" ] && [ -w "/usr/local/lib/android/sdk" ]; then
+            SDK_DIR="/usr/local/lib/android/sdk"
+            echo "Using preinstalled writable Android SDK at $SDK_DIR"
+          else
+            SDK_DIR="$HOME/android-sdk"
+            mkdir -p "$SDK_DIR/cmdline-tools"
+            if [ ! -x "$SDK_DIR/cmdline-tools/latest/bin/sdkmanager" ]; then
+              echo "Downloading Android Command Line Tools..."
+              curl -fsSL https://dl.google.com/android/repository/commandlinetools-linux-13114758_latest.zip -o /tmp/cmdline-tools.zip
+              unzip -q /tmp/cmdline-tools.zip -d /tmp/cmdline-extract
+              rm -rf "$SDK_DIR/cmdline-tools/latest"
+              mv /tmp/cmdline-extract/cmdline-tools "$SDK_DIR/cmdline-tools/latest"
+              rm -rf /tmp/cmdline-tools.zip /tmp/cmdline-extract
+            fi
+            SDKMANAGER="$SDK_DIR/cmdline-tools/latest/bin/sdkmanager"
+            yes | "$SDKMANAGER" --sdk_root="$SDK_DIR" --licenses >/dev/null 2>&1 || true
+            "$SDKMANAGER" --sdk_root="$SDK_DIR" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          fi
+
+          echo "ANDROID_HOME=$SDK_DIR" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$SDK_DIR" >> $GITHUB_ENV
+          echo "$SDK_DIR/platform-tools" >> $GITHUB_PATH
 
       - name: Install dependencies & build web app
         run: |
@@ -45,12 +67,15 @@ jobs:
 
           if [ -f "app/build/outputs/apk/release/app-release-unsigned.apk" ]; then
             UNSIGNED_APK="app/build/outputs/apk/release/app-release-unsigned.apk"
-          else
+          elif [ -f "app/build/outputs/apk/release/app-release.apk" ]; then
             UNSIGNED_APK="app/build/outputs/apk/release/app-release.apk"
+          else
+            echo "Release APK not found!"
+            find app/build/outputs/apk -type f || true
+            exit 1
           fi
           SIGNED_APK="../WAGuard-Maya-Admin.apk"
 
-          # Generate signing keystore if not supplied via secrets
           keytool -genkey -v -keystore release.keystore -alias waguard \
             -keyalg RSA -keysize 2048 -validity 10000 \
             -storepass waguard123 -keypass waguard123 \
@@ -64,6 +89,7 @@ jobs:
             --key-pass pass:waguard123 \
             --out "$SIGNED_APK" \
             app-release-aligned.apk
+          "$BUILD_TOOLS_DIR/apksigner" verify "$SIGNED_APK"
 
       - name: Upload APK Workflow Artifact
         uses: actions/upload-artifact@v4
