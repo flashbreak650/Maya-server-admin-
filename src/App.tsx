@@ -398,7 +398,7 @@ export default function App() {
     mayaReplyFrequency: 100,
     mayaLanguage: 'auto',
     mayaMemoryLimit: 20,
-    aiBadwordDetection: false,
+    aiBadwordDetection: true,
     silentModeration: false,
     mayaReplyMode: 'group',
   });

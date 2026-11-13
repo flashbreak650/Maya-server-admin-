@@ -39,7 +39,20 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = createServer(app);
-const PORT = Number(process.env.PORT) || 3000;
+function resolvePort(): number {
+  const portArgIdx = process.argv.indexOf('--port');
+  if (portArgIdx !== -1 && process.argv[portArgIdx + 1]) {
+    const cliPort = Number(process.argv[portArgIdx + 1]);
+    if (Number.isFinite(cliPort) && cliPort > 0) return cliPort;
+  }
+  if (process.env.NODE_ENV === 'production' && process.env.PORT) {
+    const envPort = Number(process.env.PORT);
+    if (Number.isFinite(envPort) && envPort > 0) return envPort;
+  }
+  return 3000;
+}
+
+const PORT = resolvePort();
 
 // Enable CORS for all origins, supporting credentials and preflight OPTIONS
 app.use((req: Request, res: Response, next) => {
@@ -995,6 +1008,12 @@ async function startServer() {
 
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
+  process.on('unhandledRejection', (reason: any) => {
+    console.error('[Unhandled Rejection Guard]:', reason?.message || reason);
+  });
+  process.on('uncaughtException', (err: any) => {
+    console.error('[Uncaught Exception Guard]:', err?.message || err);
+  });
 
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server listening on port ${PORT}`);

@@ -24,6 +24,8 @@ export interface MayaOptions {
   openrouterApiKey?: string;
   isPrivate?: boolean;
   testKeyId?: string;
+  customSystemPrompt?: string;
+  disableMemory?: boolean;
 }
 
 export interface AiExecutionResult {
@@ -396,17 +398,20 @@ export async function getMayaResponse(
   const settings = getSettings();
   
   // 1. Memory Management - Cap history size to safe context window (~10 exchanges / 20 msgs max)
-  if (!conversationMemory[memoryKey]) conversationMemory[memoryKey] = [];
-  const memoryLimit = Math.min(Math.max(1, options.memoryLimit || 10), 10);
-  const rawHistory = conversationMemory[memoryKey].slice(-(memoryLimit * 2));
-  
-  // Truncate long messages in history to 200 chars to avoid prompt token explosion
-  const history: ChatMessage[] = rawHistory.map(h => ({
-    ...h,
-    text: h.text.length > 200 ? h.text.slice(0, 200) + '...' : h.text,
-  }));
+  let history: ChatMessage[] = [];
+  if (!options.disableMemory) {
+    if (!conversationMemory[memoryKey]) conversationMemory[memoryKey] = [];
+    const memoryLimit = Math.min(Math.max(1, options.memoryLimit || 10), 10);
+    const rawHistory = conversationMemory[memoryKey].slice(-(memoryLimit * 2));
 
-  const systemPrompt = buildMayaSystemPrompt(userName, userPhone, chatContext, options);
+    // Truncate long messages in history to 200 chars to avoid prompt token explosion
+    history = rawHistory.map(h => ({
+      ...h,
+      text: h.text.length > 200 ? h.text.slice(0, 200) + '...' : h.text,
+    }));
+  }
+
+  const systemPrompt = options.customSystemPrompt || buildMayaSystemPrompt(userName, userPhone, chatContext, options);
 
   // 2. Identify Pools
   const pool = settings.aiKeys || [];
@@ -466,12 +471,15 @@ export async function getMayaResponse(
 
         if (reply) {
           const latencyMs = Date.now() - startTime;
-          conversationMemory[memoryKey].push({ role: 'user', text: userInput, timestamp: now });
-          conversationMemory[memoryKey].push({ role: 'model', text: reply, timestamp: Date.now() });
-          if (conversationMemory[memoryKey].length > memoryLimit * 2) {
-             conversationMemory[memoryKey] = conversationMemory[memoryKey].slice(-(memoryLimit * 2));
+          if (!options.disableMemory) {
+            const memoryLimit = Math.min(Math.max(1, options.memoryLimit || 10), 10);
+            conversationMemory[memoryKey].push({ role: 'user', text: userInput, timestamp: now });
+            conversationMemory[memoryKey].push({ role: 'model', text: reply, timestamp: Date.now() });
+            if (conversationMemory[memoryKey].length > memoryLimit * 2) {
+              conversationMemory[memoryKey] = conversationMemory[memoryKey].slice(-(memoryLimit * 2));
+            }
+            lastSentResponses[memoryKey] = reply;
           }
-          lastSentResponses[memoryKey] = reply;
 
           return { reply, provider, latencyMs, keyLabel: key.label };
         }

@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import type { proto, WASocket } from '@whiskeysockets/baileys';
+import { jidNormalizedUser, type proto, type WASocket } from '@whiskeysockets/baileys';
 import { getMayaResponse } from './aiEngine.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -158,7 +158,7 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   mayaReplyFrequency: 100,
   mayaLanguage: 'auto',
   mayaMemoryLimit: 20,
-  aiBadwordDetection: false,
+  aiBadwordDetection: true,
   silentModeration: false,
   mayaReplyMode: 'group',
   aiKeys: [],
@@ -653,43 +653,46 @@ export function startRestrictedUsersMonitor(sockGetter?: () => WASocket | null) 
 
 // Comprehensive dictionary covering Bangla, Sylheti, Banglish, Hindi/Urdu, English, Arabic
 const BENGALI_BADWORDS = [
-  'খানকি', 'খানকির', 'মাগি', 'মাগির', 'বেশ্যা', 'বেশ্যার', 'রান্ডি', 'রান্ডির',
-  'চুদা', 'চুদানি', 'চুদানির', 'চুদ', 'চোদা', 'চোদানি', 'চোদানির', 'মাদারচোদ',
-  'মাদারচুদা', 'বাইনচোদ', 'বাইনচুদা', 'ভোনচোদ', 'কুত্তা', 'কুত্তার', 'কুত্তির',
-  'শুয়োর', 'শুয়োরের', 'হারামি', 'হারামজাদা', 'হারামখোর', 'ভোদা', 'ভোদাই',
-  'ধোন', 'লুচ্চা', 'লুচ্চামি', 'গুয়া', 'গুয়ার', 'গুদে', 'গুদ', 'বাল', 'সালা', 'শালা'
-];
+  'খানকি', 'খানকির', 'খানকিরপোলা', 'মাগি', 'মাগির', 'মাগী', 'মাগীর', 'বেশ্যা', 'বেশ্যার',
+  'রান্ডি', 'রান্ডির', 'চুদা', 'চুদানি', 'চুদানির', 'চুদ', 'চুদি', 'চুদির', 'চোদ', 'চোদা',
+  'চোদনা', 'চুদনা', 'চোদানি', 'চোদানির', 'বোকাচোদা', 'বোকচোদা', 'মাদারচোদ', 'মাদারচুদা',
+  'বাইনচোদ', 'বাইনচুদা', 'ভোনচোদ', 'কুত্তা', 'কুত্তার', 'কুত্তির', 'শুয়োর', 'শুয়োরের',
+  'শুয়োর', 'শুয়োরের', 'হারামি', 'হারামী', 'হারামজাদা', 'হারামখোর', 'ভোদা', 'ভোদাই',
+  'ধোন', 'লুচ্চা', 'লুচ্চামি', 'গুয়া', 'গুয়ার', 'গুদে', 'গুদ', 'বাল', 'বালের', 'বালছাল',
+  'সালা', 'শালা', 'শালার', 'সালার', 'চুতিয়া', 'চুতিয়া', 'নটি', 'নটির', 'জারজ',
+  'কুত্তার বাচ্চা', 'শুয়োরের বাচ্চা', 'শুয়োরের বাচ্চা', 'মাগির পোলা', 'খানকির পোলা'
+].map((w) => w.normalize('NFC'));
 
 // Sylheti local slang
 const SYLHETI_BADWORDS = [
   'ফুয়া', 'রান্দি', 'খাউয়াস', 'আওলাইন্না', 'মুতার', 'নাঙ্গট'
-];
+].map((w) => w.normalize('NFC'));
 
 // Banglish (slang transliterated into English letters)
 const BANGLISH_BADWORDS = [
   'khanki', 'khankir', 'magi', 'magir', 'besha', 'beshar', 'beshya',
-  'randi', 'randir', 'raandi', 'choda', 'chudani', 'chuda', 'chudanir',
-  'madarchod', 'madarchuda', 'bainchod', 'baimchod', 'bhenchod', 'behnchod',
+  'randi', 'randir', 'raandi', 'choda', 'chudani', 'chuda', 'chudanir', 'chodna', 'chudna',
+  'bokachoda', 'madarchod', 'madarchuda', 'bainchod', 'baimchod', 'bhenchod', 'behnchod',
   'harami', 'haramzada', 'kuttar baccha', 'shuorer baccha', 'bhoda', 'bhodai',
-  'dhon', 'guya', 'gud', 'bal', 'chutia', 'chutiya', 'chod', 'sala', 'shala'
-];
+  'dhon', 'guya', 'gud', 'bal', 'baler', 'chutia', 'chutiya', 'chod', 'sala', 'shala', 'shalar'
+].map((w) => w.normalize('NFC'));
 
 // Hindi / Urdu slang
 const HINDI_URDU_BADWORDS = [
   'madarchod', 'bhenchod', 'behnchod', 'gaand', 'gandu', 'lund', 'lauda',
   'laude', 'lavde', 'raand', 'bsdk', 'bhosdike', 'chutiya', 'harami', 'kutte'
-];
+].map((w) => w.normalize('NFC'));
 
 // English profanities
 const ENGLISH_BADWORDS = [
   'fuck', 'fucking', 'fucker', 'motherfucker', 'shit', 'bitch', 'bitches',
   'asshole', 'cunt', 'dick', 'pussy', 'whore', 'slut', 'bastard', 'nigger', 'nigga'
-];
+].map((w) => w.normalize('NFC'));
 
 // Arabic profanities
 const ARABIC_BADWORDS = [
   'شرموطة', 'قحبة', 'كس', 'طيز', 'منيوك', 'ابن الكلب', 'عرص', 'زب'
-];
+].map((w) => w.normalize('NFC'));
 
 // Safe words that contain small substrings like 'bal' or 'balti' or 'সালা' and must NEVER be flagged
 const SAFE_WHITELIST = new Set([
@@ -773,9 +776,9 @@ export function isRespectfulSalamOrGreeting(text: string): boolean {
   return salamRegex.test(clean);
 }
 
-// Normalization function: strips accents, reduces repeated consecutive letters, decodes leetspeak
+// Normalization function: NFC unicode normalization, lowercase, strips invisible chars, decodes leetspeak
 function normalizeText(raw: string): string {
-  let str = raw.toLowerCase();
+  let str = raw.normalize('NFC').toLowerCase();
 
   // Leetspeak replacements
   str = str
@@ -832,7 +835,7 @@ export function checkBadwordViolation(text: string, customList: string[] = []): 
     }
   }
 
-  // 2. Built-in dictionaries check
+  // 2. Built-in dictionaries check (single words + multi-word phrases)
   const allWordLists = [
     ...BENGALI_BADWORDS,
     ...SYLHETI_BADWORDS,
@@ -842,11 +845,20 @@ export function checkBadwordViolation(text: string, customList: string[] = []): 
     ...ARABIC_BADWORDS,
   ];
 
+  // Check multi-word phrases cleanly on normalized text
+  const normalizedSpaceCollapsed = normalized.replace(/\s+/g, ' ').trim();
+  for (const bad of allWordLists) {
+    if (bad.includes(' ') && normalizedSpaceCollapsed.includes(bad)) {
+      return { isBad: true, matchedWord: bad };
+    }
+  }
+
   for (const token of tokens) {
     if (!token || token.length < 2) continue;
     if (isSafeWordOrGreeting(token)) continue;
 
     for (const bad of allWordLists) {
+      if (bad.includes(' ')) continue;
       if (token === bad) {
         return { isBad: true, matchedWord: bad };
       }
@@ -862,7 +874,7 @@ export function checkBadwordViolation(text: string, customList: string[] = []): 
   const DANGEROUS_COLLAPSED_STEMS = [
     'মাদারচোদ', 'বাইনচোদ', 'ভোনচোদ', 'খানকি', 'হারামজাদা', 'কুত্তারবাচ্চা', 'মাগিরপোলা',
     'madarchod', 'bhenchod', 'behnchod', 'motherfucker'
-  ];
+  ].map((w) => w.normalize('NFC'));
   for (const bad of DANGEROUS_COLLAPSED_STEMS) {
     if (collapsedSpaced.includes(bad)) return { isBad: true, matchedWord: bad };
   }
@@ -880,21 +892,34 @@ export async function checkBadwordWithAi(
   groupSubject: string,
   settings: ModerationSettings
 ): Promise<{ isBad: boolean; reason: string }> {
-  try {
-    const prompt = `You are a strict WhatsApp group moderator AI. Analyze the following text from a WhatsApp group to determine if it contains EXPLICIT PROFANITY, VULGAR CURSES, OR SEVERE INSULTS in Bengali, Banglish, Sylheti, Hindi, or English.
-    
-    IMPORTANT CONTEXTUAL MODERATION RULES:
-    1. DO NOT flag normal conversational Bengali sentences or everyday idioms (e.g. "ভুল করে হলে মাইর খাবে", "আজকে কাজ করবো না", "কথা শুনবে", "কথা বলো", "মাইর খাইবা"). Phrasal warnings like "মাইর খাবে" (will get beaten/reprimanded) or "ভুল" are normal Bengali conversation and NOT profanity!
-    2. ONLY flag explicit vulgar slurs, curses, sexual profanity, abusive insults, or severe hate speech (e.g. "মাদারচোদ", "খানকি", "fuck", "bitch", etc.).
-    3. If the message is normal conversational text or clean chat, reply ONLY with the word "SAFE".
-    4. If it contains genuine explicit vulgar profanity/slur, reply ONLY with the word "VIOLATION" followed by a 1-sentence reason in Bengali.
+  // Fast exit if no AI API key is configured anywhere
+  const hasPoolKey = Array.isArray(settings.aiKeys) && settings.aiKeys.some((k) => k.status === 'active' || k.status === 'cooldown');
+  const hasLegacyKey = Boolean(
+    (settings.geminiApiKey && settings.geminiApiKey.trim().length > 10) ||
+    (settings.groqApiKey && settings.groqApiKey.trim().length > 10) ||
+    (settings.openrouterApiKey && settings.openrouterApiKey.trim().length > 10) ||
+    process.env.GEMINI_API_KEY ||
+    process.env.GROQ_API_KEY ||
+    process.env.OPENROUTER_API_KEY
+  );
+  if (!hasPoolKey && !hasLegacyKey) {
+    return { isBad: false, reason: '' };
+  }
 
-    Text: "${text}"
-    User: ${userName} (${senderPhone})
-    Group: ${groupSubject}`;
+  try {
+    const moderatorSystemPrompt = `You are a precise WhatsApp group moderation classifier. Your ONLY task is to classify whether a message contains EXPLICIT PROFANITY, VULGAR CURSES, SEXUAL SLURS, OR SEVERE ABUSIVE INSULTS in Bengali, Banglish, Sylheti, Hindi, Urdu, Arabic, or English.
+
+STRICT RULES:
+1. NEVER flag normal conversational Bengali sentences, warnings, jokes, or everyday idioms such as "ভুল করে হলে মাইর খাবে", "আজকে কাজ করবো না", "কথা শুনবে", "কথা বলো", "মাইর খাইবা", "বালতি", "সালাম".
+2. ONLY flag genuine explicit profanity, vulgar slurs, curses, sexual abuse, or severe insults (including disguised spelling or slang).
+3. Output format MUST strictly be ONE LINE:
+   - If clean/normal: SAFE
+   - If explicit profanity: VIOLATION: <1 short reason in Bengali>`;
+
+    const userPrompt = `Group: ${groupSubject}\nSender: ${userName} (${senderPhone})\nMessage: "${text}"`;
 
     const aiResult = await getMayaResponse(
-      prompt,
+      userPrompt,
       senderPhone,
       userName,
       groupSubject,
@@ -905,12 +930,15 @@ export async function checkBadwordWithAi(
         funny: false,
         language: settings.mayaLanguage,
         isPrivate: false,
-        memoryLimit: 0, 
+        memoryLimit: 0,
+        customSystemPrompt: moderatorSystemPrompt,
+        disableMemory: true,
       }
     );
 
-    if (aiResult.reply && aiResult.reply.toUpperCase().startsWith('VIOLATION')) {
-      const reason = aiResult.reply.replace(/VIOLATION/i, '').trim() || 'গালি বা আপত্তিকর ভাষা শনাক্ত হয়েছে';
+    const reply = (aiResult.reply || '').trim();
+    if (aiResult.provider !== 'none' && /^\s*VIOLATION\b/i.test(reply)) {
+      const reason = reply.replace(/^\s*VIOLATION\s*:?\s*/i, '').trim() || 'AI দ্বারা গালি বা আপত্তিকর ভাষা শনাক্ত হয়েছে';
       return { isBad: true, reason };
     }
   } catch (err: any) {
@@ -938,12 +966,28 @@ export function checkLinkViolation(text: string): { isLink: boolean; matchedLink
 // -------------------------------------------------------------
 export function extractRealMessage(message: proto.IMessage | null | undefined): proto.IMessage | null | undefined {
   if (!message) return null;
-  if (message.ephemeralMessage?.message) return extractRealMessage(message.ephemeralMessage.message);
-  if (message.viewOnceMessage?.message) return extractRealMessage(message.viewOnceMessage.message);
-  if (message.viewOnceMessageV2?.message) return extractRealMessage(message.viewOnceMessageV2.message);
-  if (message.viewOnceMessageV2Extension?.message) return extractRealMessage(message.viewOnceMessageV2Extension.message);
-  if (message.documentWithCaptionMessage?.message) return extractRealMessage(message.documentWithCaptionMessage.message);
-  return message;
+  let current: any = message;
+  for (let depth = 0; depth < 6; depth++) {
+    const wrapped =
+      current?.ephemeralMessage?.message ||
+      current?.viewOnceMessage?.message ||
+      current?.viewOnceMessageV2?.message ||
+      current?.viewOnceMessageV2Extension?.message ||
+      current?.documentWithCaptionMessage?.message ||
+      current?.editedMessage?.message ||
+      current?.associatedChildMessage?.message ||
+      current?.lottieStickerMessage?.message ||
+      current?.groupMentionedMessage?.message ||
+      current?.botInvokeMessage?.message ||
+      current?.botForwardedMessage?.message ||
+      current?.groupStatusMessage?.message ||
+      current?.groupStatusMessageV2?.message ||
+      current?.questionReplyMessage?.message ||
+      current?.questionMessage?.message;
+    if (!wrapped) break;
+    current = wrapped;
+  }
+  return current as proto.IMessage;
 }
 
 export function extractMessageText(realMsg: proto.IMessage | null | undefined): string {
@@ -1020,64 +1064,145 @@ export async function getGroupMeta(sock: WASocket, groupId: string, forceRefresh
   }
 }
 
+function cleanJidUser(jid?: string | null): string {
+  if (!jid) return '';
+  return jid.split('@')[0].split(':')[0].trim();
+}
+
 export async function checkPermissions(
   sock: WASocket,
   groupId: string,
   senderJid: string,
-  forceRefresh = false
-): Promise<{ isSenderAdmin: boolean; isBotAdmin: boolean; groupSubject: string }> {
+  forceRefresh = false,
+  senderAltJid?: string
+): Promise<{
+  isSenderAdmin: boolean;
+  isBotAdmin: boolean;
+  groupSubject: string;
+  matchedSenderId?: string;
+}> {
   try {
     const meta = await getGroupMeta(sock, groupId, forceRefresh);
     if (!meta || !meta.participants) {
       return { isSenderAdmin: false, isBotAdmin: false, groupSubject: 'WhatsApp Group' };
     }
 
-    const senderClean = senderJid.split('@')[0].split(':')[0];
+    const senderCandidates = new Set(
+      [cleanJidUser(senderJid), cleanJidUser(senderAltJid)].filter(Boolean)
+    );
+    const senderNormalized = new Set(
+      [senderJid ? normalizeJid(senderJid) : '', senderAltJid ? normalizeJid(senderAltJid) : ''].filter(Boolean)
+    );
 
-    const botId = sock.user?.id || '';
-    const botLid = sock.user?.lid || '';
-
-    const botPhoneClean = botId.split('@')[0].split(':')[0];
-    const botLidClean = botLid ? botLid.split('@')[0].split(':')[0] : '';
+    const botRawIds = [
+      sock.user?.id,
+      sock.user?.lid,
+      sock.authState?.creds?.me?.id,
+      sock.authState?.creds?.me?.lid,
+    ].filter(Boolean) as string[];
+    const botCandidates = new Set(botRawIds.map((j) => cleanJidUser(j)).filter(Boolean));
+    const botNormalized = new Set(botRawIds.map((j) => normalizeJid(j)).filter(Boolean));
 
     let isSenderAdmin = false;
     let isBotAdmin = false;
+    let matchedSenderId: string | undefined;
 
     for (const p of meta.participants) {
-      const pClean = p.id.split('@')[0].split(':')[0];
-      const isAdmin = p.admin === 'admin' || p.admin === 'superadmin';
+      const pAny = p as any;
+      const pAllJids = [p.id, pAny.lid, pAny.phoneNumber].filter(Boolean) as string[];
+      const pAllClean = pAllJids.map((j) => cleanJidUser(j)).filter(Boolean);
+      const pAllNorm = pAllJids.map((j) => normalizeJid(j)).filter(Boolean);
+      const isAdmin = p.admin === 'admin' || p.admin === 'superadmin' || Boolean(pAny.isAdmin) || Boolean(pAny.isSuperAdmin);
 
-      if (
-        (pClean === senderClean ||
-         p.id === senderJid ||
-         normalizeJid(p.id) === normalizeJid(senderJid)) &&
-        isAdmin
-      ) {
-        isSenderAdmin = true;
+      const matchesSender =
+        pAllClean.some((c) => senderCandidates.has(c)) ||
+        pAllNorm.some((n) => senderNormalized.has(n));
+
+      if (matchesSender) {
+        matchedSenderId = p.id;
+        if (isAdmin) {
+          isSenderAdmin = true;
+        }
       }
 
-      if (
-        isAdmin &&
-        (pClean === botPhoneClean ||
-         (botLidClean && pClean === botLidClean) ||
-         p.id === botId ||
-         p.id === botLid)
-      ) {
+      const matchesBot =
+        pAllClean.some((c) => botCandidates.has(c)) ||
+        pAllNorm.some((n) => botNormalized.has(n));
+
+      if (matchesBot && isAdmin) {
         isBotAdmin = true;
       }
     }
 
-    console.log(`[Admin Verification] Group: "${meta.subject}" | Bot Phone: ${botPhoneClean} | Bot LID: ${botLidClean} | isBotAdmin: ${isBotAdmin}`);
+    console.log(
+      `[Admin Verification] Group: "${meta.subject}" (${meta.addressingMode || 'pn'}) | Bot IDs: ${Array.from(botCandidates).join(',')} | isBotAdmin: ${isBotAdmin} | isSenderAdmin: ${isSenderAdmin}`
+    );
 
     return {
       isSenderAdmin,
       isBotAdmin,
       groupSubject: meta.subject || 'WhatsApp Group',
+      matchedSenderId,
     };
   } catch (err: any) {
     console.error('[checkPermissions error]:', err.message);
     return { isSenderAdmin: false, isBotAdmin: false, groupSubject: 'WhatsApp Group' };
   }
+}
+
+/**
+ * Bulletproof Baileys v7 Group Message Revoke (handles PN + LID addressing modes)
+ */
+async function deleteMessageSafely(
+  sock: WASocket,
+  remoteJid: string,
+  msg: proto.IWebMessageInfo,
+  matchedSenderId?: string
+): Promise<boolean> {
+  const key = msg.key;
+  if (!key?.id) return false;
+
+  const participantCandidates: string[] = [];
+  const rawParticipant = key.participant || (msg as any).participant || '';
+  const altParticipant = (key as any).participantAlt || '';
+
+  for (const cand of [
+    rawParticipant ? jidNormalizedUser(rawParticipant) : '',
+    matchedSenderId ? jidNormalizedUser(matchedSenderId) : '',
+    altParticipant ? jidNormalizedUser(altParticipant) : '',
+    rawParticipant,
+  ]) {
+    if (cand && !participantCandidates.includes(cand)) {
+      participantCandidates.push(cand);
+    }
+  }
+
+  let lastErr: any = null;
+  for (const participant of participantCandidates) {
+    try {
+      await sock.sendMessage(remoteJid, {
+        delete: {
+          remoteJid,
+          fromMe: Boolean(key.fromMe),
+          id: key.id,
+          participant,
+        },
+      });
+      return true;
+    } catch (err: any) {
+      lastErr = err;
+    }
+  }
+
+  try {
+    await sock.sendMessage(remoteJid, { delete: key });
+    return true;
+  } catch (err: any) {
+    lastErr = err;
+  }
+
+  console.error('[Delete Message FAILED]:', lastErr?.message || lastErr);
+  return false;
 }
 
 // -------------------------------------------------------------
@@ -1230,7 +1355,7 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
         }
       );
 
-      if (aiResult.reply) {
+      if (aiResult.reply && aiResult.provider !== 'none') {
         const sent = await safeSendMessage(
           sock,
           remoteJid,
@@ -1265,33 +1390,39 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
   // -------------------------------------------------------------
   const senderJid = msg.key.participant || msg.participant || '';
   if (!senderJid) return;
+  const senderAltJid = (msg.key as any).participantAlt || '';
 
-  const cleanPhone = senderJid.split('@')[0].split(':')[0];
+  const cleanPhone = (senderAltJid || senderJid).split('@')[0].split(':')[0];
 
-  // 1. Verify Admin Permissions
-  const { isSenderAdmin, isBotAdmin, groupSubject } = await checkPermissions(sock, remoteJid, senderJid);
+  // 1. Verify Admin Permissions (supports both Baileys v7 @lid and @s.whatsapp.net)
+  const { isSenderAdmin, isBotAdmin, groupSubject, matchedSenderId } = await checkPermissions(
+    sock,
+    remoteJid,
+    senderJid,
+    false,
+    senderAltJid
+  );
+  const canonicalSender = matchedSenderId || normalizeJid(senderJid);
 
   // -------------------------------------------------------------
   // FEATURE 0: ACTIVE INDIVIDUAL RESTRICTION (MESSAGE INTERCEPTION & AUTO-DELETE)
   // -------------------------------------------------------------
   if (settings.individualMuteEnabled || settings.antiStickerSpam) {
-    const restrictionCheck = isUserRestricted(remoteJid, senderJid);
+    const restrictionCheck = isUserRestricted(remoteJid, canonicalSender);
     if (restrictionCheck.restricted) {
       // Group Admins are never restricted if Admin Shield is active
-      if (isSenderAdmin) {
+      if (isSenderAdmin && settings.adminShield) {
         console.log(`[Individual Mute] @${cleanPhone} is an Admin with Admin Shield active. Lifting restriction.`);
-        unrestrictUser(remoteJid, senderJid);
+        unrestrictUser(remoteJid, canonicalSender);
       } else {
         const remainingSec = Math.round(restrictionCheck.remainingMs / 1000);
         console.log(`[Individual Mute ACTIVE] Intercepted message from restricted user @${cleanPhone} in "${groupSubject}". Auto-deleting message (${remainingSec}s remaining)...`);
 
-        try {
-          await sock.sendMessage(remoteJid, { delete: msg.key });
+        const deleted = await deleteMessageSafely(sock, remoteJid, msg, matchedSenderId);
+        if (deleted) {
           db.stats.deletedMessages++;
           db.stats.restrictedMessagesBlocked = (db.stats.restrictedMessagesBlocked || 0) + 1;
           saveDatabase();
-        } catch (delErr: any) {
-          console.error('[Individual Mute] Failed to delete message from restricted user:', delErr.message);
         }
 
         // Halts all processing! Message deleted instantly, other members chat freely.
@@ -1300,7 +1431,17 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
     }
   }
 
-  const isSticker = Boolean(realMsg.stickerMessage);
+  const rawMsgAny = msg.message as any;
+  const realMsgAny = realMsg as any;
+  const isSticker = Boolean(
+    realMsg.stickerMessage ||
+    rawMsgAny?.lottieStickerMessage ||
+    realMsgAny?.lottieStickerMessage ||
+    realMsgAny?.stickerPackMessage ||
+    rawMsgAny?.stickerPackMessage ||
+    rawMsgAny?.associatedChildMessage?.message?.stickerMessage ||
+    rawMsgAny?.associatedChildMessage?.message?.lottieStickerMessage
+  );
   const isGif = Boolean(realMsg.videoMessage?.gifPlayback || realMsg.imageMessage?.mimetype === 'image/gif' || realMsg.videoMessage?.mimetype === 'image/gif');
   const isVideo = Boolean(realMsg.videoMessage) && !isGif;
   const isImage = Boolean(realMsg.imageMessage) && !isGif;
@@ -1316,23 +1457,21 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
       const stickerLimit = settings.individualMuteStickerLimit || 5;
       const durationMins = settings.individualMuteDurationMinutes || 10;
 
-      const isSpam = recordStickerAndCheckSpam(remoteJid, senderJid, windowSec, stickerLimit);
+      const isSpam = recordStickerAndCheckSpam(remoteJid, canonicalSender, windowSec, stickerLimit);
       if (isSpam) {
         console.log(`[Anti-Sticker Spam Triggered] Restricting @${cleanPhone} for ${durationMins} minutes (${stickerLimit}+ stickers in ${windowSec}s in ${groupSubject})`);
 
         // 1. Delete the spam sticker immediately
-        try {
-          await sock.sendMessage(remoteJid, { delete: msg.key });
+        const deleted = await deleteMessageSafely(sock, remoteJid, msg, matchedSenderId);
+        if (deleted) {
           db.stats.deletedMessages++;
-        } catch (delErr: any) {
-          console.error('[Anti-Sticker Spam] Failed to delete spam sticker:', delErr.message);
         }
 
         // 2. Restrict ONLY THIS MEMBER for 10 minutes (Do NOT lock group settings for other members)
         restrictUser(
           remoteJid,
           groupSubject,
-          senderJid,
+          canonicalSender,
           cleanPhone,
           durationMins,
           `${windowSec} সেকেন্ডে ${stickerLimit}টি স্টিকার পাঠানো (Sticker Spam)`
@@ -1417,20 +1556,18 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
   // VIOLATION ENFORCEMENT (Delete -> Warning -> Auto Kick on 3rd)
   // -------------------------------------------------------------
   if (violationType) {
-    console.log(`[Moderation Triggered] ${violationType} in ${groupSubject} by @${cleanPhone}`);
+    console.log(`[Moderation Triggered] ${violationType} in ${groupSubject} by @${cleanPhone} (isBotAdmin=${isBotAdmin})`);
 
-    // Step 1: Real Message Delete Operation
-    let deleteSuccessful = false;
-    try {
-      await sock.sendMessage(remoteJid, { delete: msg.key });
-      deleteSuccessful = true;
+    // Step 1: Real Message Delete Operation (PN + LID compatible)
+    const deleteSuccessful = await deleteMessageSafely(sock, remoteJid, msg, matchedSenderId);
+    if (deleteSuccessful) {
       db.stats.deletedMessages++;
-    } catch (err: any) {
-      console.error('Failed to delete violating message:', err.message);
+    } else if (!isBotAdmin) {
+      console.warn(`[Moderation Warn] Cannot delete message in "${groupSubject}" because bot is NOT Group Admin.`);
     }
 
     // Step 2: Warning Counter per Member per Group
-    const warningKey = `${remoteJid}:${senderJid}`;
+    const warningKey = `${remoteJid}:${canonicalSender}`;
     if (!db.warnings[warningKey]) {
       db.warnings[warningKey] = {
         count: 0,
@@ -1450,44 +1587,88 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
 
     const warningCount = db.warnings[warningKey].count;
 
-    // Feature 10: THREE WARNING AUTO KICK
-    if (!settings.silentModeration) {
-      if (warningCount === 1) {
-        await sock.sendMessage(remoteJid, {
-          text: `⚠️ [সতর্কবার্তা ১/৩]\nসদস্য @${cleanPhone}, গ্রুপে ${violationDetails}!\nআপনার মেসেজটি মুছে দেওয়া হয়েছে। নিয়ম মেনে চলার অনুরোধ করা হচ্ছে।`,
-          mentions: [senderJid],
-        });
-      } else if (warningCount === 2) {
-        await sock.sendMessage(remoteJid, {
-          text: `⚠️ [সতর্কবার্তা ২/৩]\nসদস্য @${cleanPhone}, এটি আপনার দ্বিতীয় সতর্কতা (${violationDetails})!\nপরবর্তী আরেকটি নিয়মলঙ্ঘনে আপনাকে স্বয়ংক্রিয়ভাবে গ্রুপ থেকে রিমুভ (Kick) করা হবে!`,
-          mentions: [senderJid],
-        });
-      } else if (warningCount >= 3) {
-        if (settings.autoKick3Warnings) {
-          const freshPerms = await checkPermissions(sock, remoteJid, senderJid, true);
-          if (freshPerms.isSenderAdmin) {
-            await safeSendMessage(sock, remoteJid, {
-              text: `🛡️ [অ্যাডমিন সুরক্ষা Notice]\nসদস্য @${cleanPhone} ৩টি সতর্কতা অতিক্রম করেছেন। তবে তিনি একজন গ্রুপ অ্যাডমিন হওয়ায় তাকে কিক করা সম্ভব নয়।`,
-              mentions: [senderJid],
-            });
-            return;
-          }
-          if (freshPerms.isBotAdmin) {
-            try {
-              const targetJid = normalizeJid(senderJid);
-              await sock.sendMessage(remoteJid, {
-                text: `🚨 [চূড়ান্ত অ্যাকশন - ৩য় সতর্কতা]\nসদস্য @${cleanPhone} ৩ বার গ্রুপের নিয়ম লঙ্ঘন করেছেন (${violationDetails})।\nনিরাপত্তার স্বার্থে তাকে গ্রুপ থেকে রিমুভ করা হচ্ছে!`,
-                mentions: [senderJid],
-              });
-              await sock.groupParticipantsUpdate(remoteJid, [targetJid], 'remove');
-              db.stats.kickedMembers++;
-              delete db.warnings[warningKey];
-              saveDatabase();
-            } catch (kickErr: any) {
-              console.error('[Kick FAILED]:', kickErr);
-            }
+    // Feature 10: THREE WARNING AUTO KICK (Always enforce kick even if silentModeration is enabled)
+    if (warningCount === 1 && !settings.silentModeration) {
+      await safeSendMessage(sock, remoteJid, {
+        text: `⚠️ [সতর্কবার্তা ১/৩]\nসদস্য @${cleanPhone}, গ্রুপে ${violationDetails}!\nআপনার মেসেজটি মুছে দেওয়া হয়েছে। নিয়ম মেনে চলার অনুরোধ করা হচ্ছে।`,
+        mentions: [senderJid],
+      });
+    } else if (warningCount === 2 && !settings.silentModeration) {
+      await safeSendMessage(sock, remoteJid, {
+        text: `⚠️ [সতর্কবার্তা ২/৩]\nসদস্য @${cleanPhone}, এটি আপনার দ্বিতীয় সতর্কতা (${violationDetails})!\nপরবর্তী আরেকটি নিয়মলঙ্ঘনে আপনাকে স্বয়ংক্রিয়ভাবে গ্রুপ থেকে রিমুভ (Kick) করা হবে!`,
+        mentions: [senderJid],
+      });
+    } else if (warningCount >= 3 && settings.autoKick3Warnings) {
+      const freshPerms = await checkPermissions(sock, remoteJid, senderJid, true, senderAltJid);
+      if (freshPerms.isSenderAdmin) {
+        if (!settings.silentModeration) {
+          await safeSendMessage(sock, remoteJid, {
+            text: `🛡️ [অ্যাডমিন সুরক্ষা Notice]\nসদস্য @${cleanPhone} ৩টি সতর্কতা অতিক্রম করেছেন। তবে তিনি একজন গ্রুপ অ্যাডমিন হওয়ায় তাকে কিক করা সম্ভব নয়।`,
+            mentions: [senderJid],
+          });
+        }
+      } else if (freshPerms.isBotAdmin) {
+        const kickTargets: string[] = [];
+        for (const cand of [
+          freshPerms.matchedSenderId,
+          normalizeJid(senderJid),
+          senderAltJid ? normalizeJid(senderAltJid) : '',
+        ]) {
+          if (cand && !kickTargets.includes(cand)) {
+            kickTargets.push(cand);
           }
         }
+
+        if (!settings.silentModeration) {
+          await safeSendMessage(sock, remoteJid, {
+            text: `🚨 [চূড়ান্ত অ্যাকশন - ৩য় সতর্কতা]\nসদস্য @${cleanPhone} ৩ বার গ্রুপের নিয়ম লঙ্ঘন করেছেন (${violationDetails})।\nনিরাপত্তার স্বার্থে তাকে গ্রুপ থেকে রিমুভ করা হচ্ছে!`,
+            mentions: [senderJid],
+          });
+        }
+
+        let kickedOk = false;
+        let lastKickStatus = '';
+        for (const targetJid of kickTargets) {
+          try {
+            const kickRes: any = await sock.groupParticipantsUpdate(remoteJid, [targetJid], 'remove');
+            const status = Array.isArray(kickRes) ? String(kickRes[0]?.status || '200') : '200';
+            lastKickStatus = status;
+            if (status === '200' || status === '207') {
+              kickedOk = true;
+              break;
+            }
+            console.warn(`[Kick Attempt] Target ${targetJid} returned status ${status}`);
+          } catch (kickErr: any) {
+            lastKickStatus = kickErr?.message || String(kickErr);
+            console.error(`[Kick FAILED for ${targetJid}]:`, lastKickStatus);
+          }
+        }
+
+        if (kickedOk) {
+          db.stats.kickedMembers++;
+          delete db.warnings[warningKey];
+          saveDatabase();
+        } else {
+          addActivityLog({
+            groupId: remoteJid,
+            groupName: groupSubject,
+            senderJid,
+            senderPhone: cleanPhone,
+            action: 'error',
+            reason: `মেম্বার রিমুভ ব্যর্থ হয়েছে (Status: ${lastKickStatus || 'Unknown'})`,
+            details: 'বট গ্রুপের অ্যাডমিন কিনা বা ইউজার গ্রুপের মালিক কিনা যাচাই করুন।',
+          });
+        }
+      } else {
+        addActivityLog({
+          groupId: remoteJid,
+          groupName: groupSubject,
+          senderJid,
+          senderPhone: cleanPhone,
+          action: 'error',
+          reason: 'মেম্বার রিমুভ করা যায়নি — বট এই গ্রুপের অ্যাডমিন নয়',
+          details: 'মেসেজ ডিলিট ও মেম্বার রিমুভ করার জন্য বট নম্বরটিকে গ্রুপ অ্যাডমিন (Admin) বানান।',
+        });
       }
     }
 
@@ -1499,7 +1680,7 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
       senderJid,
       senderPhone: cleanPhone,
       action: warningCount >= 3 && settings.autoKick3Warnings ? 'kicked' : 'warned',
-      reason: `${violationType} (${actionMap[warningCount] || 'সতর্কতা'})`,
+      reason: `${violationType} (${actionMap[warningCount] || 'সতর্কতা'})${deleteSuccessful ? '' : ' [Delete Failed: বট অ্যাডমিন নয়]'}`,
       details: violationDetails,
       warningCount,
     });
@@ -1596,7 +1777,7 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
           }
         );
 
-        if (aiResult.reply) {
+        if (aiResult.reply && aiResult.provider !== 'none') {
           lastAiReplyTime[remoteJid] = now;
 
           // Always reply directly to user's private inbox JID as requested
