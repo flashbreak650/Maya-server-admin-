@@ -2,7 +2,13 @@ node_modules/
 build/
 dist/
 coverage/
+.sessions/
+data/*.tmp
+data/moderation_db.json
+public/assets/aistudio/
 .DS_Store
 *.log
-.env*
+.env
+.env.local
+.env.production
 !.env.example

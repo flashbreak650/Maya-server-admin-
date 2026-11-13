@@ -1,5 +1,5 @@
-{ "homepage": "https://flashbreak650.github.io/Maya-server-admin-/",
-  
+{
+  "homepage": "https://flashbreak650.github.io/Maya-server-admin-/",
   "name": "react-example",
   "private": true,
   "version": "0.0.0",
@@ -13,6 +13,9 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/cli": "^8.6.2",
+    "@capacitor/core": "^8.6.2",
     "@google/genai": "^3.1.0",
     "@google/generative-ai": "^0.24.1",
     "@tailwindcss/vite": "^4.3.3",

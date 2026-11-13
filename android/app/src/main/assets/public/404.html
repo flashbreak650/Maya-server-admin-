@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="bn">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WAGuard — Redirecting...</title>
+    <script>
+      // Single Page App redirect for GitHub Pages
+      // Redirects any 404 route back to index.html with the route preserved
+      var pathSegmentsToKeep = 1; // 1 for repo-name subpath on username.github.io/repo-name/
+      var l = window.location;
+      l.replace(
+        l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
+        l.pathname.split('/').slice(0, 1 + pathSegmentsToKeep).join('/') + '/?p=/' +
+        l.pathname.slice(1).split('/').slice(pathSegmentsToKeep).join('/').replace(/&/g, '~and~') +
+        (l.search ? '&q=' + l.search.slice(1).replace(/&/g, '~and~') : '') +
+        l.hash
+      );
+    </script>
+  </head>
+  <body>
+    <p style="font-family:sans-serif;text-align:center;padding:40px;color:#087f55;">Redirecting to WAGuard...</p>
+  </body>
+</html>

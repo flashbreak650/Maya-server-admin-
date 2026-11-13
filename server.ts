@@ -18,6 +18,7 @@ import makeWASocket, {
 import {
   processIncomingMessage,
   startGroupLockMonitor,
+  startRestrictedUsersMonitor,
   getSettings as getModerationSettings,
   updateSettings as updateModerationSettings,
   getActivityLogs,
@@ -28,6 +29,8 @@ import {
   getActiveRestrictedUsers,
   unrestrictUser,
 } from './src/moderationEngine.ts';
+
+startRestrictedUsersMonitor(() => currentSock);
 
 dotenv.config();
 
@@ -484,7 +487,10 @@ app.get('/api/dashboard', (req: Request, res: Response) => {
       groupLocksTriggered: modStats.groupLocksTriggered,
     },
     moderation: {
-      settings: modSettings,
+      settings: {
+        ...modSettings,
+        aiKeys: (modSettings.aiKeys || []).map(k => ({ ...k, key: maskAiKey(k.key) }))
+      },
       stats: modStats,
       restrictedUsers: getActiveRestrictedUsers(),
     },
@@ -493,7 +499,16 @@ app.get('/api/dashboard', (req: Request, res: Response) => {
 
 // Moderation Settings Endpoints
 app.get('/api/moderation/settings', (req: Request, res: Response) => {
-  res.json({ success: true, settings: getModerationSettings() });
+  const settings = getModerationSettings();
+  if (settings.aiKeys) {
+    settings.aiKeys = settings.aiKeys.map(k => ({ ...k, key: maskAiKey(k.key) }));
+  }
+  // Mask legacy single keys
+  if (settings.geminiApiKey) settings.geminiApiKey = maskAiKey(settings.geminiApiKey);
+  if (settings.groqApiKey) settings.groqApiKey = maskAiKey(settings.groqApiKey);
+  if (settings.openrouterApiKey) settings.openrouterApiKey = maskAiKey(settings.openrouterApiKey);
+  
+  res.json({ success: true, settings });
 });
 
 app.post('/api/moderation/settings', (req: Request, res: Response) => {
@@ -604,7 +619,70 @@ app.post('/api/ai/test', async (req: Request, res: Response) => {
   });
 });
 
-// 7. Maya AI Test Endpoint
+// 7. AI Key Management & Masking
+const maskAiKey = (key: string) => {
+  if (!key) return '';
+  if (key.length <= 10) return '****';
+  return key.substring(0, 6) + '...' + key.substring(key.length - 4);
+};
+
+app.get('/api/moderation/ai-keys', (req: Request, res: Response) => {
+  const settings = getModerationSettings();
+  const maskedKeys = (settings.aiKeys || []).map(k => ({ ...k, key: maskAiKey(k.key) }));
+  res.json({ success: true, keys: maskedKeys });
+});
+
+app.post('/api/moderation/ai-keys/add', (req: Request, res: Response) => {
+  const { key, provider, label } = req.body;
+  if (!key || !provider) return res.status(400).json({ error: 'Key and provider are required' });
+
+  const settings = getModerationSettings();
+  const keys = settings.aiKeys || [];
+  
+  const newKey = {
+    id: 'key_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    key,
+    provider,
+    label: label || `${provider} Key ${keys.length + 1}`,
+    status: 'active' as const,
+    cooldownUntil: 0,
+    lastUsed: 0,
+    totalRequests: 0,
+    failureCount: 0
+  };
+
+  const updatedSettings = updateModerationSettings({ aiKeys: [...keys, newKey] });
+  const maskedKeys = (updatedSettings.aiKeys || []).map(k => ({ ...k, key: maskAiKey(k.key) }));
+  res.json({ success: true, key: { ...newKey, key: maskAiKey(newKey.key) }, keys: maskedKeys });
+});
+
+app.post('/api/moderation/ai-keys/remove', (req: Request, res: Response) => {
+  const { id } = req.body;
+  if (!id) return res.status(400).json({ error: 'Key ID is required' });
+
+  const settings = getModerationSettings();
+  const keys = (settings.aiKeys || []).filter(k => k.id !== id);
+  const updatedSettings = updateModerationSettings({ aiKeys: keys });
+  const maskedKeys = (updatedSettings.aiKeys || []).map(k => ({ ...k, key: maskAiKey(k.key) }));
+  res.json({ success: true, keys: maskedKeys });
+});
+
+app.post('/api/moderation/ai-keys/reset', (req: Request, res: Response) => {
+  const settings = getModerationSettings();
+  const keys = (settings.aiKeys || []).map(k => ({
+    ...k,
+    status: 'active' as const,
+    failureCount: 0,
+    totalRequests: 0,
+    lastError: undefined,
+    cooldownUntil: 0
+  }));
+  const updatedSettings = updateModerationSettings({ aiKeys: keys });
+  const maskedKeys = (updatedSettings.aiKeys || []).map(k => ({ ...k, key: maskAiKey(k.key) }));
+  res.json({ success: true, keys: maskedKeys });
+});
+
+// Maya AI Test Endpoint
 app.post('/api/maya/test', async (req: Request, res: Response) => {
   try {
     const { text, settings: mayaSettings } = req.body;
@@ -626,9 +704,6 @@ app.post('/api/maya/test', async (req: Request, res: Response) => {
         memoryLimit: mayaSettings?.mayaMemoryLimit ?? currentSettings.mayaMemoryLimit ?? 10,
         aiProvider: mayaSettings?.aiProvider ?? currentSettings.aiProvider ?? 'auto',
         geminiModel: mayaSettings?.geminiModel || currentSettings.geminiModel || 'gemini-3.1-flash-lite',
-        geminiApiKey: mayaSettings?.geminiApiKey || currentSettings.geminiApiKey,
-        groqApiKey: mayaSettings?.groqApiKey || currentSettings.groqApiKey,
-        openrouterApiKey: mayaSettings?.openrouterApiKey || currentSettings.openrouterApiKey,
         isPrivate: true,
       }
     );
@@ -639,6 +714,7 @@ app.post('/api/maya/test', async (req: Request, res: Response) => {
       provider: aiResult.provider,
       latencyMs: aiResult.latencyMs,
       error: aiResult.error,
+      keyLabel: aiResult.keyLabel
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });

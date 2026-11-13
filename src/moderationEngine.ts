@@ -48,6 +48,27 @@ export interface ModerationSettings {
   mayaReplyFrequency: number; // 0-100 probability
   mayaLanguage: string;
   mayaMemoryLimit: number;
+  // AI Moderation & Silent Mode
+  aiBadwordDetection: boolean;
+  silentModeration: boolean;
+  mayaReplyMode: 'group' | 'inbox' | 'off';
+  // AI Provider Management
+  aiKeys: AiKey[];
+  aiAutoRotate: boolean;
+  aiProviderPriority: ('gemini' | 'groq' | 'openrouter')[];
+}
+
+export interface AiKey {
+  id: string;
+  key: string;
+  provider: 'gemini' | 'groq' | 'openrouter';
+  label: string;
+  status: 'active' | 'exhausted' | 'invalid' | 'cooldown';
+  cooldownUntil: number;
+  lastUsed: number;
+  totalRequests: number;
+  failureCount: number;
+  lastError?: string;
 }
 
 export interface ActivityLog {
@@ -137,6 +158,12 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   mayaReplyFrequency: 100,
   mayaLanguage: 'auto',
   mayaMemoryLimit: 20,
+  aiBadwordDetection: false,
+  silentModeration: false,
+  mayaReplyMode: 'group',
+  aiKeys: [],
+  aiAutoRotate: true,
+  aiProviderPriority: ['gemini', 'groq', 'openrouter'],
 };
 
 // In-memory runtime database
@@ -211,14 +238,131 @@ const stickerTimestamps: Record<string, number[]> = {}; // key: `${groupId}:${se
 const groupMetaCache: Record<string, { meta: any; fetchedAt: number }> = {};
 const lastAiReplyTime: Record<string, number> = {}; // key: groupId
 
-export function getSettings(): ModerationSettings {
-  return { ...db.settings };
+const unmaskedKeyVault = new Map<string, string>();
+
+export function registerUnmaskedKey(id: string, keyString?: string) {
+  if (id && keyString && !isMaskedKeyString(keyString)) {
+    unmaskedKeyVault.set(id, keyString.trim());
+  }
 }
 
+export function getUnmaskedKey(id: string, fallbackKey?: string): string {
+  if (fallbackKey && !isMaskedKeyString(fallbackKey)) {
+    registerUnmaskedKey(id, fallbackKey);
+    return fallbackKey.trim();
+  }
+  return unmaskedKeyVault.get(id) || (fallbackKey && !isMaskedKeyString(fallbackKey) ? fallbackKey.trim() : fallbackKey || '');
+}
+
+export function getSettings(): ModerationSettings {
+  return JSON.parse(JSON.stringify(db.settings));
+}
+
+const isMaskedKeyString = (str?: string): boolean => {
+  if (!str) return false;
+  return str.includes('...') || str.includes('****');
+};
+
 export function updateSettings(newSettings: Partial<ModerationSettings>): ModerationSettings {
-  db.settings = { ...db.settings, ...newSettings };
+  const patch = { ...newSettings };
+
+  // 1. Prevent masked strings from overwriting real plaintext keys in single card settings
+  if (isMaskedKeyString(patch.geminiApiKey)) {
+    patch.geminiApiKey = db.settings.geminiApiKey;
+  } else if (patch.geminiApiKey && patch.geminiApiKey.trim()) {
+    patch.geminiApiKey = patch.geminiApiKey.trim();
+  }
+
+  if (isMaskedKeyString(patch.groqApiKey)) {
+    patch.groqApiKey = db.settings.groqApiKey;
+  } else if (patch.groqApiKey && patch.groqApiKey.trim()) {
+    patch.groqApiKey = patch.groqApiKey.trim();
+  }
+
+  if (isMaskedKeyString(patch.openrouterApiKey)) {
+    patch.openrouterApiKey = db.settings.openrouterApiKey;
+  } else if (patch.openrouterApiKey && patch.openrouterApiKey.trim()) {
+    patch.openrouterApiKey = patch.openrouterApiKey.trim();
+  }
+
+  // 2. Safely process aiKeys pool without wiping existing keys
+  let currentKeys = [...(db.settings.aiKeys || [])];
+
+  if (patch.aiKeys && Array.isArray(patch.aiKeys)) {
+    const existingMap = new Map(currentKeys.map(k => [k.id, getUnmaskedKey(k.id, k.key)]));
+    currentKeys = patch.aiKeys.map(k => {
+      const realKey = !isMaskedKeyString(k.key) ? k.key.trim() : (existingMap.get(k.id) || getUnmaskedKey(k.id, k.key));
+      if (realKey && !isMaskedKeyString(realKey)) {
+        registerUnmaskedKey(k.id, realKey);
+      }
+      return { ...k, key: realKey };
+    });
+  }
+
+  // 3. If a NEW unmasked key is provided in single card inputs, append it to pool WITHOUT replacing existing keys
+  if (newSettings.geminiApiKey && !isMaskedKeyString(newSettings.geminiApiKey)) {
+    const cleanKey = newSettings.geminiApiKey.trim();
+    if (cleanKey && !currentKeys.some(k => k.key === cleanKey)) {
+      currentKeys.push({
+        id: 'key_gemini_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+        key: cleanKey,
+        provider: 'gemini',
+        label: 'Gemini Card Key',
+        status: 'active',
+        cooldownUntil: 0,
+        lastUsed: 0,
+        totalRequests: 0,
+        failureCount: 0
+      });
+    }
+  }
+
+  if (newSettings.groqApiKey && !isMaskedKeyString(newSettings.groqApiKey)) {
+    const cleanKey = newSettings.groqApiKey.trim();
+    if (cleanKey && !currentKeys.some(k => k.key === cleanKey)) {
+      currentKeys.push({
+        id: 'key_groq_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+        key: cleanKey,
+        provider: 'groq',
+        label: 'Groq Card Key',
+        status: 'active',
+        cooldownUntil: 0,
+        lastUsed: 0,
+        totalRequests: 0,
+        failureCount: 0
+      });
+    }
+  }
+
+  if (newSettings.openrouterApiKey && !isMaskedKeyString(newSettings.openrouterApiKey)) {
+    const cleanKey = newSettings.openrouterApiKey.trim();
+    if (cleanKey && !currentKeys.some(k => k.key === cleanKey)) {
+      currentKeys.push({
+        id: 'key_openrouter_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+        key: cleanKey,
+        provider: 'openrouter',
+        label: 'OpenRouter Card Key',
+        status: 'active',
+        cooldownUntil: 0,
+        lastUsed: 0,
+        totalRequests: 0,
+        failureCount: 0
+      });
+    }
+  }
+
+  patch.aiKeys = currentKeys;
+
+  // Register all active keys into vault
+  for (const k of currentKeys) {
+    if (k.id && k.key && !isMaskedKeyString(k.key)) {
+      registerUnmaskedKey(k.id, k.key);
+    }
+  }
+
+  db.settings = { ...db.settings, ...patch };
   saveDatabase();
-  return { ...db.settings };
+  return JSON.parse(JSON.stringify(db.settings));
 }
 
 export function getStats() {
@@ -257,6 +401,12 @@ export function addActivityLog(log: Omit<ActivityLog, 'id' | 'timestamp'>) {
 // -------------------------------------------------------------
 // INDIVIDUAL TEMPORARY MUTE ENGINE (Auto-Delete Interception)
 // -------------------------------------------------------------
+let globalSocketGetter: (() => WASocket | null) | null = null;
+
+export function setSocketGetter(getter: () => WASocket | null) {
+  globalSocketGetter = getter;
+}
+
 export function getRestrictedUserKey(groupId: string, senderJid: string): string {
   return `${groupId}:${normalizeJid(senderJid)}`;
 }
@@ -293,6 +443,16 @@ export function isUserRestricted(
       action: 'unmuted',
       reason: 'সাময়িক রেস্ট্রিকশনের মেয়াদ শেষ হয়েছে (Auto Lifted)',
     });
+
+    if (globalSocketGetter) {
+      const sock = globalSocketGetter();
+      if (sock && sock.authState?.creds?.registered) {
+        safeSendMessage(sock, groupId, {
+          text: `✅ WAGuard Security Update\n\n@${restriction.senderPhone}-এর ১০ মিনিটের Temporary Restriction শেষ হয়েছে। তিনি এখন আবার স্বাভাবিকভাবে গ্রুপে মেসেজ করতে পারবেন।`,
+          mentions: [restriction.senderJid],
+        }).catch(() => {});
+      }
+    }
 
     return { restricted: false, remainingMs: 0 };
   }
@@ -368,6 +528,17 @@ export function unrestrictUser(groupId: string, senderJid: string): boolean {
       action: 'unmuted',
       reason: 'ম্যানুয়ালি রেস্ট্রিকশন তুলে দেওয়া হয়েছে (Manual Unmute)',
     });
+
+    if (globalSocketGetter) {
+      const sock = globalSocketGetter();
+      if (sock && sock.authState?.creds?.registered) {
+        safeSendMessage(sock, groupId, {
+          text: `✅ WAGuard Security Update\n\n@${restriction.senderPhone}-এর ১০ মিনিটের Temporary Restriction শেষ হয়েছে। তিনি এখন আবার স্বাভাবিকভাবে গ্রুপে মেসেজ করতে পারবেন।`,
+          mentions: [restriction.senderJid],
+        }).catch(() => {});
+      }
+    }
+
     return true;
   }
   return false;
@@ -383,6 +554,15 @@ export function getActiveRestrictedUsers(): Array<RestrictedUser & { remainingSe
     if (now >= user.expiresAt) {
       delete db.restrictedUsers[key];
       saveDatabase();
+      if (globalSocketGetter) {
+        const sock = globalSocketGetter();
+        if (sock && sock.authState?.creds?.registered) {
+          safeSendMessage(sock, user.groupId, {
+            text: `✅ WAGuard Security Update\n\n@${user.senderPhone}-এর ১০ মিনিটের Temporary Restriction শেষ হয়েছে। তিনি এখন আবার স্বাভাবিকভাবে গ্রুপে মেসেজ করতে পারবেন।`,
+            mentions: [user.senderJid],
+          }).catch(() => {});
+        }
+      }
     } else {
       const remainingSec = Math.max(0, Math.ceil((user.expiresAt - now) / 1000));
       const mins = Math.floor(remainingSec / 60);
@@ -405,9 +585,10 @@ export function recordStickerAndCheckIndividualSpam(
   groupId: string,
   senderJid: string,
   timeWindowSec: number = 5,
-  limit: number = 3
+  limit: number = 5
 ): boolean {
-  const key = `${groupId}:${senderJid}`;
+  const cleanSender = normalizeJid(senderJid);
+  const key = `${groupId}:${cleanSender}`;
   const now = Date.now();
   if (!stickerTimestamps[key]) {
     stickerTimestamps[key] = [];
@@ -421,8 +602,12 @@ export function recordStickerAndCheckIndividualSpam(
 }
 
 // Background monitor to lift expired restrictions automatically
-export function startRestrictedUsersMonitor() {
-  setInterval(() => {
+export function startRestrictedUsersMonitor(sockGetter?: () => WASocket | null) {
+  if (sockGetter) {
+    globalSocketGetter = sockGetter;
+  }
+
+  setInterval(async () => {
     if (!db.restrictedUsers) return;
     const now = Date.now();
     let changed = false;
@@ -440,17 +625,27 @@ export function startRestrictedUsersMonitor() {
           action: 'unmuted',
           reason: 'সাময়িক রেস্ট্রিকশনের মেয়াদ শেষ হয়েছে (Auto Lifted)',
         });
+
+        const activeGetter = sockGetter || globalSocketGetter;
+        if (activeGetter) {
+          const sock = activeGetter();
+          if (sock && sock.authState?.creds?.registered) {
+            try {
+              await safeSendMessage(sock, user.groupId, {
+                text: `✅ WAGuard Security Update\n\n@${user.senderPhone}-এর ১০ মিনিটের Temporary Restriction শেষ হয়েছে। তিনি এখন আবার স্বাভাবিকভাবে গ্রুপে মেসেজ করতে পারবেন।`,
+                mentions: [user.senderJid],
+              });
+            } catch (e) {}
+          }
+        }
       }
     }
 
     if (changed) {
       saveDatabase();
     }
-  }, 10000);
+  }, 5000);
 }
-
-// Start auto-lift timer
-startRestrictedUsersMonitor();
 
 // -------------------------------------------------------------
 // MULTILINGUAL ANTI-BADWORD MATCHING ENGINE
@@ -462,7 +657,7 @@ const BENGALI_BADWORDS = [
   'চুদা', 'চুদানি', 'চুদানির', 'চুদ', 'চোদা', 'চোদানি', 'চোদানির', 'মাদারচোদ',
   'মাদারচুদা', 'বাইনচোদ', 'বাইনচুদা', 'ভোনচোদ', 'কুত্তা', 'কুত্তার', 'কুত্তির',
   'শুয়োর', 'শুয়োরের', 'হারামি', 'হারামজাদা', 'হারামখোর', 'ভোদা', 'ভোদাই',
-  'ধোন', 'লুচ্চা', 'লুচ্চামি', 'গুয়া', 'গুয়ার', 'গুদে', 'গুদ', 'বাল'
+  'ধোন', 'লুচ্চা', 'লুচ্চামি', 'গুয়া', 'গুয়ার', 'গুদে', 'গুদ', 'বাল', 'সালা', 'শালা'
 ];
 
 // Sylheti local slang
@@ -476,7 +671,7 @@ const BANGLISH_BADWORDS = [
   'randi', 'randir', 'raandi', 'choda', 'chudani', 'chuda', 'chudanir',
   'madarchod', 'madarchuda', 'bainchod', 'baimchod', 'bhenchod', 'behnchod',
   'harami', 'haramzada', 'kuttar baccha', 'shuorer baccha', 'bhoda', 'bhodai',
-  'dhon', 'guya', 'gud', 'bal', 'chutia', 'chutiya', 'chod'
+  'dhon', 'guya', 'gud', 'bal', 'chutia', 'chutiya', 'chod', 'sala', 'shala'
 ];
 
 // Hindi / Urdu slang
@@ -496,14 +691,87 @@ const ARABIC_BADWORDS = [
   'شرموطة', 'قحبة', 'كس', 'طيز', 'منيوك', 'ابن الكلب', 'عرص', 'زب'
 ];
 
-// Safe words that contain small substrings like 'bal' or 'balti' and must NEVER be flagged
+// Safe words that contain small substrings like 'bal' or 'balti' or 'সালা' and must NEVER be flagged
 const SAFE_WHITELIST = new Set([
+  'আসসালামুয়ালাইকুম', 'আসসালামু', 'সালাম', 'ওয়ালাইকুম', 'সালামুয়ালাইকুম', 'সালামু আলাইকুম', 'আসসালামু আলাইকুম',
+  'ওয়ালাইকুম', 'ওয়ালাইকুম আসসালাম', 'ওয়ালাইকুমুস সালাম', 'সালাত', 'সালাতুল', 'সালাউদ্দিন', 'সালাহউদ্দিন', 'সালাহ',
+  'সবাই', 'কেমন', 'আছেন', 'আছো', 'ভালো', 'ধন্যবাদ', 'স্বাগতম', 'আলহামদুলিল্লাহ', 'ইনশাআল্লাহ', 'মাশাআল্লাহ', 'সুবহানাল্লাহ', 'জাজাকাল্লাহ',
+  'আল্লাহ', 'খোদা', 'নমস্কার', 'আদাব', 'শুভ', 'সকাল', 'সন্ধ্যা', 'রাত্রি', 'রাত', 'মাগফিরাত',
+  // Common Conversational Bengali Words & Phrasal Verbs (Must NEVER be flagged as badword)
+  'মাইর', 'মাইর খাবে', 'মাইর খাইবা', 'মারামারি', 'মার', 'মারা', 'মারবে', 'খাবে', 'খাবো', 'খাবি', 'খাওয়া', 'খাব',
+  'পড়বে', 'পড়বে না', 'যাবে', 'আসবে', 'করবে', 'হবে', 'থাকবে', 'দেবে', 'দিবে', 'বলবে', 'শুনবে', 'চলবে', 'ভাববে', 'জানবে', 'বুঝবে', 'পাবে',
+  'ভুল', 'ভুল করে', 'ভুল হলে', 'ভুলবশত', 'ক্ষমা', 'দয়া', 'কথা', 'কাজ', 'পড়া', 'লেখা', 'দেখা', 'খেলবে',
   'বালতি', 'বালিশ', 'বালক', 'বালিকা', 'বাল্য', 'বাল্যকাল', 'বালু', 'বাঙালি',
   'বাঙালী', 'ইকবাল', 'আবুল', 'সবল', 'দূর্বল', 'দুর্বল', 'বল', 'বলা', 'বলে',
-  'বলুন', 'বলবেন', 'বলো', 'কথা', 'ভালো', 'চাল', 'ডাল', 'পাল', 'কাল', 'মালয়েশিয়া',
+  'বলুন', 'বলবেন', 'বলো', 'চাল', 'ডাল', 'পাল', 'কাল', 'মালয়েশিয়া', 'মাল্টা', 'মালামাল', 'মালপত্র',
+  'ভাই', 'আপু', 'বন্ধু', 'আপুরা', 'ভাইয়া', 'ভাইরা', 'আপুনি', 'ভাল',
   'ball', 'balance', 'global', 'balcony', 'bald', 'iqbal', 'verbal', 'tribal',
-  'herbal', 'football', 'basketball', 'baseball', 'shobhal'
+  'herbal', 'football', 'basketball', 'baseball', 'shobhal', 'salam', 'assalamu', 'alaikum', 'walikum'
 ]);
+
+// Check if a token belongs to Islamic greetings or respectful words
+export function isSafeWordOrGreeting(token: string): boolean {
+  if (!token) return false;
+  const t = token.trim().toLowerCase();
+
+  // Islamic Greetings & Sacred Terms
+  if (
+    t.startsWith('সালাম') ||
+    t.startsWith('আসসালাম') ||
+    t.startsWith('ওয়ালাইকুম') ||
+    t.startsWith('ওয়ালাইকুম') ||
+    t.startsWith('সালাত') ||
+    t.startsWith('সালাউদ্দিন') ||
+    t.startsWith('সালাহ') ||
+    t.startsWith('আলহামদু') ||
+    t.startsWith('সুবহান') ||
+    t.startsWith('মাশা') ||
+    t.startsWith('ইনশা') ||
+    t.startsWith('জাজাক') ||
+    t.startsWith('আল্লাহ') ||
+    t.startsWith('নমস্কার') ||
+    t.startsWith('আদাব') ||
+    t.startsWith('মাগফিরাত')
+  ) {
+    return true;
+  }
+
+  // Safe conversational Bengali tokens
+  if (
+    t === 'মাইর' ||
+    t === 'খাবে' ||
+    t === 'মারবে' ||
+    t === 'ভুল' ||
+    t === 'মারামারি' ||
+    t === 'কথা' ||
+    t === 'কাজ'
+  ) {
+    return true;
+  }
+
+  // Banglish greetings
+  if (
+    t.startsWith('salam') ||
+    t.startsWith('assalam') ||
+    t.startsWith('alaikum') ||
+    t.startsWith('walikum') ||
+    t.startsWith('nomoshkar') ||
+    t.startsWith('adab')
+  ) {
+    return true;
+  }
+
+  return SAFE_WHITELIST.has(t);
+}
+
+// Regex to check if the message is a greeting (Salam, How are you, etc.)
+export function isRespectfulSalamOrGreeting(text: string): boolean {
+  if (!text) return false;
+  const clean = text.trim().toLowerCase();
+  // Expanded regex to cover almost all common variations of Salam and greetings
+  const salamRegex = /(?:^|\s)(?:আস+া?লামু|সালাম|ওয়ালাইকুম|ওয়ালাইকুম|নমস্কার|আদাব|আলহামদুলিল্লাহ|ইনশাআল্লাহ|মাশাআল্লাহ|সুবহানাল্লাহ|salam|assalamu|alaikum|walikum|slaam|nomoshkar|adab|কেমন আছেন|কেমন আছো|সবাই কেমন|সবাই কেমন আছেন|শুভ সকাল|শুভ রাত্রি|hello|hi|hey)(?:$|\s|[!?.,])/iu;
+  return salamRegex.test(clean);
+}
 
 // Normalization function: strips accents, reduces repeated consecutive letters, decodes leetspeak
 function normalizeText(raw: string): string {
@@ -525,27 +793,46 @@ function normalizeText(raw: string): string {
   return str;
 }
 
-// Fast badword match
+// Fast badword match with strict token-boundary enforcement and greeting immunity
 export function checkBadwordViolation(text: string, customList: string[] = []): { isBad: boolean; matchedWord?: string } {
   if (!text || text.trim().length === 0) return { isBad: false };
 
+  // 0. QUICK PRE-CHECK: If it's a clear greeting, skip all badword checks
+  if (isRespectfulSalamOrGreeting(text)) return { isBad: false };
+
   const normalized = normalizeText(text);
+
+  // Tokenize by punctuation and whitespace
+  const tokens = normalized.split(/[\s,.;:!?+=\-_/\\()\[\]{}|<>*~`'"@#$%^&]+/);
 
   // 1. Check custom badwords from dashboard
   for (const custom of customList) {
     const trimmed = custom.trim().toLowerCase();
-    if (trimmed.length > 1 && normalized.includes(trimmed)) {
-      return { isBad: true, matchedWord: trimmed };
+    if (!trimmed || trimmed.length < 2) continue;
+
+    // Never treat whitelisted safe words or greetings as badwords
+    if (isSafeWordOrGreeting(trimmed)) continue;
+
+    // For multi-word custom phrases
+    if (trimmed.includes(' ')) {
+      if (normalized.includes(trimmed)) return { isBad: true, matchedWord: trimmed };
+      continue;
+    }
+
+    // Single-word custom badwords: require exact token match or stem match if >= 6 chars
+    for (const token of tokens) {
+      if (!token || isSafeWordOrGreeting(token)) continue;
+
+      if (token === trimmed) {
+        return { isBad: true, matchedWord: trimmed };
+      }
+      if (trimmed.length >= 6 && token.startsWith(trimmed) && !SAFE_WHITELIST.has(token)) {
+        return { isBad: true, matchedWord: trimmed };
+      }
     }
   }
 
-  // Check spaced letters (e.g. "খ া ন কি" or "b a l" or "f u c k")
-  const collapsedSpaced = normalized.replace(/\s+/g, '');
-
-  // 2. Exact word tokens check
-  // Tokenize by punctuation and whitespace
-  const tokens = normalized.split(/[\s,.;:!?+=\-_/\\()\[\]{}|<>*~`'"@#$%^&]+/);
-
+  // 2. Built-in dictionaries check
   const allWordLists = [
     ...BENGALI_BADWORDS,
     ...SYLHETI_BADWORDS,
@@ -557,35 +844,79 @@ export function checkBadwordViolation(text: string, customList: string[] = []): 
 
   for (const token of tokens) {
     if (!token || token.length < 2) continue;
-
-    // Check if token is in whitelist
-    if (SAFE_WHITELIST.has(token)) continue;
+    if (isSafeWordOrGreeting(token)) continue;
 
     for (const bad of allWordLists) {
-      // For short words like 'bal' or 'গুদ', require exact token match
-      if (bad.length <= 3) {
-        if (token === bad) {
-          return { isBad: true, matchedWord: bad };
-        }
-      } else {
-        // For longer words, check exact match or starting with bad stem
-        if (token === bad || token.startsWith(bad)) {
-          return { isBad: true, matchedWord: bad };
-        }
+      if (token === bad) {
+        return { isBad: true, matchedWord: bad };
       }
-    }
-  }
-
-  // 3. Check collapsed spaced words for dangerous words
-  for (const bad of allWordLists) {
-    if (bad.length >= 4) {
-      if (collapsedSpaced.includes(bad)) {
+      // Only stem-match for long explicit slurs (>= 6 chars) if token is not whitelisted
+      if (bad.length >= 6 && token.startsWith(bad) && !SAFE_WHITELIST.has(token)) {
         return { isBad: true, matchedWord: bad };
       }
     }
   }
 
+  // 3. Spaced-out word detection (e.g. "ম া দ া র চ ো দ")
+  const collapsedSpaced = normalized.replace(/\s+/g, '');
+  const DANGEROUS_COLLAPSED_STEMS = [
+    'মাদারচোদ', 'বাইনচোদ', 'ভোনচোদ', 'খানকি', 'হারামজাদা', 'কুত্তারবাচ্চা', 'মাগিরপোলা',
+    'madarchod', 'bhenchod', 'behnchod', 'motherfucker'
+  ];
+  for (const bad of DANGEROUS_COLLAPSED_STEMS) {
+    if (collapsedSpaced.includes(bad)) return { isBad: true, matchedWord: bad };
+  }
+
   return { isBad: false };
+}
+
+/**
+ * Advanced AI-Powered Badword Detection (Gemini / ChatGPT Context Engine)
+ */
+export async function checkBadwordWithAi(
+  text: string,
+  senderPhone: string,
+  userName: string,
+  groupSubject: string,
+  settings: ModerationSettings
+): Promise<{ isBad: boolean; reason: string }> {
+  try {
+    const prompt = `You are a strict WhatsApp group moderator AI. Analyze the following text from a WhatsApp group to determine if it contains EXPLICIT PROFANITY, VULGAR CURSES, OR SEVERE INSULTS in Bengali, Banglish, Sylheti, Hindi, or English.
+    
+    IMPORTANT CONTEXTUAL MODERATION RULES:
+    1. DO NOT flag normal conversational Bengali sentences or everyday idioms (e.g. "ভুল করে হলে মাইর খাবে", "আজকে কাজ করবো না", "কথা শুনবে", "কথা বলো", "মাইর খাইবা"). Phrasal warnings like "মাইর খাবে" (will get beaten/reprimanded) or "ভুল" are normal Bengali conversation and NOT profanity!
+    2. ONLY flag explicit vulgar slurs, curses, sexual profanity, abusive insults, or severe hate speech (e.g. "মাদারচোদ", "খানকি", "fuck", "bitch", etc.).
+    3. If the message is normal conversational text or clean chat, reply ONLY with the word "SAFE".
+    4. If it contains genuine explicit vulgar profanity/slur, reply ONLY with the word "VIOLATION" followed by a 1-sentence reason in Bengali.
+
+    Text: "${text}"
+    User: ${userName} (${senderPhone})
+    Group: ${groupSubject}`;
+
+    const aiResult = await getMayaResponse(
+      prompt,
+      senderPhone,
+      userName,
+      groupSubject,
+      'ai_moderator_check',
+      {
+        ...settings,
+        romantic: false,
+        funny: false,
+        language: settings.mayaLanguage,
+        isPrivate: false,
+        memoryLimit: 0, 
+      }
+    );
+
+    if (aiResult.reply && aiResult.reply.toUpperCase().startsWith('VIOLATION')) {
+      const reason = aiResult.reply.replace(/VIOLATION/i, '').trim() || 'গালি বা আপত্তিকর ভাষা শনাক্ত হয়েছে';
+      return { isBad: true, reason };
+    }
+  } catch (err: any) {
+    console.error('[AI Badword Check Error]:', err.message);
+  }
+  return { isBad: false, reason: '' };
 }
 
 // -------------------------------------------------------------
@@ -752,19 +1083,24 @@ export async function checkPermissions(
 // -------------------------------------------------------------
 // STICKER SPAM & 10-MINUTE GROUP LOCK SYSTEM
 // -------------------------------------------------------------
-export function recordStickerAndCheckSpam(groupId: string, senderJid: string): boolean {
-  const key = `${groupId}:${senderJid}`;
+export function recordStickerAndCheckSpam(
+  groupId: string,
+  senderJid: string,
+  timeWindowSec: number = 5,
+  limit: number = 5
+): boolean {
+  const cleanSender = normalizeJid(senderJid);
+  const key = `${groupId}:${cleanSender}`;
   const now = Date.now();
   if (!stickerTimestamps[key]) {
     stickerTimestamps[key] = [];
   }
 
-  // Keep timestamps within last 5 seconds (5000ms)
-  stickerTimestamps[key] = stickerTimestamps[key].filter((t) => now - t <= 5000);
+  const windowMs = Math.max(1, timeWindowSec) * 1000;
+  stickerTimestamps[key] = stickerTimestamps[key].filter((t) => now - t <= windowMs);
   stickerTimestamps[key].push(now);
 
-  // If 3 or more stickers in 5 seconds -> Spam!
-  return stickerTimestamps[key].length >= 3;
+  return stickerTimestamps[key].length >= limit;
 }
 
 // Start group unlock timer monitor
@@ -938,11 +1274,11 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
   // -------------------------------------------------------------
   // FEATURE 0: ACTIVE INDIVIDUAL RESTRICTION (MESSAGE INTERCEPTION & AUTO-DELETE)
   // -------------------------------------------------------------
-  if (settings.individualMuteEnabled) {
+  if (settings.individualMuteEnabled || settings.antiStickerSpam) {
     const restrictionCheck = isUserRestricted(remoteJid, senderJid);
     if (restrictionCheck.restricted) {
       // Group Admins are never restricted if Admin Shield is active
-      if (settings.adminShield && isSenderAdmin) {
+      if (isSenderAdmin) {
         console.log(`[Individual Mute] @${cleanPhone} is an Admin with Admin Shield active. Lifting restriction.`);
         unrestrictUser(remoteJid, senderJid);
       } else {
@@ -971,82 +1307,49 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
   const isViewOnce = isViewOnceMessage(msg, realMsg);
 
   // -------------------------------------------------------------
-  // FEATURE 3: INDIVIDUAL STICKER SPAM DETECTION & 10-MINUTE RESTRICTION
-  // (Note: Never locks the group! Intercepts and auto-deletes the restricted member's messages)
+  // FEATURE 3: ANTI-STICKER SPAM (5 SECONDS -> 10-MINUTE INDIVIDUAL MEMBER LOCK)
   // -------------------------------------------------------------
-  if (settings.individualMuteEnabled && isSticker) {
+  if ((settings.antiStickerSpam || settings.individualMuteEnabled) && isSticker) {
     const isProtected = settings.adminShield && isSenderAdmin;
     if (!isProtected) {
-      const timeWindow = settings.individualMuteTimeWindow || 5;
-      const limit = settings.individualMuteStickerLimit || 3;
-      const durationMin = settings.individualMuteDurationMinutes || 10;
+      const windowSec = settings.individualMuteTimeWindow || 5;
+      const stickerLimit = settings.individualMuteStickerLimit || 5;
+      const durationMins = settings.individualMuteDurationMinutes || 10;
 
-      const isSpam = recordStickerAndCheckIndividualSpam(remoteJid, senderJid, timeWindow, limit);
+      const isSpam = recordStickerAndCheckSpam(remoteJid, senderJid, windowSec, stickerLimit);
       if (isSpam) {
-        console.log(`[Individual Mute Triggered] Sticker spam detected: @${cleanPhone} sent ${limit}+ stickers in ${timeWindow}s in ${groupSubject}`);
+        console.log(`[Anti-Sticker Spam Triggered] Restricting @${cleanPhone} for ${durationMins} minutes (${stickerLimit}+ stickers in ${windowSec}s in ${groupSubject})`);
 
         // 1. Delete the spam sticker immediately
         try {
           await sock.sendMessage(remoteJid, { delete: msg.key });
           db.stats.deletedMessages++;
         } catch (delErr: any) {
-          console.error('[Individual Mute] Failed to delete spam sticker:', delErr.message);
+          console.error('[Anti-Sticker Spam] Failed to delete spam sticker:', delErr.message);
         }
 
-        // 2. Individual Restrict the user for durationMin (DO NOT LOCK THE GROUP)
+        // 2. Restrict ONLY THIS MEMBER for 10 minutes (Do NOT lock group settings for other members)
         restrictUser(
           remoteJid,
           groupSubject,
           senderJid,
           cleanPhone,
-          durationMin,
-          `${timeWindow} সেকেন্ডে ${limit}+ স্টিকার পাঠানো`
+          durationMins,
+          `${windowSec} সেকেন্ডে ${stickerLimit}টি স্টিকার পাঠানো (Sticker Spam)`
         );
 
-        // 3. Send the exact required notification to the group
-        await safeSendMessage(sock, remoteJid, {
-          text: `⚠️ STICKER SPAM DETECTED!\nএকজন সদস্য অতিরিক্ত স্টিকার পাঠানোর কারণে ${durationMin} মিনিটের জন্য Restrict করা হয়েছে।`,
-          mentions: [senderJid],
-        });
+        saveDatabase();
+
+        // 3. Send warning notice alert to the group if not silent
+        if (!settings.silentModeration) {
+          await safeSendMessage(sock, remoteJid, {
+            text: `🚨 WAGuard Security Alert\n\n⚠️ @${cleanPhone} অতিরিক্ত স্টিকার পাঠানোর কারণে Anti-Spam Protection-এর আওতায় এসেছে।\n\n🔒 Temporary Messaging Restriction Activated\n\n⏳ Restriction Duration: ${durationMins} Minutes\n\n📌 এই সময়ে ওই সদস্যের পাঠানো নতুন মেসেজ স্বয়ংক্রিয়ভাবে মুছে ফেলার চেষ্টা করা হবে।\n\n🛡️ গ্রুপের অন্য সদস্যরা স্বাভাবিকভাবে মেসেজ করতে পারবেন।`,
+            mentions: [senderJid],
+          });
+        }
 
         return; // Finished handling spam sticker
       }
-    }
-  } else if (!settings.individualMuteEnabled && settings.antiStickerSpam && isSticker) {
-    // Legacy fallback: only if Individual Mute is turned off but whole-group lock is desired
-    const isSpam = recordStickerAndCheckSpam(remoteJid, senderJid);
-    if (isSpam) {
-      console.log(`[Legacy Group Lock Anti-Sticker Spam] Detected 3+ stickers in 5s by @${cleanPhone} in ${groupSubject}`);
-
-      try {
-        await sock.sendMessage(remoteJid, { delete: msg.key });
-        db.stats.deletedMessages++;
-      } catch (err: any) {
-        console.error('Failed to delete spam sticker:', err.message);
-      }
-
-      const lockDurationMs = 10 * 60 * 1000;
-      const lockedUntil = Date.now() + lockDurationMs;
-
-      if (isBotAdmin) {
-        try {
-          await sock.groupSettingUpdate(remoteJid, 'announcement');
-          db.groupLocks[remoteJid] = {
-            groupId: remoteJid,
-            lockedUntil,
-            originalSetting: 'not_announcement',
-            reason: `Sticker spam by @${cleanPhone}`,
-          };
-          db.stats.groupLocksTriggered++;
-          saveDatabase();
-
-          await sock.sendMessage(remoteJid, {
-            text: `⚠️ [WAGuard Anti-Sticker Spam Alert]\n🚫 সদস্য @${cleanPhone} কর্তৃক অতিরিক্ত স্টিকার স্প্যাম শনাক্ত হয়েছে!\n🔒 গ্রুপটিকে ১০ মিনিটের জন্য Announcement Mode-এ লক করা হলো।`,
-            mentions: [senderJid],
-          });
-        } catch (err: any) {}
-      }
-      return;
     }
   }
 
@@ -1056,16 +1359,16 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
   let violationType: string | null = null;
   let violationDetails = '';
 
-  // Feature 1: Admin Security Shield (Admins are never penalized)
-  const isProtectedAdmin = settings.adminShield && isSenderAdmin;
+  // Feature 1: Admin Security Shield (Respects settings.adminShield toggle)
+  const isProtectedAdmin = settings.adminShield && isSenderAdmin; 
 
   if (!isProtectedAdmin) {
-    // Feature 2: ANTI-STICKER
-    if (settings.antiSticker && isSticker) {
-      violationType = 'Anti-Sticker';
-      violationDetails = 'স্টিকার পাঠানো নিষিদ্ধ';
-    }
-    // Feature 4: ANTI-GIF
+  // Feature 2: ANTI-STICKER (Delete every sticker instantly if antiSticker is enabled)
+  if (settings.antiSticker && isSticker) {
+    violationType = 'Anti-Sticker';
+    violationDetails = 'স্টিকার পাঠানো নিষিদ্ধ';
+  }
+  // Feature 4: ANTI-GIF
     else if (settings.antiGif && isGif) {
       violationType = 'Anti-GIF';
       violationDetails = 'GIF এবং এনিমেটেড ভিডিও পাঠানো নিষিদ্ধ';
@@ -1098,7 +1401,14 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
       const badwordCheck = checkBadwordViolation(messageText, settings.customBadwords);
       if (badwordCheck.isBad) {
         violationType = 'Anti-Badword';
-        violationDetails = `অপমানজনক বা গালি শব্দ শনাক্ত হয়েছে (${badwordCheck.matchedWord})`;
+        violationDetails = `গালি শনাক্ত হয়েছে (${badwordCheck.matchedWord})`;
+      } else if (settings.aiBadwordDetection) {
+        // Fallback to AI detection if standard dictionary doesn't catch it
+        const aiCheck = await checkBadwordWithAi(messageText, cleanPhone, msg.pushName || 'User', groupSubject, settings);
+        if (aiCheck.isBad) {
+          violationType = 'AI-Anti-Badword';
+          violationDetails = aiCheck.reason;
+        }
       }
     }
   }
@@ -1141,130 +1451,58 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
     const warningCount = db.warnings[warningKey].count;
 
     // Feature 10: THREE WARNING AUTO KICK
-    if (warningCount === 1) {
-      await sock.sendMessage(remoteJid, {
-        text: `⚠️ [সতর্কবার্তা ১/৩]\nসদস্য @${cleanPhone}, গ্রুপে ${violationDetails}!\nআপনার মেসেজটি মুছে দেওয়া হয়েছে। নিয়ম মেনে চলার অনুরোধ করা হচ্ছে।`,
-        mentions: [senderJid],
-      });
-
-      addActivityLog({
-        groupId: remoteJid,
-        groupName: groupSubject,
-        senderJid,
-        senderPhone: cleanPhone,
-        action: 'warned',
-        reason: `${violationType} (১ম সতর্কতা)`,
-        details: violationDetails,
-        warningCount: 1,
-      });
-    } else if (warningCount === 2) {
-      await sock.sendMessage(remoteJid, {
-        text: `⚠️ [সতর্কবার্তা ২/৩]\nসদস্য @${cleanPhone}, এটি আপনার দ্বিতীয় সতর্কতা (${violationDetails})!\nপরবর্তী আরেকটি নিয়মলঙ্ঘনে আপনাকে স্বয়ংক্রিয়ভাবে গ্রুপ থেকে রিমুভ (Kick) করা হবে!`,
-        mentions: [senderJid],
-      });
-
-      addActivityLog({
-        groupId: remoteJid,
-        groupName: groupSubject,
-        senderJid,
-        senderPhone: cleanPhone,
-        action: 'warned',
-        reason: `${violationType} (২য় সতর্কতা)`,
-        details: violationDetails,
-        warningCount: 2,
-      });
-    } else if (warningCount >= 3) {
-      // 3rd Warning -> Final Warning & Auto Kick Execution
-      if (settings.autoKick3Warnings) {
-        // Force fresh metadata check from WhatsApp server to ensure admin status is up-to-date
-        const freshPerms = await checkPermissions(sock, remoteJid, senderJid, true);
-        
-        // Under NO circumstances should any Group Admin ever be kicked by WAGuard
-        if (freshPerms.isSenderAdmin) {
-          console.warn(`[Kick Blocked] Target user @${cleanPhone} is a Group Admin in ${groupSubject}. Group Admins cannot be kicked.`);
-          await safeSendMessage(sock, remoteJid, {
-            text: `🛡️ [অ্যাডমিন সুরক্ষা Notice]\nসদস্য @${cleanPhone} ৩টি সতর্কতা অতিক্রম করেছেন। তবে তিনি একজন গ্রুপ অ্যাডমিন (Group Admin) হওয়ায় তাকে কিক (Kick) করা সম্ভব নয়।`,
-            mentions: [senderJid],
-          });
-          return;
-        }
-
-        const canKick = freshPerms.isBotAdmin;
-
-        if (canKick) {
-          try {
-            // Normalize target JID (strips device suffix like :12)
-            const targetJid = normalizeJid(senderJid);
-
-            await sock.sendMessage(remoteJid, {
-              text: `🚨 [চূড়ান্ত অ্যাকশন - ৩য় সতর্কতা]\nসদস্য @${cleanPhone} ৩ বার গ্রুপের নিয়ম লঙ্ঘন করেছেন (${violationDetails})।\nনিরাপত্তার স্বার্থে তাকে গ্রুপ থেকে রিমুভ (Kick) করা হচ্ছে!`,
-              mentions: [senderJid],
-            });
-
-            console.log(`[Baileys Kick Action] Executing groupParticipantsUpdate for target ${targetJid} in group ${remoteJid}...`);
-            const kickResult = await sock.groupParticipantsUpdate(remoteJid, [targetJid], 'remove');
-            console.log(`[Baileys Kick Action SUCCESS] Result for @${cleanPhone}:`, kickResult);
-
-            db.stats.kickedMembers++;
-            delete db.warnings[warningKey];
-            saveDatabase();
-
-            addActivityLog({
-              groupId: remoteJid,
-              groupName: groupSubject,
-              senderJid: targetJid,
-              senderPhone: cleanPhone,
-              action: 'kicked',
-              reason: `৩ বার সতর্কতা অতিক্রান্ত (${violationType})`,
-              details: 'সদস্যকে গ্রুপ থেকে সফলভাবে রিমুভ করা হয়েছে।',
-              warningCount: 3,
-            });
-          } catch (kickErr: any) {
-            console.error('[Baileys Kick Action FAILED]:', kickErr);
-            const errCode = kickErr?.output?.statusCode || kickErr?.code || 'ERROR';
-            const errMsg = kickErr?.message || String(kickErr);
-
-            await sock.sendMessage(remoteJid, {
-              text: `⚠️ [কিক ত্রুটি - Code: ${errCode}]\nসদস্য @${cleanPhone} ৩টি সতর্কতা অতিক্রম করেছেন, কিন্তু কিক করার সময় ত্রুটি দেখা দিয়েছে: ${errMsg}`,
-              mentions: [senderJid],
-            });
-
-            addActivityLog({
-              groupId: remoteJid,
-              groupName: groupSubject,
-              senderJid,
-              senderPhone: cleanPhone,
-              action: 'error',
-              reason: `Kick Failed (${errCode}): ${errMsg}`,
-              warningCount: 3,
-            });
-          }
-        } else {
-          // Bot is genuinely NOT admin in group metadata
-          console.warn(`[Kick Cancelled] Bot is NOT listed as admin in fresh groupMetadata for ${groupSubject} (${remoteJid}). Bot ID: ${sock.user?.id}, LID: ${sock.user?.lid}`);
-
-          await sock.sendMessage(remoteJid, {
-            text: `⚠️ [সতর্কবার্তা ৩/৩ - অ্যাডমিন আবশ্যক]\nসদস্য @${cleanPhone} ৩টি নিয়ম লঙ্ঘন করেছেন! কিন্তু WAGuard বট এই গ্রুপের অ্যাডমিন না হওয়ায় সদস্যকে বাস্তবে কিক করা সম্ভব হয়নি। দয়া করে গ্রুপ অ্যাডমিন বটকে অ্যাডমিন পারমিশন দিন।`,
-            mentions: [senderJid],
-          });
-
-          addActivityLog({
-            groupId: remoteJid,
-            groupName: groupSubject,
-            senderJid,
-            senderPhone: cleanPhone,
-            action: 'error',
-            reason: 'Bot is not admin in fresh group metadata.',
-            warningCount: 3,
-          });
-        }
-      } else {
+    if (!settings.silentModeration) {
+      if (warningCount === 1) {
         await sock.sendMessage(remoteJid, {
-          text: `🚨 [সতর্কবার্তা ৩/৩]\nসদস্য @${cleanPhone}, আপনি ৩ বার গ্রুপের নিয়ম লঙ্ঘন করেছেন (${violationDetails})। দয়া করে গ্রুপের নিয়ম মেনে চলুন।`,
+          text: `⚠️ [সতর্কবার্তা ১/৩]\nসদস্য @${cleanPhone}, গ্রুপে ${violationDetails}!\nআপনার মেসেজটি মুছে দেওয়া হয়েছে। নিয়ম মেনে চলার অনুরোধ করা হচ্ছে।`,
           mentions: [senderJid],
         });
+      } else if (warningCount === 2) {
+        await sock.sendMessage(remoteJid, {
+          text: `⚠️ [সতর্কবার্তা ২/৩]\nসদস্য @${cleanPhone}, এটি আপনার দ্বিতীয় সতর্কতা (${violationDetails})!\nপরবর্তী আরেকটি নিয়মলঙ্ঘনে আপনাকে স্বয়ংক্রিয়ভাবে গ্রুপ থেকে রিমুভ (Kick) করা হবে!`,
+          mentions: [senderJid],
+        });
+      } else if (warningCount >= 3) {
+        if (settings.autoKick3Warnings) {
+          const freshPerms = await checkPermissions(sock, remoteJid, senderJid, true);
+          if (freshPerms.isSenderAdmin) {
+            await safeSendMessage(sock, remoteJid, {
+              text: `🛡️ [অ্যাডমিন সুরক্ষা Notice]\nসদস্য @${cleanPhone} ৩টি সতর্কতা অতিক্রম করেছেন। তবে তিনি একজন গ্রুপ অ্যাডমিন হওয়ায় তাকে কিক করা সম্ভব নয়।`,
+              mentions: [senderJid],
+            });
+            return;
+          }
+          if (freshPerms.isBotAdmin) {
+            try {
+              const targetJid = normalizeJid(senderJid);
+              await sock.sendMessage(remoteJid, {
+                text: `🚨 [চূড়ান্ত অ্যাকশন - ৩য় সতর্কতা]\nসদস্য @${cleanPhone} ৩ বার গ্রুপের নিয়ম লঙ্ঘন করেছেন (${violationDetails})।\nনিরাপত্তার স্বার্থে তাকে গ্রুপ থেকে রিমুভ করা হচ্ছে!`,
+                mentions: [senderJid],
+              });
+              await sock.groupParticipantsUpdate(remoteJid, [targetJid], 'remove');
+              db.stats.kickedMembers++;
+              delete db.warnings[warningKey];
+              saveDatabase();
+            } catch (kickErr: any) {
+              console.error('[Kick FAILED]:', kickErr);
+            }
+          }
+        }
       }
     }
+
+    // Always log the activity regardless of silent mode
+    const actionMap: Record<number, string> = { 1: '১ম সতর্কতা', 2: '২য় সতর্কতা', 3: '৩য় সতর্কতা' };
+    addActivityLog({
+      groupId: remoteJid,
+      groupName: groupSubject,
+      senderJid,
+      senderPhone: cleanPhone,
+      action: warningCount >= 3 && settings.autoKick3Warnings ? 'kicked' : 'warned',
+      reason: `${violationType} (${actionMap[warningCount] || 'সতর্কতা'})`,
+      details: violationDetails,
+      warningCount,
+    });
 
     return; // Message handled and penalized
   }
@@ -1314,24 +1552,25 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
       lower.includes('বট') || 
       lower.includes('bot');
 
+    const isSalamOrGreeting = isRespectfulSalamOrGreeting(messageText);
+
     const shouldAttemptReply = 
       isDirectMention || 
       isDirectCall || 
       isQuotingBot || 
-      (settings.mayaAutoParticipate && Math.random() * 100 < settings.mayaReplyFrequency) ||
-      (settings.botReply && Math.random() * 100 <= (settings.mayaReplyFrequency || 50));
+      isSalamOrGreeting ||
+      (settings.mayaAutoParticipate && Math.random() * 100 < settings.mayaReplyFrequency);
 
     if (shouldAttemptReply) {
       const now = Date.now();
       const lastReply = lastAiReplyTime[remoteJid] || 0;
       const cooldownMs = settings.mayaReplyCooldown * 1000;
 
-      // Mentions, direct calls, and quoted messages ALWAYS bypass cooldown for fluid conversation
-      if (!isDirectMention && !isDirectCall && !isQuotingBot && now - lastReply < cooldownMs) {
-        return; // Still in cooldown for unprompted background chat participation
+      if (!isDirectMention && !isDirectCall && !isQuotingBot && !isSalamOrGreeting && now - lastReply < cooldownMs) {
+        return;
       }
 
-      console.log(`[Maya AI Response Engine] Processing for ${groupSubject} (Direct/Quoting: ${isDirectMention || isDirectCall || isQuotingBot})`);
+      console.log(`[Maya AI Response Engine] Processing for ${groupSubject} (Sending to User DM)`);
       
       try {
         const userName = msg.pushName || 'User';
@@ -1360,14 +1599,15 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
         if (aiResult.reply) {
           lastAiReplyTime[remoteJid] = now;
 
+          // Always reply directly to user's private inbox JID as requested
+          const targetJid = normalizeJid(senderJid);
+
           const sent = await safeSendMessage(
             sock,
-            remoteJid,
+            targetJid,
             {
-              text: aiResult.reply,
-              mentions: [senderJid],
-            },
-            { quoted: msg as any }
+              text: `🌸 [Maya AI Private Reply for ${groupSubject}]\n\n${aiResult.reply}`
+            }
           );
 
           if (sent) {
@@ -1377,13 +1617,9 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
               senderJid,
               senderPhone: cleanPhone,
               action: 'replied',
-              reason: isDirectMention || isDirectCall || isQuotingBot
-                ? `Group AI Direct [${aiResult.provider.toUpperCase()}]`
-                : `Group AI Chat [${aiResult.provider.toUpperCase()}]`,
+              reason: `Group Mention -> Private Inbox Reply [${aiResult.provider.toUpperCase()}]`,
               details: aiResult.reply.slice(0, 60),
             });
-
-            console.log(`[Maya AI Group SUCCESS] Replied in ${groupSubject} via ${aiResult.provider} in ${aiResult.latencyMs}ms`);
           }
         }
       } catch (err: any) {

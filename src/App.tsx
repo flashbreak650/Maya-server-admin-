@@ -46,20 +46,13 @@ import {
   UserX,
   VolumeX,
   Clock,
+  ChevronUp,
+  ChevronDown,
+  Info,
 } from 'lucide-react';
+import { HELP_ITEMS } from './helpData.ts';
+import { HelpModal } from './components/HelpModal.tsx';
 
-export interface RestrictedUser {
-  groupId: string;
-  groupName: string;
-  senderJid: string;
-  senderPhone: string;
-  restrictedAt: number;
-  expiresAt: number;
-  reason: string;
-  violationCount?: number;
-  remainingSeconds?: number;
-  remainingText?: string;
-}
 
 interface GroupItem {
   id: string;
@@ -94,11 +87,6 @@ interface ModerationSettings {
   autoKick3Warnings: boolean;
   botReply: boolean;
   customBadwords: string[];
-  // Individual Temporary Mute Settings
-  individualMuteEnabled: boolean;
-  individualMuteStickerLimit: number;
-  individualMuteTimeWindow: number;
-  individualMuteDurationMinutes: number;
   // Maya AI Settings
   mayaAiEnabled: boolean;
   mayaPrivateReply: boolean;
@@ -115,6 +103,26 @@ interface ModerationSettings {
   mayaReplyFrequency: number;
   mayaLanguage: string;
   mayaMemoryLimit: number;
+  aiBadwordDetection: boolean;
+  silentModeration: boolean;
+  mayaReplyMode: 'group' | 'inbox' | 'off';
+  // AI Key Pool
+  aiKeys?: AiKey[];
+  aiAutoRotate?: boolean;
+  aiProviderPriority?: ('gemini' | 'groq' | 'openrouter')[];
+}
+
+export interface AiKey {
+  id: string;
+  key: string;
+  provider: 'gemini' | 'groq' | 'openrouter';
+  label: string;
+  status: 'active' | 'exhausted' | 'invalid' | 'cooldown';
+  cooldownUntil: number;
+  lastUsed: number;
+  totalRequests: number;
+  failureCount: number;
+  lastError?: string;
 }
 
 interface ActivityLog {
@@ -132,10 +140,38 @@ interface ActivityLog {
 
 export default function App() {
   const [activePage, setActivePage] = useState<'home' | 'security' | 'maya' | 'integrations' | 'pairing' | 'groups'>('home');
+  const [isStaticHost, setIsStaticHost] = useState(false);
+
+  useEffect(() => {
+    // Detect if running on GitHub Pages, similar static host, or Capacitor Android APK
+    const isCapacitor = !!(window as any).Capacitor?.isNativePlatform?.() || window.location.protocol === 'capacitor:';
+    if (isCapacitor || window.location.hostname.includes('github.io') || window.location.hostname.includes('pages.dev')) {
+      setIsStaticHost(true);
+    }
+  }, []);
   const [uiLang, setUiLang] = useState<'bn' | 'en'>((localStorage.getItem('wg_ui_lang') as 'bn' | 'en') || 'bn');
   const [toastMessage, setToastMessage] = useState('');
   const [showToast, setShowToast] = useState(false);
   const [toastTimer, setToastTimer] = useState<any>(null);
+  const [activeHelpId, setActiveHelpId] = useState<string | null>(null);
+
+  const openHelp = (id: string) => setActiveHelpId(id);
+  const closeHelp = () => setActiveHelpId(null);
+
+  const renderInfoBtn = (id: string) => (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openHelp(id);
+      }}
+      className="inline-flex items-center justify-center w-6 h-6 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 border border-emerald-500/20 transition-all cursor-pointer shrink-0 active:scale-90"
+      title={isBn ? 'বিস্তারিত জানুন' : 'Help & Info'}
+    >
+      <Info size={12} className="stroke-[3]" />
+    </button>
+  );
 
   const toggleUiLang = () => {
     const nextLang = uiLang === 'bn' ? 'en' : 'bn';
@@ -200,28 +236,13 @@ export default function App() {
     sec1Title: isBn ? '১. অ্যাডমিন সিকিউরিটি শিল্ড ও অটো-কিক' : '1. Admin Security Shield & Auto-Kick System',
     sec1Sub: isBn ? 'গ্রুপ অ্যাডমিনদের নিরাপত্তা ও ৩ সতর্কতা কিক নিয়মাবলী' : 'Group admin protection & 3-warning auto-kick rules',
     adminShieldTitle: isBn ? 'Admin Security Shield (অ্যাডমিন সুরক্ষা)' : 'Admin Security Shield',
-    adminShieldDesc: isBn ? 'কোনো Group Admin-কে কখনো Kick বা Warning দেবে না এবং তাদের মেসেজ ডিলিট করবে না।' : 'Never kick, warn, or delete messages from Group Admins.',
+    adminShieldDesc: isBn ? 'সক্রিয় থাকলে কোনো Group Admin-কে কখনো Kick বা Warning দেবে না এবং তাদের মেসেজ ডিলিট করবে না।' : 'When active, never kick, warn, or delete messages from Group Admins.',
     autoKickTitle: isBn ? 'Three Warning Auto Kick (৩ স্ট্রাইক কিক)' : 'Three Warning Auto Kick',
     autoKickDesc: isBn ? '১ম ও ২য় বার Warning, ৩য় বার বাস্তবে কিক। বট অ্যাডমিন হলে সদস্যকে বাস্তবে Kick করবে।' : 'Warning 1, Warning 2, and real Kick on 3rd violation when bot is admin.',
 
     sec2Title: isBn ? '২. মিডিয়া ফিল্টার ও অ্যান্টি-স্প্যাম লক' : '2. Media Restrictions & Anti-Spam Lock',
     sec2Sub: isBn ? 'স্টিকার স্প্যাম, জিআইএফ, ভিডিও, ছবি ও ভিউ ওয়ান্স মডারেশন' : 'Sticker spam, GIF, video, photo & view-once moderation',
-    // Individual Temporary Mute Translations
-    indMuteCardTitle: isBn ? 'Individual Temporary Mute (ব্যক্তিগত সাময়িক মিউট)' : 'Individual Temporary Mute',
-    indMuteCardSub: isBn ? 'স্টিকার স্প্যামারকে পুরো গ্রুপ লক না করে নির্দিষ্ট সময়ের জন্য মেসেজ ইন্টারসেপ্ট ও অটো-ডিলিট' : 'Intercepts and auto-deletes messages of sticker spammers without locking the group.',
-    indMuteToggleTitle: isBn ? 'Individual Mute System (সদস্যের সাময়িক মিউট)' : 'Individual Mute System',
-    indMuteToggleDesc: isBn ? 'সদস্য নির্ধারিত সময়ের মধ্যে অতিরিক্ত স্টিকার পাঠালে পুরো গ্রুপ লক না করে শুধু ওই সদস্যকে সাময়িকভাবে রেস্ট্রিক্ট করবে।' : 'Restricts only the offending member instead of locking the entire group.',
-    stickerLimitLabel: isBn ? 'Sticker Spam Limit (স্টিকার সীমা)' : 'Sticker Spam Limit',
-    timeWindowLabel: isBn ? 'Detection Window (সময় সীমা - সেকেন্ড)' : 'Detection Window (seconds)',
-    durationMinutesLabel: isBn ? 'Restriction Duration (রেস্ট্রিকশন মেয়াদ - মিনিট)' : 'Restriction Duration (minutes)',
-    activeRestrictedTitle: isBn ? 'Active Restricted Users (সাময়িকভাবে রেস্ট্রিক্টেড সদস্যবৃন্দ)' : 'Active Restricted Users',
-    noRestrictedUsers: isBn ? 'বর্তমানে কোনো সদস্য রেস্ট্রিকশনে নেই। কোনো সদস্য স্টিকার স্প্যাম করলে তার তথ্য এখানে লাইভ দেখা যাবে।' : 'No members currently restricted. Violators will appear here in real time.',
-    unmuteBtn: isBn ? 'রেস্ট্রিকশন তুলুন' : 'Unmute',
-    unmutingText: isBn ? 'আনমিউট হচ্ছে...' : 'Unmuting...',
-    saveIndMuteBtn: isBn ? 'মিউট সেটিংস সেভ' : 'Save Mute Settings',
-    offlineNoteTitle: isBn ? 'টেকনিক্যাল রিকোয়ারমেন্ট ও সীমাবদ্ধতা' : 'Technical Requirements & Limitations',
-    offlineNoteDesc: isBn ? 'WhatsApp-এ কোনো নির্দিষ্ট সদস্যকে Native Mute করার অফিশিয়াল সুবিধা না থাকায় WAGuard বট মেসেজ ইন্টারসেপ্ট করে অটো-ডিলিট করার মাধ্যমে এই Individual Restriction নিশ্চিত করে। অন্য সদস্যরা সাধারণভাবেই মেসেজ করতে পারবে।' : 'WhatsApp has no native individual mute API. WAGuard enforces restriction via message interception and automatic deletion. Other members can chat normally.',
-    offlineWarningBadge: isBn ? '⚠️ বট অফলাইন: বট অফলাইনে থাকায় এই মেসেজ অটো-ডিলিট ও সাময়িক মিউট কার্যকর হতে পারবে না!' : '⚠️ Bot is offline: Message auto-delete cannot function while offline!',
+    
     antiStickerSpamTitle: isBn ? 'Anti-Sticker Spam (১০ মিনিট গ্রুপ লক)' : 'Anti-Sticker Spam (Auto 10m Group Lock)',
     antiStickerSpamDesc: isBn ? '৫ সেকেন্ডে ৩টি বা বেশি Sticker পাঠালে মেসেজ ডিলিট ও পুরো গ্রুপ ১০ মিনিটের জন্য লক হবে।' : '3+ stickers in 5 seconds locks group for 10 minutes.',
     antiStickerTitle: isBn ? 'Anti-Sticker (সকল স্টিকার নিষিদ্ধ)' : 'Anti-Sticker (All Stickers)',
@@ -241,11 +262,17 @@ export default function App() {
     antiBadwordDesc: isBn ? 'বাংলা, সিলেটি, Banglish, English, Hindi, Arabic গালি ও স্পেস দিয়ে লেখা শব্দও ডিলিট করবে।' : 'Detects profanity across languages including spaced & leetspeak variants.',
     antiLinkTitle: isBn ? 'Anti-Link (সকল লিংক ও গ্রুপ ইনভাইট)' : 'Anti-Link (All URLs & WhatsApp Invites)',
     antiLinkDesc: isBn ? 'Website URL, WhatsApp Invites, Telegram, Facebook, YouTube লিংক মুছে ফেলবে।' : 'Deletes URLs, group invite links, and social media links.',
-    botReplyTitle: isBn ? 'Bot Reply System (বট রিপ্লাই অন/অফ সুইচ)' : 'Bot Reply System (On/Off Switch)',
-    botReplyDesc: isBn ? 'ইনবক্সে (DM) মেসেজ পাঠালে বট চুপ থাকবে (কোনো উত্তর দেবে না)। কিন্তু গ্রুপে "মায়া" (Maya) নামে ডাকলে, ট্যাগ করলে বা মেনশন করলে উত্তর দেবে।' : 'Silent in DMs/Inbox. In groups, responds whenever tagged or called "Maya" / "Bot".',
+    botReplyTitle: isBn ? 'Bot Reply System (ইনবক্সে অটো-উত্তর)' : 'Bot Reply System (Private DM Reply)',
+    botReplyDesc: isBn ? 'সক্রিয় থাকলে গ্রুপে মেম্বাররা বটের নাম বললেও বট গ্রুপে মেসেজ না দিয়ে সরাসরি ওই মেম্বারের ইনবক্সে (DM) মেসেজ করবে।' : 'When enabled, mentions/tags in group will cause Maya to reply privately in the member\'s DM instead of group.',
     customBadwordsLabel: isBn ? 'Custom Badword List (কাস্টম নিষিদ্ধ শব্দের তালিকা)' : 'Custom Badword List',
     customBadwordsHint: isBn ? 'কমা (,) দিয়ে আলাদা করে শব্দ লিখুন।' : 'Separate words with commas.',
     saveBadwordsBtn: isBn ? 'কাস্টম ব্যাডওয়ার্ড সেভ' : 'Save Custom Badwords',
+
+    // New Moderation & AI
+    aiBadwordTitle: isBn ? 'Gemini AI Badword Detector (এআই গালি শনাক্তকারী)' : 'Gemini AI Badword Detector',
+    aiBadwordDesc: isBn ? 'লিস্টে নেই এমন গালি বা আপত্তিকর কথা জিমিনি এআই এর মাধ্যমে খুঁজে বের করে ডিলিট করবে।' : 'Uses Gemini AI to detect complex badwords not in the custom list.',
+    silentModTitle: isBn ? 'Silent Moderation (নিঃশব্দ মডারেশন)' : 'Silent Moderation',
+    silentModDesc: isBn ? 'মেসেজ ডিলিট করার পর গ্রুপে কোনো সতর্কবার্তা (Warning Message) পাঠাবে না।' : 'Disable bot warning messages after deleting a violation.',
 
     // Activity Logs
     activityTitle: isBn ? 'লাইভ মডারেশন অ্যাক্টিভিটি লগ' : 'Real-Time Moderation Activity Log',
@@ -339,10 +366,6 @@ export default function App() {
     autoKick3Warnings: true,
     botReply: true,
     customBadwords: [],
-    individualMuteEnabled: true,
-    individualMuteStickerLimit: 3,
-    individualMuteTimeWindow: 5,
-    individualMuteDurationMinutes: 10,
     mayaAiEnabled: true,
     mayaPrivateReply: true,
     mayaGroupReply: true,
@@ -357,12 +380,35 @@ export default function App() {
     mayaReplyFrequency: 100,
     mayaLanguage: 'auto',
     mayaMemoryLimit: 20,
+    aiBadwordDetection: false,
+    silentModeration: false,
+    mayaReplyMode: 'group',
   });
   const [customBadwordsText, setCustomBadwordsText] = useState('');
-  const [restrictedUsers, setRestrictedUsers] = useState<RestrictedUser[]>([]);
-  const [isUnmuting, setIsUnmuting] = useState<string | null>(null);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
+  const [restrictedUsers, setRestrictedUsers] = useState<any[]>([]);
   const [isLogsLoading, setIsLogsLoading] = useState(false);
+
+  // Live countdown timer for active restricted users dashboard
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setRestrictedUsers((prev) => {
+        if (!prev || prev.length === 0) return prev;
+        const now = Date.now();
+        const updated = prev
+          .filter((u) => u.expiresAt > now)
+          .map((u) => {
+            const remainingSec = Math.max(0, Math.ceil((u.expiresAt - now) / 1000));
+            const mins = Math.floor(remainingSec / 60);
+            const secs = remainingSec % 60;
+            const remainingText = mins > 0 ? `${mins} মি. ${secs} সে.` : `${secs} সেকেন্ড`;
+            return { ...u, remainingSeconds: remainingSec, remainingText };
+          });
+        return updated;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Groups
   const [groups, setGroups] = useState<GroupItem[]>([
@@ -375,8 +421,8 @@ export default function App() {
   const [geminiKey, setGeminiKey] = useState(localStorage.getItem('wg_gemini_key') || '');
   const [geminiModel, setGeminiModel] = useState(() => {
     const saved = localStorage.getItem('wg_gemini_model');
-    if (!saved || saved === 'gemini-flash-latest' || saved.includes('1.5') || saved.includes('2.0') || saved.includes('2.5')) {
-      return 'gemini-3.1-flash-lite';
+    if (!saved || saved === 'gemini-flash-latest' || saved === 'gemini-3.1-flash-lite' || saved.includes('3.8') || saved === 'gemini-2.0-flash-exp' || saved.includes('1.5')) {
+      return 'gemini-3.8-flash';
     }
     return saved;
   });
@@ -388,6 +434,13 @@ export default function App() {
   const [supabaseUrl, setSupabaseUrl] = useState(localStorage.getItem('wg_supabase_url') || '');
   const [supabaseKey, setSupabaseKey] = useState(localStorage.getItem('wg_supabase_key') || '');
   const [baileysUrl, setBaileysUrl] = useState(localStorage.getItem('wg_server') || '');
+
+  // AI Brain Management State
+  const [isAddingKey, setIsAddingKey] = useState(false);
+  const [newKeyInput, setNewKeyInput] = useState('');
+  const [newKeyProvider, setNewKeyProvider] = useState<'gemini' | 'groq' | 'openrouter'>('gemini');
+  const [newKeyLabel, setNewKeyLabel] = useState('');
+  const [isTestingKey, setIsTestingKey] = useState<string | null>(null);
 
   // Password visibility
   const [showGemini, setShowGemini] = useState(false);
@@ -429,7 +482,10 @@ export default function App() {
         data = rawText ? JSON.parse(rawText) : {};
       } catch {
         if (!res.ok) {
-          throw new Error(`HTTP ${res.status}: Static host or endpoint unavailable`);
+          if (res.status === 404 && isStaticHost && !baileysUrl) {
+             throw new Error(isBn ? 'ব্যাকএন্ড কানেক্ট করা নেই! ইনটিগ্রেশন পেজে গিয়ে সার্ভার URL সেভ করুন।' : 'Backend disconnected! Set your Server URL in Integrations.');
+          }
+          throw new Error(`HTTP ${res.status}: Endpoint unavailable`);
         }
         return { success: false, raw: rawText };
       }
@@ -483,11 +539,13 @@ export default function App() {
         setOverview(data.overview);
       }
       if (data.moderation?.settings) {
-        setSettings(data.moderation.settings);
-        setCustomBadwordsText((data.moderation.settings.customBadwords || []).join(', '));
-      }
-      if (data.moderation?.restrictedUsers) {
-        setRestrictedUsers(data.moderation.restrictedUsers);
+        const s = data.moderation.settings;
+        setSettings(s);
+        setCustomBadwordsText((s.customBadwords || []).join(', '));
+        if (s.geminiApiKey) setGeminiKey(s.geminiApiKey);
+        if (s.groqApiKey) setGroqKey(s.groqApiKey);
+        if (s.openrouterApiKey) setOpenrouterKey(s.openrouterApiKey);
+        if (s.geminiModel) setGeminiModel(s.geminiModel);
       }
       await checkStatus();
     } catch {
@@ -504,29 +562,18 @@ export default function App() {
         callApi('/api/moderation/restricted-users'),
       ]);
       if (settingsRes.settings) {
-        setSettings(settingsRes.settings);
-        setCustomBadwordsText((settingsRes.settings.customBadwords || []).join(', '));
-        if (settingsRes.settings.geminiApiKey) {
-          setGeminiKey(settingsRes.settings.geminiApiKey);
-          localStorage.setItem('wg_gemini_key', settingsRes.settings.geminiApiKey);
-        }
-        if (settingsRes.settings.geminiModel && settingsRes.settings.geminiModel !== 'gemini-flash-latest') {
-          setGeminiModel(settingsRes.settings.geminiModel);
-          localStorage.setItem('wg_gemini_model', settingsRes.settings.geminiModel);
-        }
-        if (settingsRes.settings.groqApiKey) {
-          setGroqKey(settingsRes.settings.groqApiKey);
-          localStorage.setItem('wg_groq_key', settingsRes.settings.groqApiKey);
-        }
-        if (settingsRes.settings.openrouterApiKey) {
-          setOpenrouterKey(settingsRes.settings.openrouterApiKey);
-          localStorage.setItem('wg_openrouter_key', settingsRes.settings.openrouterApiKey);
-        }
+        const s = settingsRes.settings;
+        setSettings(s);
+        setCustomBadwordsText((s.customBadwords || []).join(', '));
+        if (s.geminiApiKey) setGeminiKey(s.geminiApiKey);
+        if (s.groqApiKey) setGroqKey(s.groqApiKey);
+        if (s.openrouterApiKey) setOpenrouterKey(s.openrouterApiKey);
+        if (s.geminiModel) setGeminiModel(s.geminiModel);
       }
       if (logsRes.logs) {
         setActivityLogs(logsRes.logs);
       }
-      if (restrictedRes?.restrictedUsers) {
+      if (restrictedRes && restrictedRes.restrictedUsers) {
         setRestrictedUsers(restrictedRes.restrictedUsers);
       }
       showNotification(isBn ? 'সেটিংস ও লগ প্রস্তুত' : 'Settings & Logs Synced');
@@ -537,75 +584,142 @@ export default function App() {
     }
   };
 
-  // Real-time ticking for remaining restriction time
-  useEffect(() => {
-    if (restrictedUsers.length === 0) return;
-    const interval = setInterval(() => {
-      setRestrictedUsers((prev) =>
-        prev
-          .map((u) => {
-            const remSec = Math.max(0, Math.ceil((u.expiresAt - Date.now()) / 1000));
-            const mins = Math.floor(remSec / 60);
-            const secs = remSec % 60;
-            const remainingText = mins > 0 ? `${mins} মি. ${secs} সে.` : `${secs} সেকেন্ড`;
-            return {
-              ...u,
-              remainingSeconds: remSec,
-              remainingText,
-            };
-          })
-          .filter((u) => (u.remainingSeconds || 0) > 0)
-      );
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [restrictedUsers.length]);
-
   const handleManualUnmute = async (groupId: string, senderJid: string) => {
-    setIsUnmuting(senderJid);
     try {
       const res = await callApi('/api/moderation/unmute', 'POST', { groupId, senderJid });
-      if (res.restrictedUsers) {
-        setRestrictedUsers(res.restrictedUsers);
-      } else {
-        setRestrictedUsers((prev) => prev.filter((u) => !(u.senderJid === senderJid && u.groupId === groupId)));
+      if (res.success) {
+        showNotification(isBn ? 'সদস্যের রেস্ট্রিকশন তুলে দেওয়া হয়েছে!' : 'User unmuted successfully!');
+        if (res.restrictedUsers) {
+          setRestrictedUsers(res.restrictedUsers);
+        } else {
+          loadModerationData();
+        }
       }
-      showNotification(res.message || (isBn ? 'সদস্যকে আনমিউট করা হয়েছে' : 'User unmuted successfully'));
     } catch (err: any) {
-      showNotification((isBn ? 'আনমিউট ব্যর্থ: ' : 'Unmute failed: ') + err.message);
-    } finally {
-      setIsUnmuting(null);
+      showNotification((isBn ? 'Unrestrict ব্যর্থ: ' : 'Unrestrict failed: ') + err.message);
     }
   };
 
-  const saveIndividualMuteSettings = async (
-    limit: number,
-    timeWindow: number,
-    durationMinutes: number
-  ) => {
-    const patch = {
-      individualMuteStickerLimit: Math.max(1, limit),
-      individualMuteTimeWindow: Math.max(1, timeWindow),
-      individualMuteDurationMinutes: Math.max(1, durationMinutes),
-    };
-    setSettings((prev) => ({ ...prev, ...patch }));
-    try {
-      await callApi('/api/moderation/settings', 'POST', patch);
-      showNotification(isBn ? 'Individual Mute সেটিংস সংরক্ষিত হয়েছে!' : 'Individual Mute settings saved!');
-    } catch (err: any) {
-      showNotification((isBn ? 'সংরক্ষণ ব্যর্থ: ' : 'Save failed: ') + err.message);
-    }
-  };
+
+
 
   const updateSettingToggle = async (key: keyof ModerationSettings, value: any) => {
     const updated = { ...settings, [key]: value };
     setSettings(updated);
     try {
       await callApi('/api/moderation/settings', 'POST', { [key]: value });
-      showNotification(isBn ? `সফলভাবে সেভ হয়েছে: ${key} = ${value}` : `Saved: ${key} = ${value}`);
+      showNotification(isBn ? `সফলভাবে সেভ হয়েছে` : `Settings updated successfully`);
     } catch (err: any) {
       showNotification((isBn ? 'সেভ করতে ব্যর্থ: ' : 'Save failed: ') + err.message);
       setSettings(settings);
     }
+  };
+
+  const handleAddAiKey = async (e?: React.FormEvent | React.MouseEvent | React.KeyboardEvent) => {
+    e?.preventDefault();
+    if (!newKeyInput.trim()) {
+      showNotification(isBn ? 'দয়া করে এপিআই কি লিখুন' : 'Please enter an API key');
+      return;
+    }
+    setIsAddingKey(true);
+    try {
+      const res = await callApi('/api/moderation/ai-keys/add', 'POST', {
+        key: newKeyInput.trim(),
+        provider: newKeyProvider,
+        label: newKeyLabel.trim()
+      });
+      if (res.success) {
+        if (res.keys) {
+          setSettings(prev => ({ ...prev, aiKeys: res.keys }));
+        } else if (res.key) {
+          setSettings(prev => ({
+            ...prev,
+            aiKeys: [...(prev.aiKeys || []).filter(k => k.id !== res.key.id), res.key]
+          }));
+        }
+        setNewKeyInput('');
+        setNewKeyLabel('');
+        showNotification(isBn ? 'নতুন এপিআই কি যুক্ত হয়েছে!' : 'New API key added successfully!');
+      }
+    } catch (err: any) {
+      showNotification((isBn ? 'যোগ করতে ব্যর্থ: ' : 'Add failed: ') + err.message);
+    } finally {
+      setIsAddingKey(false);
+    }
+  };
+
+  const handleRemoveAiKey = async (id: string, e?: React.MouseEvent) => {
+    e?.preventDefault();
+    try {
+      const res = await callApi('/api/moderation/ai-keys/remove', 'POST', { id });
+      if (res.keys) {
+        setSettings(prev => ({ ...prev, aiKeys: res.keys }));
+      } else {
+        setSettings(prev => ({
+          ...prev,
+          aiKeys: (prev.aiKeys || []).filter(k => k.id !== id)
+        }));
+      }
+      showNotification(isBn ? 'কি-টি রিমুভ করা হয়েছে' : 'Key removed successfully');
+    } catch (err: any) {
+      showNotification((isBn ? 'রিমুভ ব্যর্থ: ' : 'Remove failed: ') + err.message);
+    }
+  };
+
+  const handleResetAiKeys = async (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    try {
+      const res = await callApi('/api/moderation/ai-keys/reset', 'POST');
+      if (res.keys) {
+        setSettings(prev => ({ ...prev, aiKeys: res.keys }));
+      }
+      showNotification(isBn ? 'সব কি রিসেট করা হয়েছে' : 'All keys reset successfully');
+    } catch (err: any) {
+      showNotification((isBn ? 'রিসেট ব্যর্থ: ' : 'Reset failed: ') + err.message);
+    }
+  };
+
+  const handleTestAiKey = async (key: AiKey, e?: React.MouseEvent) => {
+     e?.preventDefault();
+     setIsTestingKey(key.id);
+     showNotification(isBn ? `${key.label} টেস্ট করা হচ্ছে...` : `Testing ${key.label}...`);
+     try {
+        const res = await callApi('/api/maya/test', 'POST', {
+           text: 'Ping',
+           settings: {
+              ...settings,
+              aiProvider: key.provider,
+              testKeyId: key.id
+           }
+        });
+        if (res.success) {
+           showNotification(isBn ? 'টেস্ট সফল হয়েছে!' : 'Test successful!');
+           loadModerationData();
+        }
+     } catch (err: any) {
+        showNotification((isBn ? 'টেস্ট ব্যর্থ: ' : 'Test failed: ') + err.message);
+        loadModerationData();
+     } finally {
+        setIsTestingKey(null);
+     }
+  };
+
+  const moveProviderUp = (index: number) => {
+    if (index === 0) return;
+    const priority = [...(settings.aiProviderPriority || ['gemini', 'groq', 'openrouter'])];
+    const temp = priority[index];
+    priority[index] = priority[index - 1];
+    priority[index - 1] = temp;
+    updateSettingToggle('aiProviderPriority', priority);
+  };
+
+  const moveProviderDown = (index: number) => {
+    const priority = [...(settings.aiProviderPriority || ['gemini', 'groq', 'openrouter'])];
+    if (index === priority.length - 1) return;
+    const temp = priority[index];
+    priority[index] = priority[index + 1];
+    priority[index + 1] = temp;
+    updateSettingToggle('aiProviderPriority', priority);
   };
 
   const saveCustomBadwords = async () => {
@@ -624,7 +738,6 @@ export default function App() {
   };
 
   const resetAllWarnings = async () => {
-    if (!confirm(isBn ? 'আপনি কি নিশ্চিত যে সকল সদস্যের Warning রিসেট করতে চান?' : 'Reset all member warnings?')) return;
     try {
       await callApi('/api/moderation/reset-warnings', 'POST');
       showNotification(isBn ? 'সকল Warning রিসেট করা হয়েছে!' : 'All warnings reset successfully!');
@@ -725,15 +838,39 @@ export default function App() {
         localStorage.setItem('wg_gemini_key', geminiKey);
         localStorage.setItem('wg_gemini_model', safeModel);
         await callApi('/api/moderation/settings', 'POST', { geminiApiKey: geminiKey, geminiModel: safeModel });
+        if (geminiKey.trim() && !geminiKey.includes('...')) {
+          await callApi('/api/moderation/ai-keys/add', 'POST', {
+            key: geminiKey.trim(),
+            provider: 'gemini',
+            label: 'Gemini Main 1'
+          }).catch(() => {});
+        }
         showNotification(isBn ? 'Gemini এপিআই কি সার্ভারে সেভ হয়েছে!' : 'Gemini Config Saved to Backend!');
+        loadModerationData();
       } else if (type === 'groq') {
         localStorage.setItem('wg_groq_key', groqKey);
         await callApi('/api/moderation/settings', 'POST', { groqApiKey: groqKey });
+        if (groqKey.trim() && !groqKey.includes('...')) {
+          await callApi('/api/moderation/ai-keys/add', 'POST', {
+            key: groqKey.trim(),
+            provider: 'groq',
+            label: 'Groq Main 1'
+          }).catch(() => {});
+        }
         showNotification(isBn ? 'Groq এপিআই কি সার্ভারে সেভ হয়েছে!' : 'Groq API Key Saved to Backend!');
+        loadModerationData();
       } else if (type === 'openrouter') {
         localStorage.setItem('wg_openrouter_key', openrouterKey);
         await callApi('/api/moderation/settings', 'POST', { openrouterApiKey: openrouterKey });
+        if (openrouterKey.trim() && !openrouterKey.includes('...')) {
+          await callApi('/api/moderation/ai-keys/add', 'POST', {
+            key: openrouterKey.trim(),
+            provider: 'openrouter',
+            label: 'OpenRouter Main 1'
+          }).catch(() => {});
+        }
         showNotification(isBn ? 'OpenRouter এপিআই কি সার্ভারে সেভ হয়েছে!' : 'OpenRouter API Key Saved to Backend!');
+        loadModerationData();
       } else if (type === 'supabase') {
         localStorage.setItem('wg_supabase_url', supabaseUrl);
         localStorage.setItem('wg_supabase_key', supabaseKey);
@@ -761,17 +898,15 @@ export default function App() {
            settings: {
              ...settings,
              geminiModel: geminiModel === 'gemini-flash-latest' ? 'gemini-3.1-flash-lite' : geminiModel,
-             geminiApiKey: geminiKey,
-             groqApiKey: groqKey,
-             openrouterApiKey: openrouterKey,
            }
          });
          
          const hintEl = testInputEl.parentElement?.nextElementSibling;
          if (hintEl) {
             const providerTag = res.provider ? ` [${res.provider.toUpperCase()} - ${res.latencyMs || 0}ms]` : '';
+            const keyInfo = res.keyLabel ? `<span class="opacity-60"> via ${res.keyLabel}</span>` : '';
             const errorInfo = (res.provider === 'fallback' || res.provider === 'none') && res.error ? `<div class="mt-1 text-[9px] text-rose-500 font-mono">Debug: ${res.error}</div>` : '';
-            hintEl.innerHTML = `<div><b>Maya${providerTag}:</b> ${res.reply}</div>${errorInfo}`;
+            hintEl.innerHTML = `<div><b>Maya${providerTag}:</b> ${res.reply}${keyInfo}</div>${errorInfo}`;
             hintEl.classList.remove('italic', 'text-gray-600');
             hintEl.classList.add('text-emerald-800');
          }
@@ -813,6 +948,50 @@ export default function App() {
     showNotification('Baileys URL Reset Done');
   };
 
+  const getHelpStatus = (id: string | null): { text?: string; isActive?: boolean } => {
+    if (!id) return {};
+    switch (id) {
+      case 'adminShield':
+        return { text: settings.adminShield ? 'ACTIVE (চালু)' : 'OFF (বন্ধ)', isActive: settings.adminShield };
+      case 'autoKick3Warnings':
+        return { text: settings.autoKick3Warnings ? 'ACTIVE (চালু)' : 'OFF (বন্ধ)', isActive: settings.autoKick3Warnings };
+      case 'antiStickerSpam':
+        return { text: settings.antiStickerSpam ? 'ACTIVE (চালু)' : 'OFF (বন্ধ)', isActive: settings.antiStickerSpam };
+      case 'antiSticker':
+        return { text: settings.antiSticker ? 'BLOCKED (নিষিদ্ধ)' : 'ALLOWED (অনুমোদিত)', isActive: settings.antiSticker };
+      case 'antiGif':
+        return { text: settings.antiGif ? 'BLOCKED (নিষিদ্ধ)' : 'ALLOWED (অনুমোদিত)', isActive: settings.antiGif };
+      case 'antiVideo':
+        return { text: settings.antiVideo ? 'BLOCKED (নিষিদ্ধ)' : 'ALLOWED (অনুমোদিত)', isActive: settings.antiVideo };
+      case 'antiImage':
+        return { text: settings.antiImage ? 'BLOCKED (নিষিদ্ধ)' : 'ALLOWED (অনুমোদিত)', isActive: settings.antiImage };
+      case 'antiViewOnce':
+        return { text: settings.antiViewOnce ? 'BLOCKED (নিষিদ্ধ)' : 'ALLOWED (অনুমোদিত)', isActive: settings.antiViewOnce };
+      case 'antiBadword':
+        return { text: settings.antiBadword ? 'ACTIVE (চালু)' : 'OFF (বন্ধ)', isActive: settings.antiBadword };
+      case 'antiLink':
+        return { text: settings.antiLink ? 'BLOCKED (নিষিদ্ধ)' : 'ALLOWED (অনুমোদিত)', isActive: settings.antiLink };
+      case 'botReply':
+        return { text: settings.botReply ? 'ACTIVE (চালু)' : 'OFF (বন্ধ)', isActive: settings.botReply };
+      case 'salamProtection':
+        return { text: '100% PROTECTED (সুরক্ষিত)', isActive: true };
+      case 'mayaEngine':
+        return { text: settings.mayaAiEnabled ? 'ACTIVE (চালু)' : 'OFF (বন্ধ)', isActive: settings.mayaAiEnabled };
+      case 'mayaPrivateReply':
+        return { text: settings.mayaPrivateReply ? 'ACTIVE (চালু)' : 'OFF (বন্ধ)', isActive: settings.mayaPrivateReply };
+      case 'mayaGroupReply':
+        return { text: settings.mayaGroupReply ? 'ACTIVE (চালু)' : 'OFF (বন্ধ)', isActive: settings.mayaGroupReply };
+      case 'mayaRomantic':
+        return { text: settings.mayaRomantic ? 'ACTIVE (চালু)' : 'OFF (বন্ধ)', isActive: settings.mayaRomantic };
+      case 'mayaFunny':
+        return { text: settings.mayaFunny ? 'ACTIVE (চালু)' : 'OFF (বন্ধ)', isActive: settings.mayaFunny };
+      case 'botConnection':
+        return { text: liveStatus.online ? 'ONLINE (কানেক্টেড)' : 'DISCONNECTED (সংযোগ নেই)', isActive: liveStatus.online };
+      default:
+        return { text: 'MONITORED (সক্রিয়)', isActive: true };
+    }
+  };
+
   // Setup periodic live status polling (every 2.5 seconds)
   useEffect(() => {
     loadDashboard();
@@ -842,7 +1021,7 @@ export default function App() {
         </div>
         <div className="header-right">
           <div
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold ${
+            className={`flex items-center gap-1.5 px-2.5 py-1  text-[11px] font-semibold ${
               liveStatus.online
                 ? 'bg-[#e9f7ef] text-[#108255]'
                 : liveStatus.status === 'pairing'
@@ -851,7 +1030,7 @@ export default function App() {
             }`}
           >
             <span
-              className={`w-2 h-2 rounded-full ${
+              className={`w-2 h-2  ${
                 liveStatus.online ? 'bg-[#108255]' : liveStatus.status === 'pairing' ? 'bg-amber-500 animate-ping' : 'bg-gray-400'
               }`}
             ></span>
@@ -866,7 +1045,7 @@ export default function App() {
 
           {/* Bengali / English Language Switcher Button */}
           <button
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-extrabold transition-all cursor-pointer shadow-xs shrink-0"
+            className="flex items-center gap-1.5 px-2.5 py-1  border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-extrabold transition-all cursor-pointer shadow-xs shrink-0"
             onClick={toggleUiLang}
             title={isBn ? 'Switch UI to English' : 'বাংলায় পরিবর্তন করুন'}
           >
@@ -968,6 +1147,36 @@ export default function App() {
                 </button>
               </div>
 
+              {/* Static Host Backend Warning */}
+              {isStaticHost && !baileysUrl && (
+                <div className="mb-5 p-4  border border-rose-200 bg-rose-50 text-rose-900 flex items-start gap-3 shadow-sm animate-appear">
+                  <div className="w-8 h-8  bg-rose-100 flex items-center justify-center shrink-0 text-rose-600">
+                    <Plug size={18} />
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="font-bold text-sm">ব্যাকএন্ড সার্ভার কানেক্ট করা নেই!</h4>
+                    <p className="text-xs mt-1 leading-relaxed opacity-90">
+                      GitHub Pages শুধুমাত্র ফ্রন্টএন্ড হোস্ট করে। আপনার ড্যাশবোর্ডটি সচল করতে <b>Integrations</b> পেজে গিয়ে আপনার Render/Railway সার্ভার লিঙ্কটি সেভ করুন।
+                    </p>
+                    <button 
+                      className="mt-3 px-3 py-1.5 bg-rose-600 text-white text-[10px] font-bold  hover:bg-rose-700 transition-colors"
+                      onClick={() => setActivePage('integrations')}
+                    >
+                      কানেক্ট ব্যাকএন্ড
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* CATEGORY 0: OVERVIEW & QUICK STATS */}
+              <div className="category-system-header mt-8 mb-4 px-1">
+                 <div className="flex items-center gap-2 mb-1">
+                    <div className="w-1.5 h-1.5  bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
+                    <span className="text-[10px] font-black text-blue-600 uppercase tracking-[0.2em]">System 0</span>
+                 </div>
+                 <h2 className="text-sm font-black text-slate-800 uppercase tracking-tight opacity-90">{isBn ? 'ড্যাশবোর্ড ওভারভিউ' : 'Dashboard Overview & Stats'}</h2>
+              </div>
+
               {/* Compact Stats */}
               <div className="stats">
                 <div className="stat">
@@ -1013,10 +1222,13 @@ export default function App() {
               </div>
 
               {/* Hero Status Card */}
-              <div className="grid2">
+              <div className="grid2 !mt-5">
                 <div className="hero">
                   <div className="hero-content">
-                    <h3 className="font-bold text-sm">{t.botConnTitle}</h3>
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="font-bold text-sm text-white">{t.botConnTitle}</h3>
+                      {renderInfoBtn('botConnection')}
+                    </div>
                     <p className="text-xs mt-1">
                       {liveStatus.online
                         ? t.botConnDescConnected(liveStatus.user?.name || liveStatus.phoneNumber || 'Connected')
@@ -1056,7 +1268,10 @@ export default function App() {
                 <div className="card" style={{ marginBottom: 0 }}>
                   <div className="card-head">
                     <div>
-                      <h3>{t.groupSecTitle}</h3>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h3>{t.groupSecTitle}</h3>
+                        {renderInfoBtn('adminShield')}
+                      </div>
                       <p>Active Moderation Shield</p>
                     </div>
                     <div className="symbol sp">
@@ -1094,18 +1309,32 @@ export default function App() {
                     <RefreshCw size={13} className={isLogsLoading ? 'animate-spin' : ''} />
                     <span className="btn-text">{t.refreshRules}</span>
                   </button>
-                  <button className="btn danger" onClick={resetAllWarnings}>
-                    <RotateCcw size={13} />
-                    <span className="btn-text">{t.resetWarningsBtn}</span>
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button className="btn danger" onClick={resetAllWarnings}>
+                      <RotateCcw size={13} />
+                      <span className="btn-text">{t.resetWarningsBtn}</span>
+                    </button>
+                    {renderInfoBtn('warningManagement')}
+                  </div>
                 </div>
               </div>
 
-              {/* SECTION 1: ADMIN SHIELD & AUTO-KICK */}
+              {/* CATEGORY A: SECURITY & PROTECTION */}
+              <div className="category-system-header mt-8 mb-4 px-1">
+                 <div className="flex items-center gap-2 mb-1">
+                    <div className="w-1.5 h-1.5  bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                    <span className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.2em]">System A</span>
+                 </div>
+                 <h2 className="text-sm font-black text-slate-800 uppercase tracking-tight opacity-90">{isBn ? 'সিকিউরিটি ও সুরক্ষা' : 'Security & Protection System'}</h2>
+              </div>
+              
               <div className="card">
                 <div className="card-head">
                   <div>
-                    <h3>{t.sec1Title}</h3>
+                    <div className="flex items-center gap-1">
+                      <h3 className="font-extrabold text-[13px]">{t.sec1Title}</h3>
+                      {renderInfoBtn('adminShield')}
+                    </div>
                     <p>{t.sec1Sub}</p>
                   </div>
                   <div className="symbol sg">
@@ -1117,9 +1346,12 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      {t.adminShieldTitle}
-                      <span className={`badge ${settings.adminShield ? 'badge-green' : 'badge-amber'}`}>
-                        {settings.adminShield ? 'ON' : 'OFF'}
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {t.adminShieldTitle}
+                        <span className={`badge ${settings.adminShield ? 'badge-green' : 'badge-amber'}`}>
+                          {settings.adminShield ? 'ON' : 'OFF'}
+                        </span>
+                        {renderInfoBtn('adminShield')}
                       </span>
                     </h4>
                     <p>{t.adminShieldDesc}</p>
@@ -1138,9 +1370,12 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      {t.autoKickTitle}
-                      <span className={`badge ${settings.autoKick3Warnings ? 'badge-green' : 'badge-amber'}`}>
-                        {settings.autoKick3Warnings ? 'ACTIVE' : 'OFF'}
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {t.autoKickTitle}
+                        <span className={`badge ${settings.autoKick3Warnings ? 'badge-green' : 'badge-amber'}`}>
+                          {settings.autoKick3Warnings ? 'ACTIVE' : 'OFF'}
+                        </span>
+                        {renderInfoBtn('autoKick3Warnings')}
                       </span>
                     </h4>
                     <p>{t.autoKickDesc}</p>
@@ -1156,239 +1391,21 @@ export default function App() {
                 </div>
               </div>
 
-              {/* INDIVIDUAL TEMPORARY MUTE CARD (AUTO-DELETE INTERCEPTION) */}
-              <div className="card">
-                <div className="card-head">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3>{t.indMuteCardTitle}</h3>
-                      <span className="badge badge-purple text-[10px]">ANTI-SPAM MUTE</span>
-                    </div>
-                    <p>{t.indMuteCardSub}</p>
-                  </div>
-                  <div className="symbol sp">
-                    <UserX size={16} />
-                  </div>
-                </div>
 
-                {/* Individual Mute Toggle */}
-                <div className="toggle-row">
-                  <div className="toggle-info">
-                    <h4>
-                      {t.indMuteToggleTitle}
-                      <span className={`badge ${settings.individualMuteEnabled ? 'badge-green' : 'badge-amber'}`}>
-                        {settings.individualMuteEnabled ? 'ACTIVE' : 'OFF'}
-                      </span>
-                    </h4>
-                    <p>{t.indMuteToggleDesc}</p>
-                  </div>
-                  <label className="switch">
-                    <input
-                      type="checkbox"
-                      checked={settings.individualMuteEnabled}
-                      onChange={(e) => updateSettingToggle('individualMuteEnabled', e.target.checked)}
-                    />
-                    <span className="slider"></span>
-                  </label>
-                </div>
 
-                {/* Technical Requirements & Limitation Note */}
-                <div className="mt-3 p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-xs">
-                  <div className="flex items-start gap-2 text-indigo-300">
-                    <Sparkles size={14} className="mt-0.5 shrink-0 text-indigo-400" />
-                    <div>
-                      <span className="font-semibold block text-indigo-200">{t.offlineNoteTitle}</span>
-                      <p className="text-gray-300 mt-0.5 text-[11px] leading-relaxed">
-                        {t.offlineNoteDesc}
-                      </p>
-                      {!liveStatus.online && (
-                        <div className="mt-2 py-1 px-2 rounded bg-amber-500/20 border border-amber-500/30 text-amber-300 font-semibold text-[11px] flex items-center gap-1.5">
-                          <AlertTriangle size={12} className="shrink-0" />
-                          <span>{t.offlineWarningBadge}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Settings Inputs: Limit, Window, Duration */}
-                {settings.individualMuteEnabled && (
-                  <div className="mt-4 pt-4 border-t border-white/5">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div className="form-group mb-0">
-                        <label className="text-xs font-semibold text-gray-300 flex items-center justify-between">
-                          <span>{t.stickerLimitLabel}</span>
-                          <span className="text-[10px] text-indigo-400 font-mono">Count</span>
-                        </label>
-                        <input
-                          type="number"
-                          min={1}
-                          max={30}
-                          className="field mt-1 w-full"
-                          value={settings.individualMuteStickerLimit || 3}
-                          onChange={(e) =>
-                            setSettings((prev) => ({
-                              ...prev,
-                              individualMuteStickerLimit: parseInt(e.target.value, 10) || 1,
-                            }))
-                          }
-                        />
-                        <span className="text-[10px] text-gray-500 block mt-1">Default: 3 Stickers</span>
-                      </div>
-
-                      <div className="form-group mb-0">
-                        <label className="text-xs font-semibold text-gray-300 flex items-center justify-between">
-                          <span>{t.timeWindowLabel}</span>
-                          <span className="text-[10px] text-indigo-400 font-mono">Seconds</span>
-                        </label>
-                        <input
-                          type="number"
-                          min={1}
-                          max={120}
-                          className="field mt-1 w-full"
-                          value={settings.individualMuteTimeWindow || 5}
-                          onChange={(e) =>
-                            setSettings((prev) => ({
-                              ...prev,
-                              individualMuteTimeWindow: parseInt(e.target.value, 10) || 1,
-                            }))
-                          }
-                        />
-                        <span className="text-[10px] text-gray-500 block mt-1">Default: 5 Seconds</span>
-                      </div>
-
-                      <div className="form-group mb-0">
-                        <label className="text-xs font-semibold text-gray-300 flex items-center justify-between">
-                          <span>{t.durationMinutesLabel}</span>
-                          <span className="text-[10px] text-indigo-400 font-mono">Minutes</span>
-                        </label>
-                        <input
-                          type="number"
-                          min={1}
-                          max={1440}
-                          className="field mt-1 w-full"
-                          value={settings.individualMuteDurationMinutes || 10}
-                          onChange={(e) =>
-                            setSettings((prev) => ({
-                              ...prev,
-                              individualMuteDurationMinutes: parseInt(e.target.value, 10) || 1,
-                            }))
-                          }
-                        />
-                        <span className="text-[10px] text-gray-500 block mt-1">Default: 10 Minutes</span>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 flex justify-end">
-                      <button
-                        className="btn primary text-xs py-1.5 px-3 flex items-center gap-1.5"
-                        onClick={() =>
-                          saveIndividualMuteSettings(
-                            settings.individualMuteStickerLimit || 3,
-                            settings.individualMuteTimeWindow || 5,
-                            settings.individualMuteDurationMinutes || 10
-                          )
-                        }
-                      >
-                        <Save size={12} />
-                        <span>{t.saveIndMuteBtn}</span>
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Active Restricted Users Table & Live Countdown */}
-                <div className="mt-5 pt-4 border-t border-white/5">
-                  <div className="flex items-center justify-between mb-3">
-                    <h4 className="text-sm font-semibold text-gray-200 flex items-center gap-2">
-                      <Clock size={14} className="text-amber-400" />
-                      <span>{t.activeRestrictedTitle}</span>
-                      <span className={`badge ${restrictedUsers.length > 0 ? 'badge-red' : 'badge-green'}`}>
-                        {restrictedUsers.length} Active
-                      </span>
-                    </h4>
-                    <button
-                      className="btn outline text-xs py-1 px-2"
-                      onClick={async () => {
-                        const res = await callApi('/api/moderation/restricted-users');
-                        if (res?.restrictedUsers) setRestrictedUsers(res.restrictedUsers);
-                      }}
-                    >
-                      <RefreshCw size={11} /> Refresh
-                    </button>
-                  </div>
-
-                  <div className="tablewrap">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>MEMBER (SENDER)</th>
-                          <th>GROUP</th>
-                          <th>REMAINING TIME</th>
-                          <th>REASON</th>
-                          <th>ACTION</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {restrictedUsers.length > 0 ? (
-                          restrictedUsers.map((user) => (
-                            <tr key={`${user.groupId}:${user.senderJid}`}>
-                              <td>
-                                <span className="font-mono text-xs font-semibold text-rose-400">
-                                  @{user.senderPhone}
-                                </span>
-                              </td>
-                              <td>
-                                <span className="text-xs text-gray-300 font-medium">{user.groupName}</span>
-                              </td>
-                              <td>
-                                <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-amber-300">
-                                  <Clock size={12} className="animate-pulse text-amber-400" />
-                                  <span>{user.remainingText || `${user.remainingSeconds}s`}</span>
-                                </div>
-                              </td>
-                              <td>
-                                <span className="text-xs text-gray-400">{user.reason}</span>
-                              </td>
-                              <td>
-                                <button
-                                  className="btn danger text-xs py-1 px-2.5 flex items-center gap-1"
-                                  disabled={isUnmuting === user.senderJid}
-                                  onClick={() => handleManualUnmute(user.groupId, user.senderJid)}
-                                >
-                                  {isUnmuting === user.senderJid ? (
-                                    <>
-                                      <RefreshCw size={11} className="animate-spin" />
-                                      <span>{t.unmutingText}</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <VolumeX size={11} />
-                                      <span>{t.unmuteBtn}</span>
-                                    </>
-                                  )}
-                                </button>
-                              </td>
-                            </tr>
-                          ))
-                        ) : (
-                          <tr>
-                            <td colSpan={5} className="empty text-center py-4 text-xs text-gray-400">
-                              {t.noRestrictedUsers}
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+              {/* CATEGORY B: ANTI-SPAM PROTECTION */}
+              <div className="category-system-header mt-8 mb-4 px-1">
+                 <span className="badge badge-amber !text-[10px] !px-3 !py-1 ! font-black tracking-widest uppercase shadow-sm">System B</span>
+                 <h2 className="text-sm font-black text-slate-700 mt-1 uppercase tracking-tight opacity-80">{isBn ? 'অ্যান্টি-স্প্যাম সুরক্ষা' : 'Anti-Spam Protection System'}</h2>
               </div>
 
-              {/* SECTION 2: SPAM & MEDIA RESTRICTIONS */}
               <div className="card">
                 <div className="card-head">
                   <div>
-                    <h3>{t.sec2Title}</h3>
+                    <div className="flex items-center gap-1">
+                      <h3 className="font-extrabold text-[13px]">{t.sec2Title}</h3>
+                      {renderInfoBtn('antiStickerSpam')}
+                    </div>
                     <p>{t.sec2Sub}</p>
                   </div>
                   <div className="symbol so">
@@ -1400,9 +1417,12 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      {t.antiStickerSpamTitle}
-                      <span className={`badge ${settings.antiStickerSpam ? 'badge-green' : 'badge-amber'}`}>
-                        {settings.antiStickerSpam ? 'ACTIVE' : 'OFF'}
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {t.antiStickerSpamTitle}
+                        <span className={`badge ${settings.antiStickerSpam ? 'badge-green' : 'badge-amber'}`}>
+                          {settings.antiStickerSpam ? 'ACTIVE' : 'OFF'}
+                        </span>
+                        {renderInfoBtn('antiStickerSpam')}
                       </span>
                     </h4>
                     <p>{t.antiStickerSpamDesc}</p>
@@ -1421,9 +1441,12 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      {t.antiStickerTitle}
-                      <span className={`badge ${settings.antiSticker ? 'badge-red' : 'badge-blue'}`}>
-                        {settings.antiSticker ? 'BLOCKED' : 'ALLOWED'}
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {t.antiStickerTitle}
+                        <span className={`badge ${settings.antiSticker ? 'badge-red' : 'badge-blue'}`}>
+                          {settings.antiSticker ? 'BLOCKED' : 'ALLOWED'}
+                        </span>
+                        {renderInfoBtn('antiSticker')}
                       </span>
                     </h4>
                     <p>{t.antiStickerDesc}</p>
@@ -1442,9 +1465,12 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      {t.antiGifTitle}
-                      <span className={`badge ${settings.antiGif ? 'badge-green' : 'badge-amber'}`}>
-                        {settings.antiGif ? 'BLOCKED' : 'ALLOWED'}
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {t.antiGifTitle}
+                        <span className={`badge ${settings.antiGif ? 'badge-green' : 'badge-amber'}`}>
+                          {settings.antiGif ? 'BLOCKED' : 'ALLOWED'}
+                        </span>
+                        {renderInfoBtn('antiGif')}
                       </span>
                     </h4>
                     <p>{t.antiGifDesc}</p>
@@ -1463,9 +1489,12 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      {t.antiVideoTitle}
-                      <span className={`badge ${settings.antiVideo ? 'badge-red' : 'badge-blue'}`}>
-                        {settings.antiVideo ? 'BLOCKED' : 'ALLOWED'}
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {t.antiVideoTitle}
+                        <span className={`badge ${settings.antiVideo ? 'badge-red' : 'badge-blue'}`}>
+                          {settings.antiVideo ? 'BLOCKED' : 'ALLOWED'}
+                        </span>
+                        {renderInfoBtn('antiVideo')}
                       </span>
                     </h4>
                     <p>{t.antiVideoDesc}</p>
@@ -1484,9 +1513,12 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      {t.antiImageTitle}
-                      <span className={`badge ${settings.antiImage ? 'badge-red' : 'badge-blue'}`}>
-                        {settings.antiImage ? 'BLOCKED' : 'ALLOWED'}
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {t.antiImageTitle}
+                        <span className={`badge ${settings.antiImage ? 'badge-red' : 'badge-blue'}`}>
+                          {settings.antiImage ? 'BLOCKED' : 'ALLOWED'}
+                        </span>
+                        {renderInfoBtn('antiImage')}
                       </span>
                     </h4>
                     <p>{t.antiImageDesc}</p>
@@ -1505,9 +1537,12 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      {t.antiViewOnceTitle}
-                      <span className={`badge ${settings.antiViewOnce ? 'badge-green' : 'badge-amber'}`}>
-                        {settings.antiViewOnce ? 'BLOCKED' : 'ALLOWED'}
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {t.antiViewOnceTitle}
+                        <span className={`badge ${settings.antiViewOnce ? 'badge-green' : 'badge-amber'}`}>
+                          {settings.antiViewOnce ? 'BLOCKED' : 'ALLOWED'}
+                        </span>
+                        {renderInfoBtn('antiViewOnce')}
                       </span>
                     </h4>
                     <p>{t.antiViewOnceDesc}</p>
@@ -1523,11 +1558,104 @@ export default function App() {
                 </div>
               </div>
 
-              {/* SECTION 3: MULTILINGUAL BADWORD & LINK FILTER */}
+              {/* ACTIVE RESTRICTED USERS DASHBOARD CARD */}
+              <div className="card mt-4 border-amber-500/30 bg-amber-500/5">
+                <div className="card-head">
+                  <div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <h3 className="font-extrabold text-[13px] text-amber-900">
+                        {isBn ? 'সক্রিয় সাময়িক রেস্ট্রিকশনপ্রাপ্ত সদস্য (Active Restricted Users)' : 'Active Restricted Users Dashboard'}
+                      </h3>
+                      <span className="badge badge-amber">{restrictedUsers.length}</span>
+                      {renderInfoBtn('antiStickerSpam')}
+                    </div>
+                    <p className="text-xs text-amber-800/80">
+                      {isBn ? 'অতিরিক্ত স্টিকার স্প্যাম করার কারণে ১০ মিনিটের জন্য মেসেজিং রেস্ট্রিকশনে থাকা সদস্যবৃন্দ' : 'Members temporarily restricted for 10 minutes due to sticker spam'}
+                    </p>
+                  </div>
+                  <div className="symbol so">
+                    <UserX size={16} />
+                  </div>
+                </div>
+
+                <div className="tablewrap mt-3">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>{isBn ? 'সদস্যের নাম / নম্বর' : 'MEMBER'}</th>
+                        <th>{isBn ? 'গ্রুপ নাম' : 'GROUP'}</th>
+                        <th>{isBn ? 'কারণ' : 'REASON'}</th>
+                        <th>{isBn ? 'শুরু সময়' : 'START TIME'}</th>
+                        <th>{isBn ? 'অবশিষ্ট সময় (LIVE)' : 'REMAINING'}</th>
+                        <th>{isBn ? 'স্ট্যাটাস' : 'STATUS'}</th>
+                        <th>{isBn ? 'অ্যাকশন' : 'ACTION'}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {restrictedUsers.length > 0 ? (
+                        restrictedUsers.map((user) => (
+                          <tr key={`${user.groupId}:${user.senderJid}`}>
+                            <td className="font-mono text-xs font-bold text-slate-800 whitespace-nowrap">
+                              @{user.senderPhone}
+                            </td>
+                            <td className="text-xs font-medium text-slate-700">
+                              {user.groupName || 'Protected Group'}
+                            </td>
+                            <td className="text-xs text-rose-700 font-medium">
+                              {user.reason || 'Sticker Spam'}
+                            </td>
+                            <td className="text-[10px] text-slate-500 whitespace-nowrap">
+                              {new Date(user.restrictedAt).toLocaleTimeString()}
+                            </td>
+                            <td className="whitespace-nowrap font-mono text-xs font-bold text-amber-700">
+                              <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 px-2 py-0.5 border border-amber-300">
+                                <Clock size={11} className="animate-spin text-amber-600" />
+                                {user.remainingText || `${Math.ceil((user.expiresAt - Date.now()) / 1000)}s`}
+                              </span>
+                            </td>
+                            <td>
+                              <span className="badge badge-red">
+                                Restricted
+                              </span>
+                            </td>
+                            <td>
+                              <button
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold transition-all shadow-xs shrink-0 cursor-pointer"
+                                onClick={() => handleManualUnmute(user.groupId, user.senderJid)}
+                              >
+                                {isBn ? 'Unrestrict' : 'Unrestrict'}
+                              </button>
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={7} className="empty py-4 text-xs text-slate-500 text-center">
+                            {isBn ? 'বর্তমানে কোনো সদস্য রেস্ট্রিকশন তালিকায় নেই।' : 'No members currently restricted.'}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* CATEGORY C: MESSAGE MODERATION */}
+              <div className="category-system-header mt-8 mb-4 px-1">
+                 <div className="flex items-center gap-2 mb-1">
+                    <div className="w-1.5 h-1.5  bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]" />
+                    <span className="text-[10px] font-black text-red-600 uppercase tracking-[0.2em]">System C</span>
+                 </div>
+                 <h2 className="text-sm font-black text-slate-800 uppercase tracking-tight opacity-90">{isBn ? 'মেসেজ মডারেশন' : 'Message Moderation Engine'}</h2>
+              </div>
+
               <div className="card">
                 <div className="card-head">
                   <div>
-                    <h3>{t.sec3Title}</h3>
+                    <div className="flex items-center gap-1">
+                      <h3 className="font-extrabold text-[13px]">{t.sec3Title}</h3>
+                      {renderInfoBtn('antiBadword')}
+                    </div>
                     <p>{t.sec3Sub}</p>
                   </div>
                   <div className="symbol sr">
@@ -1535,13 +1663,17 @@ export default function App() {
                   </div>
                 </div>
 
+
                 {/* Anti-Badword */}
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      {t.antiBadwordTitle}
-                      <span className={`badge ${settings.antiBadword ? 'badge-green' : 'badge-amber'}`}>
-                        {settings.antiBadword ? 'ACTIVE' : 'OFF'}
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {t.antiBadwordTitle}
+                        <span className={`badge ${settings.antiBadword ? 'badge-green' : 'badge-amber'}`}>
+                          {settings.antiBadword ? 'ACTIVE' : 'OFF'}
+                        </span>
+                        {renderInfoBtn('antiBadword')}
                       </span>
                     </h4>
                     <p>{t.antiBadwordDesc}</p>
@@ -1560,9 +1692,12 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      {t.antiLinkTitle}
-                      <span className={`badge ${settings.antiLink ? 'badge-green' : 'badge-amber'}`}>
-                        {settings.antiLink ? 'BLOCKED' : 'OFF'}
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {t.antiLinkTitle}
+                        <span className={`badge ${settings.antiLink ? 'badge-green' : 'badge-amber'}`}>
+                          {settings.antiLink ? 'BLOCKED' : 'OFF'}
+                        </span>
+                        {renderInfoBtn('antiLink')}
                       </span>
                     </h4>
                     <p>{t.antiLinkDesc}</p>
@@ -1577,13 +1712,64 @@ export default function App() {
                   </label>
                 </div>
 
+                {/* AI Badword Detection */}
+                <div className="toggle-row">
+                  <div className="toggle-info">
+                    <h4>
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {t.aiBadwordTitle}
+                        <span className={`badge ${settings.aiBadwordDetection ? 'badge-green' : 'badge-amber'}`}>
+                          {settings.aiBadwordDetection ? 'ACTIVE' : 'OFF'}
+                        </span>
+                        {renderInfoBtn('antiBadword')}
+                      </span>
+                    </h4>
+                    <p>{t.aiBadwordDesc}</p>
+                  </div>
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.aiBadwordDetection}
+                      onChange={(e) => updateSettingToggle('aiBadwordDetection', e.target.checked)}
+                    />
+                    <span className="slider"></span>
+                  </label>
+                </div>
+
+                {/* Silent Moderation */}
+                <div className="toggle-row">
+                  <div className="toggle-info">
+                    <h4>
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {t.silentModTitle}
+                        <span className={`badge ${settings.silentModeration ? 'badge-red' : 'badge-blue'}`}>
+                          {settings.silentModeration ? 'SILENT' : 'LOUD'}
+                        </span>
+                        {renderInfoBtn('warningManagement')}
+                      </span>
+                    </h4>
+                    <p>{t.silentModDesc}</p>
+                  </div>
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.silentModeration}
+                      onChange={(e) => updateSettingToggle('silentModeration', e.target.checked)}
+                    />
+                    <span className="slider"></span>
+                  </label>
+                </div>
+
                 {/* Bot Mention / Name Calling Reply */}
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      {t.botReplyTitle}
-                      <span className={`badge ${settings.botReply ? 'badge-green' : 'badge-amber'}`}>
-                        {settings.botReply ? 'ACTIVE' : 'OFF'}
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {t.botReplyTitle}
+                        <span className={`badge ${settings.botReply ? 'badge-green' : 'badge-amber'}`}>
+                          {settings.botReply ? 'ACTIVE' : 'OFF'}
+                        </span>
+                        {renderInfoBtn('botReply')}
                       </span>
                     </h4>
                     <p>{t.botReplyDesc}</p>
@@ -1600,7 +1786,10 @@ export default function App() {
 
                 {/* Custom Badword List Editor */}
                 <div className="form-group" style={{ marginTop: '12px' }}>
-                  <label>{t.customBadwordsLabel}</label>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <label className="mb-0">{t.customBadwordsLabel}</label>
+                    {renderInfoBtn('customBadwords')}
+                  </div>
                   <p className="hint" style={{ marginBottom: '6px' }}>
                     {t.customBadwordsHint}
                   </p>
@@ -1619,11 +1808,22 @@ export default function App() {
                 </div>
               </div>
 
-              {/* SECTION 4: REAL ACTIVITY LOGS */}
+              {/* CATEGORY E: LOGS & STATUS */}
+              <div className="category-system-header mt-8 mb-4 px-1">
+                 <div className="flex items-center gap-2 mb-1">
+                    <div className="w-1.5 h-1.5  bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
+                    <span className="text-[10px] font-black text-blue-600 uppercase tracking-[0.2em]">System E</span>
+                 </div>
+                 <h2 className="text-sm font-black text-slate-800 uppercase tracking-tight opacity-90">{isBn ? 'লগ ও সিস্টেম স্ট্যাটাস' : 'Logs & System Status'}</h2>
+              </div>
+
               <div className="card">
                 <div className="card-head">
                   <div>
-                    <h3>{t.activityTitle}</h3>
+                    <div className="flex items-center gap-1">
+                      <h3 className="font-extrabold text-[13px]">{t.activityTitle}</h3>
+                      {renderInfoBtn('activityLogs')}
+                    </div>
                     <p>{t.activitySub}</p>
                   </div>
                   <div className="flex gap-2">
@@ -1719,6 +1919,15 @@ export default function App() {
                 </button>
               </div>
 
+              {/* CATEGORY D: MAYA AI COMPANION */}
+              <div className="category-system-header mt-8 mb-4 px-1">
+                 <div className="flex items-center gap-2 mb-1">
+                    <div className="w-1.5 h-1.5  bg-teal-500 shadow-[0_0_8px_rgba(20,184,166,0.5)]" />
+                    <span className="text-[10px] font-black text-teal-600 uppercase tracking-[0.2em]">System D</span>
+                 </div>
+                 <h2 className="text-sm font-black text-slate-800 uppercase tracking-tight opacity-90">{isBn ? 'মায়া এআই ইঞ্জিন' : 'Maya AI Core & Companion'}</h2>
+              </div>
+
               <div className="grid2">
                 <div className="card">
                   <div className="card-head">
@@ -1734,7 +1943,13 @@ export default function App() {
                   {/* Master AI Engine Switch */}
                   <div className="toggle-row">
                     <div className="toggle-info">
-                      <h4>{t.mayaEngineTitle} <span className={`badge ${settings.mayaAiEnabled ? 'badge-green' : 'badge-amber'}`}>{settings.mayaAiEnabled ? 'ACTIVE' : 'OFF'}</span></h4>
+                      <h4>
+                        <span className="flex items-center gap-1.5 flex-wrap">
+                          {t.mayaEngineTitle}
+                          <span className={`badge ${settings.mayaAiEnabled ? 'badge-green' : 'badge-amber'}`}>{settings.mayaAiEnabled ? 'ACTIVE' : 'OFF'}</span>
+                          {renderInfoBtn('mayaEngine')}
+                        </span>
+                      </h4>
                       <p>{t.mayaEngineDesc}</p>
                     </div>
                     <label className="switch">
@@ -1750,7 +1965,13 @@ export default function App() {
                   {/* Private Inbox AI Toggle */}
                   <div className="toggle-row">
                     <div className="toggle-info">
-                      <h4>{t.privateInboxAiTitle} <span className={`badge ${settings.mayaPrivateReply ? 'badge-green' : 'badge-amber'}`}>{settings.mayaPrivateReply ? 'ACTIVE' : 'OFF'}</span></h4>
+                      <h4>
+                        <span className="flex items-center gap-1.5 flex-wrap">
+                          {t.privateInboxAiTitle}
+                          <span className={`badge ${settings.mayaPrivateReply ? 'badge-green' : 'badge-amber'}`}>{settings.mayaPrivateReply ? 'ACTIVE' : 'OFF'}</span>
+                          {renderInfoBtn('mayaPrivateReply')}
+                        </span>
+                      </h4>
                       <p>{t.privateInboxAiDesc}</p>
                     </div>
                     <label className="switch">
@@ -1766,7 +1987,13 @@ export default function App() {
                   {/* Group AI Toggle */}
                   <div className="toggle-row">
                     <div className="toggle-info">
-                      <h4>{t.groupAiTitle} <span className={`badge ${settings.mayaGroupReply ? 'badge-green' : 'badge-amber'}`}>{settings.mayaGroupReply ? 'ACTIVE' : 'OFF'}</span></h4>
+                      <h4>
+                        <span className="flex items-center gap-1.5 flex-wrap">
+                          {t.groupAiTitle}
+                          <span className={`badge ${settings.mayaGroupReply ? 'badge-green' : 'badge-amber'}`}>{settings.mayaGroupReply ? 'ACTIVE' : 'OFF'}</span>
+                          {renderInfoBtn('mayaGroupReply')}
+                        </span>
+                      </h4>
                       <p>{t.groupAiDesc}</p>
                     </div>
                     <label className="switch">
@@ -1781,7 +2008,13 @@ export default function App() {
 
                   <div className="toggle-row">
                     <div className="toggle-info">
-                      <h4>{t.romanticTitle} <span className={`badge ${settings.mayaRomantic ? 'badge-green' : 'badge-amber'}`}>{settings.mayaRomantic ? 'ON' : 'OFF'}</span></h4>
+                      <h4>
+                        <span className="flex items-center gap-1.5 flex-wrap">
+                          {t.romanticTitle}
+                          <span className={`badge ${settings.mayaRomantic ? 'badge-green' : 'badge-amber'}`}>{settings.mayaRomantic ? 'ON' : 'OFF'}</span>
+                          {renderInfoBtn('mayaRomantic')}
+                        </span>
+                      </h4>
                       <p>{t.romanticDesc}</p>
                     </div>
                     <label className="switch">
@@ -1796,7 +2029,13 @@ export default function App() {
 
                   <div className="toggle-row">
                     <div className="toggle-info">
-                      <h4>{t.funnyTitle} <span className={`badge ${settings.mayaFunny ? 'badge-green' : 'badge-amber'}`}>{settings.mayaFunny ? 'ON' : 'OFF'}</span></h4>
+                      <h4>
+                        <span className="flex items-center gap-1.5 flex-wrap">
+                          {t.funnyTitle}
+                          <span className={`badge ${settings.mayaFunny ? 'badge-green' : 'badge-amber'}`}>{settings.mayaFunny ? 'ON' : 'OFF'}</span>
+                          {renderInfoBtn('mayaFunny')}
+                        </span>
+                      </h4>
                       <p>{t.funnyDesc}</p>
                     </div>
                     <label className="switch">
@@ -1811,7 +2050,13 @@ export default function App() {
 
                   <div className="toggle-row">
                     <div className="toggle-info">
-                      <h4>{t.autoPartTitle} <span className={`badge ${settings.mayaAutoParticipate ? 'badge-green' : 'badge-amber'}`}>{settings.mayaAutoParticipate ? 'ON' : 'OFF'}</span></h4>
+                      <h4>
+                        <span className="flex items-center gap-1.5 flex-wrap">
+                          {t.autoPartTitle}
+                          <span className={`badge ${settings.mayaAutoParticipate ? 'badge-green' : 'badge-amber'}`}>{settings.mayaAutoParticipate ? 'ON' : 'OFF'}</span>
+                          {renderInfoBtn('mayaAutoParticipate')}
+                        </span>
+                      </h4>
                       <p>{t.autoPartDesc}</p>
                     </div>
                     <label className="switch">
@@ -1915,7 +2160,7 @@ export default function App() {
                     {t.sendBtn}
                   </button>
                 </div>
-                <div className="hint mt-2 p-2.5 bg-slate-50 rounded-lg border border-slate-200">
+                <div className="hint mt-2 p-2.5 bg-slate-50  border border-slate-200">
                   💡 {isBn ? 'মেসেজ পাঠিয়ে মায়ার রোমান্টিক উত্তর দেখুন।' : 'Send a message to see Maya\'s reply.'}
                 </div>
               </div>
@@ -1933,11 +2178,11 @@ export default function App() {
               </div>
 
               {liveStatus.online ? (
-                <div className="card max-w-xl mx-auto overflow-hidden border border-emerald-200 bg-gradient-to-b from-emerald-50/90 via-white to-slate-50 p-6 rounded-2xl shadow-sm">
+                <div className="card max-w-xl mx-auto overflow-hidden border border-emerald-200 bg-gradient-to-b from-emerald-50/90 via-white to-slate-50 p-6  shadow-sm">
                   {/* Connected Header Banner */}
                   <div className="flex items-center justify-between border-b border-emerald-100 pb-4 mb-4">
                     <div className="flex items-center gap-3">
-                      <div className="w-11 h-11 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-md shadow-emerald-600/20">
+                      <div className="w-11 h-11  bg-emerald-600 text-white flex items-center justify-center shadow-md shadow-emerald-600/20">
                         <ShieldCheck size={22} />
                       </div>
                       <div className="text-left">
@@ -1945,8 +2190,8 @@ export default function App() {
                           <h3 className="text-slate-900 text-base font-extrabold tracking-tight">
                             {isBn ? 'WhatsApp একাউন্ট সফলভাবে যুক্ত' : 'WhatsApp Linked Successfully'}
                           </h3>
-                          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
+                          <span className="flex items-center gap-1 px-2 py-0.5  bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                            <span className="w-1.5 h-1.5  bg-emerald-600 animate-pulse"></span>
                             Live
                           </span>
                         </div>
@@ -1958,10 +2203,10 @@ export default function App() {
                   </div>
 
                   {/* Account Info Box */}
-                  <div className="bg-white rounded-xl border border-emerald-100 p-4 shadow-2xs text-left mb-5">
+                  <div className="bg-white  border border-emerald-100 p-4 shadow-2xs text-left mb-5">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-400 text-white font-bold flex items-center justify-center text-sm shadow-sm">
+                        <div className="w-10 h-10  bg-gradient-to-tr from-emerald-500 to-teal-400 text-white font-bold flex items-center justify-center text-sm shadow-sm">
                           🌺
                         </div>
                         <div>
@@ -1977,7 +2222,7 @@ export default function App() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <span className="inline-block px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 text-[11px] font-bold border border-emerald-200">
+                        <span className="inline-block px-2.5 py-1  bg-emerald-50 text-emerald-800 text-[11px] font-bold border border-emerald-200">
                           ✓ Verified Socket
                         </span>
                       </div>
@@ -1985,15 +2230,15 @@ export default function App() {
 
                     {/* Metric Chips inside the card */}
                     <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-slate-100 text-center">
-                      <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                      <div className="bg-slate-50 p-2  border border-slate-100">
                         <span className="text-[10px] text-slate-500 block">{isBn ? 'সার্ভার স্টেট' : 'Server State'}</span>
                         <span className="text-xs font-bold text-emerald-700">Online</span>
                       </div>
-                      <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                      <div className="bg-slate-50 p-2  border border-slate-100">
                         <span className="text-[10px] text-slate-500 block">{isBn ? 'অটো মডারেশন' : 'Auto Moderation'}</span>
                         <span className="text-xs font-bold text-slate-800">24/7 Active</span>
                       </div>
-                      <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
+                      <div className="bg-slate-50 p-2  border border-slate-100">
                         <span className="text-[10px] text-slate-500 block">{isBn ? 'মায়া AI' : 'Maya AI'}</span>
                         <span className="text-xs font-bold text-teal-700">Ready</span>
                       </div>
@@ -2050,7 +2295,7 @@ export default function App() {
                   </div>
 
                   {pairingError && (
-                    <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs p-2.5 rounded-lg text-left my-2">
+                    <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs p-2.5  text-left my-2">
                       {pairingError}
                     </div>
                   )}
@@ -2068,7 +2313,7 @@ export default function App() {
                     <div className="info text-left mt-3">
                       <div className="flex justify-between items-center text-xs font-bold">
                         <span>OFFICIAL PAIRING CODE</span>
-                        <span className="bg-emerald-200 text-emerald-900 text-[10px] px-2 py-0.5 rounded-full">Active</span>
+                        <span className="bg-emerald-200 text-emerald-900 text-[10px] px-2 py-0.5 ">Active</span>
                       </div>
 
                       {pairingMode === 'code' ? (
@@ -2091,7 +2336,7 @@ export default function App() {
                             <img
                               src={liveStatus.qrCode}
                               alt="WhatsApp QR Code"
-                              className="w-48 h-48 mx-auto rounded-xl border border-gray-200 p-1 bg-white shadow-xs"
+                              className="w-48 h-48 mx-auto  border border-gray-200 p-1 bg-white shadow-xs"
                             />
                           ) : (
                             <p className="text-xs text-gray-500 py-4">QR Loading...</p>
@@ -2178,31 +2423,406 @@ export default function App() {
             <section className="page active" id="integrations">
               <div className="page-head">
                 <div>
-                  <h1>API & Integrations</h1>
-                  <p>Configure server endpoints and external credentials.</p>
+                  <h1>AI Control Center</h1>
+                  <p>Manage API key rotation, provider failover, and system health.</p>
                 </div>
               </div>
 
-              {/* Gemini AI */}
+              <div className="grid2 !mb-6">
+                 {/* AI System Health Card */}
+                 <div className="card !bg-emerald-700 !text-white border-0 shadow-xl overflow-hidden relative">
+                    <div className="absolute top-[-20px] right-[-20px] opacity-10 rotate-12">
+                       <Cpu size={120} />
+                    </div>
+                    <div className="card-head !border-emerald-600/30">
+                       <div className="flex items-center gap-2">
+                          <div className="p-1.5 bg-white/20 ">
+                             <ShieldCheck size={18} className="text-white" />
+                          </div>
+                          <div>
+                             <h3 className="!text-white font-bold">AI System Health</h3>
+                             <p className="!text-emerald-100 text-[10px]">Real-time key pool monitoring</p>
+                          </div>
+                       </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-4 gap-2 mt-4">
+                       <div className="text-center p-2 bg-white/10 ">
+                          <div className="text-xl font-black">{settings.aiKeys?.length || 0}</div>
+                          <div className="text-[8px] font-bold uppercase opacity-70 tracking-widest">Pool</div>
+                          <div className="text-[7px] font-bold opacity-50 mt-0.5">(মোট কি)</div>
+                       </div>
+                       <div className="text-center p-2 bg-white/20  border border-white/20">
+                          <div className="text-xl font-black">{settings.aiKeys?.filter(k => k.status === 'active').length || 0}</div>
+                          <div className="text-[8px] font-bold uppercase opacity-90 tracking-widest">Active</div>
+                          <div className="text-[7px] font-bold opacity-60 mt-0.5">(সচল)</div>
+                       </div>
+                       <div className="text-center p-2 bg-amber-500/30  border border-amber-400/30">
+                          <div className="text-xl font-black">{settings.aiKeys?.filter(k => k.status === 'exhausted' || k.status === 'cooldown').length || 0}</div>
+                          <div className="text-[8px] font-bold uppercase opacity-90 tracking-widest">Busy</div>
+                          <div className="text-[7px] font-bold opacity-60 mt-0.5">(কোটা শেষ)</div>
+                       </div>
+                       <div className="text-center p-2 bg-rose-500/30  border border-rose-400/30">
+                          <div className="text-xl font-black">{settings.aiKeys?.filter(k => k.status === 'invalid').length || 0}</div>
+                          <div className="text-[8px] font-bold uppercase opacity-90 tracking-widest">Faulty</div>
+                          <div className="text-[7px] font-bold opacity-60 mt-0.5">(ভুল কি)</div>
+                       </div>
+                    </div>
+
+                    <div className="mt-5 p-2.5 bg-black/20  border border-white/10 flex items-center justify-between">
+                       <div className="flex items-center gap-2">
+                          <div className={`w-2 h-2  ${settings.aiAutoRotate ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'}`} />
+                          <span className="text-[10px] font-bold">Auto-Rotation: <span className={settings.aiAutoRotate ? 'text-emerald-300' : 'text-slate-300'}>{settings.aiAutoRotate ? 'ACTIVE (চালু)' : 'OFF (বন্ধ)'}</span></span>
+                       </div>
+                       {(() => {
+                          const activeKey = (settings.aiKeys || [])
+                            .filter(k => k.status === 'active')
+                            .sort((a, b) => (a.lastUsed || 0) - (b.lastUsed || 0))[0];
+                          return activeKey ? (
+                             <div className="text-right">
+                                <div className="text-[8px] opacity-50 font-bold uppercase tracking-tighter line-clamp-1">Current Engine</div>
+                                <div className="text-[9px] font-mono bg-white/10 px-2 py-0.5 text-white/80">{activeKey.provider.toUpperCase()} #{activeKey.label.split(' ')[0]}</div>
+                             </div>
+                          ) : (
+                             <span className="text-[9px] font-mono opacity-60">LEGACY MODE</span>
+                          );
+                       })()}
+                    </div>
+                 </div>
+
+                 {/* System Incident Logs */}
+                 <div className="card">
+                    <div className="card-head">
+                       <div className="flex items-center gap-2">
+                          <div className="p-1.5 bg-rose-50 ">
+                             <Zap size={18} className="text-rose-500" />
+                          </div>
+                          <div>
+                             <h3 className="font-bold">System Incident Logs</h3>
+                             <p className="text-[10px]">Failover events and error diagnostics</p>
+                          </div>
+                       </div>
+                       <button className="iconbutton sm" onClick={loadModerationData} title="Refresh logs">
+                          <RefreshCw size={13} />
+                       </button>
+                    </div>
+                    <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1 custom-scrollbar mt-2">
+                       {(settings.aiKeys || []).some(k => k.lastError) ? (
+                          settings.aiKeys?.filter(k => k.lastError).map(k => (
+                             <div key={k.id} className="p-2.5 bg-slate-50  border border-slate-200 flex items-start gap-3 group animate-appear hover:border-rose-200 transition-colors">
+                                <div className={`px-2 py-0.5 text-[8px] font-black uppercase tracking-tighter shrink-0 mt-0.5 shadow-sm ${
+                                   k.provider === 'gemini' ? 'bg-emerald-100 text-emerald-700' :
+                                   k.provider === 'groq' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'
+                                }`}>
+                                   {k.provider}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                   <div className="text-[10px] font-extrabold text-slate-700 flex items-center gap-1.5">
+                                      {k.label}
+                                      <span className="w-1 h-1  bg-slate-300" />
+                                      <span className="text-[8px] font-bold text-rose-500 uppercase tracking-tight">System Error</span>
+                                   </div>
+                                   <div className="text-[10px] text-slate-500 leading-relaxed font-mono bg-white/50 p-1.5 mt-1 border border-slate-100 break-words line-clamp-3 group-hover:line-clamp-none transition-all">
+                                      {k.lastError}
+                                   </div>
+                                </div>
+                             </div>
+                          ))
+                       ) : (
+                          <div className="h-[140px] flex flex-col items-center justify-center text-slate-300 gap-3">
+                             <div className="w-12 h-12 bg-slate-50  flex items-center justify-center border border-slate-100">
+                                <CheckCircle2 size={24} className="opacity-20 text-emerald-500" />
+                             </div>
+                             <div className="text-center">
+                                <span className="text-[11px] font-bold text-slate-400 block uppercase tracking-wider">System Normal</span>
+                                <span className="text-[9px] text-slate-300">No AI failures or failover events recorded.</span>
+                             </div>
+                          </div>
+                       )}
+                    </div>
+                 </div>
+              </div>
+
+              {/* AI BRAIN CENTER - KEY ROTATION & FAILOVER */}
               <div className="card">
                 <div className="card-head">
                   <div>
-                    <h3>Google Gemini AI (জেডমিনি এপিআই)</h3>
-                    <p>AI-powered moderation and personality</p>
+                    <h3 className="flex items-center gap-2">
+                      <Cpu size={18} className="text-indigo-600" />
+                      Maya AI Brain Center
+                    </h3>
+                    <p>Advanced API Key Rotation & Provider Failover System</p>
                   </div>
-                  <div className="symbol sp">
+                  <div className="flex gap-2">
+                    <button type="button" className="btn outline sm" onClick={(e) => handleResetAiKeys(e)} title="Reset all key stats">
+                       <RotateCcw size={12} />
+                    </button>
+                    <div className={`badge ${settings.aiAutoRotate ? 'badge-green' : 'badge-gray'}`}>
+                      {settings.aiAutoRotate ? 'AUTO-ROTATE ON' : 'ROTATION OFF'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Key Management Area */}
+                <div className="space-y-4">
+                  <div className="bg-[#f2f8f5] p-3  border border-emerald-100">
+                    <h4 className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                      <Database size={12} />
+                      Maya AI Key Pool ({settings.aiKeys?.length || 0})
+                    </h4>
+                    
+                    <div className="tablewrap !mt-0 !bg-white">
+                      <table className="!text-[11px]">
+                        <thead>
+                          <tr>
+                            <th>Provider / Label</th>
+                            <th>Status</th>
+                            <th className="hidden sm:table-cell">Usage / Stats</th>
+                            <th>Rate</th>
+                            <th>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(settings.aiKeys || []).length > 0 ? (
+                            settings.aiKeys?.map((k) => (
+                              <tr key={k.id}>
+                                <td>
+                                  <div className="flex items-center gap-2">
+                                    <div className={`w-2 h-2  ${
+                                      k.provider === 'gemini' ? 'bg-emerald-500' :
+                                      k.provider === 'groq' ? 'bg-orange-500' : 'bg-blue-500'
+                                    }`} />
+                                    <div>
+                                      <div className="font-bold">{k.label}</div>
+                                      <div className="text-[9px] font-mono text-slate-400">{k.key}</div>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td>
+                                  <div className="flex flex-col gap-1">
+                                    <span className={`badge !text-[9px] ${
+                                      k.status === 'active' ? 'badge-green' :
+                                      k.status === 'exhausted' ? 'badge-amber' :
+                                      k.status === 'invalid' ? 'badge-red' : 'badge-blue'
+                                    }`}>
+                                      {(k.status || 'active').toUpperCase()}
+                                    </span>
+                                    {k.cooldownUntil && k.cooldownUntil > Date.now() ? (
+                                      <span className="text-[8px] text-slate-500 flex items-center gap-0.5">
+                                        <Clock size={8} /> {Math.ceil((k.cooldownUntil - Date.now()) / 60000)}m
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                </td>
+                                <td className="hidden sm:table-cell">
+                                  <div className="flex flex-col text-[10px]">
+                                    <span>Total: <b>{k.totalRequests || 0}</b></span>
+                                    <span className={(k.failureCount || 0) > 0 ? 'text-rose-500' : 'text-slate-400'}>
+                                      Fails: {k.failureCount || 0}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="font-mono text-[9px] font-bold text-emerald-600">
+                                   {(k.totalRequests || 0) > 0 
+                                     ? Math.round((((k.totalRequests || 0) - (k.failureCount || 0)) / (k.totalRequests || 1)) * 100) + '%'
+                                     : '--'}
+                                </td>
+                                <td>
+                                  <div className="flex gap-1">
+                                     <button 
+                                       type="button"
+                                       className={`iconbutton !w-7 !h-7 ${isTestingKey === k.id ? 'is-loading' : ''}`} 
+                                       onClick={(e) => handleTestAiKey(k, e)}
+                                       title="Test this specific key"
+                                     >
+                                        <Activity size={12} />
+                                     </button>
+                                     <button 
+                                       type="button"
+                                       className="iconbutton danger !w-7 !h-7" 
+                                       onClick={(e) => handleRemoveAiKey(k.id, e)}
+                                       title="Delete key"
+                                     >
+                                       <Trash2 size={13} />
+                                     </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr>
+                              <td colSpan={5} className="empty py-8 text-slate-400 italic">
+                                No API keys in pool. Maya is using default environment keys.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Add Key Form */}
+                  <div className="p-4 bg-emerald-50/50  border border-emerald-100">
+                    <h4 className="text-xs font-bold text-emerald-900 mb-3 flex items-center gap-1.5">
+                      <Sparkles size={13} className="text-emerald-600" />
+                      অ্যাডভান্সড কী ম্যানেজমেন্ট (নতুন কী যুক্ত করুন)
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                      <div className="md:col-span-3">
+                        <label className="text-[9px] font-bold text-emerald-700 block mb-1 uppercase tracking-tighter">AI Provider (এআই প্রোভাইডার)</label>
+                        <select 
+                          className="field !text-xs" 
+                          value={newKeyProvider} 
+                          onChange={e => setNewKeyProvider(e.target.value as any)}
+                        >
+                          <option value="gemini">Google Gemini AI</option>
+                          <option value="groq">Groq Cloud AI</option>
+                          <option value="openrouter">OpenRouter AI</option>
+                        </select>
+                      </div>
+                      <div className="md:col-span-3">
+                        <label className="text-[9px] font-bold text-emerald-700 block mb-1 uppercase tracking-tighter">Key Label (কি-এর নাম/লেবেল)</label>
+                        <input 
+                          type="text" 
+                          className="field !text-xs" 
+                          placeholder="Ex: Maya Main 1 (মেইন কি ১)" 
+                          value={newKeyLabel}
+                          onChange={e => setNewKeyLabel(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleAddAiKey(e);
+                            }
+                          }}
+                        />
+                        <div className="text-[8px] text-emerald-600/50 mt-0.5 flex items-center gap-1 font-bold">
+                           <Info size={8} /> Just a nickname for your reference.
+                        </div>
+                      </div>
+                      <div className="md:col-span-4">
+                        <label className="text-[9px] font-bold text-emerald-700 block mb-1 uppercase tracking-tighter">Official API Key (এপিআই কি পেস্ট করুন)</label>
+                        <input 
+                          type="password" 
+                          className="field !text-xs" 
+                          placeholder="Paste API Key here..." 
+                          value={newKeyInput}
+                          onChange={e => setNewKeyInput(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleAddAiKey(e);
+                            }
+                          }}
+                        />
+                      </div>
+                      <div className="md:col-span-2 flex flex-col justify-end">
+                        <button 
+                          type="button"
+                          className={`btn primary full !text-[10px] !py-2.5 ${isAddingKey ? 'is-loading' : ''}`} 
+                          onClick={(e) => handleAddAiKey(e)}
+                          disabled={isAddingKey || !newKeyInput}
+                        >
+                          <span className="spinner"></span>
+                          <span className="btn-icon-holder"><Save size={12} /> ADD KEY</span>
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-[9px] text-emerald-600/70 mt-2 italic">* আপনার এপিআই কি সার্ভারে এনক্রিপ্টেড অবস্থায় সেভ করা হয়।</p>
+                  </div>
+
+                  {/* failover settings */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                     <div className="form-group !mb-0">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Provider Failover Priority</label>
+                        <div className="flex flex-col gap-1.5 mt-2">
+                           {(settings.aiProviderPriority || ['gemini', 'groq', 'openrouter']).map((p, i) => (
+                             <div key={p} className="flex items-center justify-between p-2 bg-white border border-slate-200  shadow-sm">
+                               <div className="flex items-center gap-2">
+                                  <span className="text-[10px] text-slate-400 font-bold w-4">#{i+1}</span>
+                                  <div className={`w-2 h-2  ${
+                                    p === 'gemini' ? 'bg-indigo-500' : p === 'groq' ? 'bg-orange-500' : 'bg-blue-500'
+                                  }`} />
+                                  <span className="text-[11px] font-bold capitalize">{p}</span>
+                               </div>
+                               <div className="flex gap-1">
+                                  <button 
+                                    type="button"
+                                    className="p-1.5 hover:bg-slate-100 text-slate-500 disabled:opacity-20 transition-colors" 
+                                    onClick={() => moveProviderUp(i)}
+                                    disabled={i === 0}
+                                    title="Move Up"
+                                  >
+                                     <ChevronUp size={14} />
+                                  </button>
+                                  <button 
+                                    type="button"
+                                    className="p-1.5 hover:bg-slate-100 text-slate-500 disabled:opacity-20 transition-colors" 
+                                    onClick={() => moveProviderDown(i)}
+                                    disabled={i === (settings.aiProviderPriority || []).length - 1}
+                                    title="Move Down"
+                                  >
+                                     <ChevronDown size={14} />
+                                  </button>
+                               </div>
+                             </div>
+                           ))}
+                        </div>
+                        <p className="hint !mt-2">Failed keys automatically rotate. Failed providers trigger failover in this order.</p>
+                     </div>
+                     <div className="flex items-center justify-between p-3 bg-slate-50  border border-slate-200">
+                        <div>
+                           <h4 className="text-[11px] font-bold">Auto-Rotation</h4>
+                           <p className="text-[9px] text-slate-500">Enable smart key rotation on 429 errors</p>
+                        </div>
+                        <label className="switch scale-90">
+                           <input 
+                             type="checkbox" 
+                             checked={settings.aiAutoRotate ?? true} 
+                             onChange={e => updateSettingToggle('aiAutoRotate', e.target.checked)}
+                           />
+                           <span className="slider"></span>
+                        </label>
+                     </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* INDIVIDUAL AI PROVIDER API KEY CONFIGURATION CARDS */}
+              {/* 1. Google Gemini AI Card */}
+              <div className="card">
+                <div className="card-head">
+                  <div>
+                    <h3 className="flex items-center gap-2">
+                      <Sparkles size={18} className="text-emerald-600" />
+                      Google Gemini AI (Official Model Engine)
+                    </h3>
+                    <p>Primary AI brain engine for Maya personality</p>
+                  </div>
+                  <div className="symbol sg">
                     <Sparkles size={16} />
                   </div>
                 </div>
                 <div className="form-group">
-                  <label>GEMINI API KEY (এপিআই কি)</label>
+                  <label>Gemini Model Version (এআই মডেল সিলেক্ট করুন)</label>
+                  <select
+                    className="field"
+                    value={geminiModel}
+                    onChange={(e) => setGeminiModel(e.target.value)}
+                  >
+                    <option value="gemini-3.8-flash">Google Gemini 3.8 Flash (Recommended)</option>
+                    <option value="gemini-flash-latest">Google Gemini Flash Latest</option>
+                    <option value="gemini-3.1-flash-lite">Google Gemini 3.1 Flash Lite</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Official Gemini API Key (এপিআই কি)</label>
                   <div className="fieldwrap">
                     <input
                       className="field secret"
                       type={showGemini ? 'text' : 'password'}
                       value={geminiKey}
                       onChange={(e) => setGeminiKey(e.target.value)}
-                      placeholder="Enter Gemini API Key"
+                      placeholder="AIzaSy..."
                     />
                     <button
                       className="reveal"
@@ -2212,41 +2832,34 @@ export default function App() {
                       {showGemini ? <EyeOff size={15} /> : <Eye size={15} />}
                     </button>
                   </div>
-                </div>
-                <div className="form-group">
-                  <label>GEMINI MODEL</label>
-                  <select
-                    className="field"
-                    value={geminiModel}
-                    onChange={(e) => setGeminiModel(e.target.value)}
-                  >
-                    <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (High Quota & Ultra Fast - Recommended)</option>
-                    <option value="gemini-3.8-flash">Gemini 3.8 Flash (High Intelligence - 20 RPD Free)</option>
-                  </select>
+                  <p className="hint">Get your free Gemini API key from Google AI Studio</p>
                 </div>
                 <div className="form-actions">
-                  <button className="btn primary" onClick={() => saveConfig('gemini')}>
-                    <Save size={13} /> Save Gemini Config
+                  <button type="button" className="btn primary" onClick={() => saveConfig('gemini')}>
+                    <Save size={13} /> Save Gemini API Key
                   </button>
-                  <button className="btn outline" onClick={testAI}>
-                    <Activity size={13} /> Test AI
+                  <button type="button" className="btn outline" onClick={testAI}>
+                    <Activity size={13} /> Test Gemini AI Connection
                   </button>
                 </div>
               </div>
 
-              {/* Groq Cloud AI */}
+              {/* 2. Groq Cloud AI Card */}
               <div className="card">
                 <div className="card-head">
                   <div>
-                    <h3>Groq Cloud AI (GROQ_API_KEY / GROQ_API_KEYS)</h3>
-                    <p>High-speed Ultra-low latency Llama & Mixtral inference engine</p>
+                    <h3 className="flex items-center gap-2">
+                      <Zap size={18} className="text-orange-500" />
+                      Groq Cloud AI (Ultra-Fast Failover Engine)
+                    </h3>
+                    <p>Llama 3.3 70B & Gemma 2 9B failover provider</p>
                   </div>
                   <div className="symbol so">
                     <Zap size={16} />
                   </div>
                 </div>
                 <div className="form-group">
-                  <label>GROQ API KEY (এপিআই কি)</label>
+                  <label>Groq API Key (এপিআই কি)</label>
                   <div className="fieldwrap">
                     <input
                       className="field secret"
@@ -2263,34 +2876,38 @@ export default function App() {
                       {showGroq ? <EyeOff size={15} /> : <Eye size={15} />}
                     </button>
                   </div>
+                  <p className="hint">Get your free Groq API key from console.groq.com</p>
                 </div>
                 <div className="form-actions">
-                  <button className="btn primary" onClick={() => saveConfig('groq')}>
-                    <Save size={13} /> Save Groq Key
+                  <button type="button" className="btn primary" onClick={() => saveConfig('groq')}>
+                    <Save size={13} /> Save Groq API Key
                   </button>
                 </div>
               </div>
 
-              {/* OpenRouter AI */}
+              {/* 3. OpenRouter AI Card */}
               <div className="card">
                 <div className="card-head">
                   <div>
-                    <h3>OpenRouter AI (OPENROUTER_API_KEY)</h3>
-                    <p>Multi-model AI router & unified API gateway</p>
+                    <h3 className="flex items-center gap-2">
+                      <Globe size={18} className="text-blue-500" />
+                      OpenRouter AI (Multi-Model Failover Engine)
+                    </h3>
+                    <p>Backup multi-model LLM provider</p>
                   </div>
                   <div className="symbol sb">
-                    <Cpu size={16} />
+                    <Globe size={16} />
                   </div>
                 </div>
                 <div className="form-group">
-                  <label>OPENROUTER API KEY</label>
+                  <label>OpenRouter API Key (এপিআই কি)</label>
                   <div className="fieldwrap">
                     <input
                       className="field secret"
                       type={showOpenrouter ? 'text' : 'password'}
                       value={openrouterKey}
                       onChange={(e) => setOpenrouterKey(e.target.value)}
-                      placeholder="sk-or-v1-..."
+                      placeholder="sk-or-..."
                     />
                     <button
                       className="reveal"
@@ -2300,10 +2917,11 @@ export default function App() {
                       {showOpenrouter ? <EyeOff size={15} /> : <Eye size={15} />}
                     </button>
                   </div>
+                  <p className="hint">Get your OpenRouter API key from openrouter.ai</p>
                 </div>
                 <div className="form-actions">
-                  <button className="btn primary" onClick={() => saveConfig('openrouter')}>
-                    <Save size={13} /> Save OpenRouter Key
+                  <button type="button" className="btn primary" onClick={() => saveConfig('openrouter')}>
+                    <Save size={13} /> Save OpenRouter API Key
                   </button>
                 </div>
               </div>
@@ -2348,7 +2966,7 @@ export default function App() {
                   </div>
                 </div>
                 <div className="form-actions">
-                  <button className="btn primary" onClick={() => saveConfig('supabase')}>
+                  <button type="button" className="btn primary" onClick={() => saveConfig('supabase')}>
                     <Save size={13} /> Save Supabase Credentials
                   </button>
                 </div>
@@ -2358,7 +2976,14 @@ export default function App() {
               <div className="card">
                 <div className="card-head">
                   <div>
-                    <h3>Baileys Socket Server URL</h3>
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <span className="badge badge-blue text-[9px] font-bold">CATEGORY F</span>
+                      <span className="text-[10px] text-gray-500 font-semibold">{isBn ? 'সার্ভার ও সিস্টেম সংযোগ' : 'Server & System Status'}</span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="font-extrabold text-[13px]">Baileys Socket Server URL</h3>
+                      {renderInfoBtn('serverConnection')}
+                    </div>
                     <p>Connect to live backend server</p>
                   </div>
                   <div className="symbol sb">
@@ -2376,10 +3001,10 @@ export default function App() {
                   <p className="hint">Leave empty to use built-in server</p>
                 </div>
                 <div className="form-actions">
-                  <button className="btn primary" onClick={saveBaileysConfig}>
+                  <button type="button" className="btn primary" onClick={saveBaileysConfig}>
                     <Save size={13} /> Save URL
                   </button>
-                  <button className="btn outline" onClick={resetBaileysConfig}>
+                  <button type="button" className="btn outline" onClick={resetBaileysConfig}>
                     <RotateCcw size={13} /> Reset to Default
                   </button>
                 </div>
@@ -2398,16 +3023,16 @@ export default function App() {
                 </div>
                 <div className="text-xs text-emerald-950 leading-relaxed space-y-2.5">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-                    <div className="p-2 bg-white rounded-lg border border-emerald-200">
+                    <div className="p-2 bg-white  border border-emerald-200">
                       <b>✅ 1. Relative Asset Path:</b> <code>base: &#39;./&#39;</code> কনফিগার করা হয়েছে।
                     </div>
-                    <div className="p-2 bg-white rounded-lg border border-emerald-200">
+                    <div className="p-2 bg-white  border border-emerald-200">
                       <b>✅ 2. Trailing Slash Enforcer:</b> <code>index.html</code> এ স্বয়ংক্রিয় রিডাইরেক্ট কোড যুক্ত।
                     </div>
-                    <div className="p-2 bg-white rounded-lg border border-emerald-200">
+                    <div className="p-2 bg-white  border border-emerald-200">
                       <b>✅ 3. Jekyll Bypass:</b> <code>.nojekyll</code> ফাইল যুক্ত যাতে কোনো ফাইল মিসিং না হয়।
                     </div>
-                    <div className="p-2 bg-white rounded-lg border border-emerald-200">
+                    <div className="p-2 bg-white  border border-emerald-200">
                       <b>✅ 4. SPA 404 Routing:</b> <code>404.html</code> দেওয়া হয়েছে যাতে রিফ্রেশে পেজ না হারায়।
                     </div>
                   </div>
@@ -2416,7 +3041,7 @@ export default function App() {
                     <b>💡 গুরুত্বপূর্ণ নোট:</b> GitHub Pages শুধুমাত্র ফ্রন্টএন্ড স্ট্যাটিক ফাইল হোস্ট করে। লাইভ WhatsApp সকেট (Baileys) ও মায়া AI ২৪/৭ সচল রাখতে প্রজেক্টটির ব্যাকএন্ড Render/Railway/VPS-এ চালিয়ে উপরের <b>Baileys Socket Server URL</b> বক্সে আপনার সার্ভার লিঙ্ক সেভ করুন।
                   </p>
 
-                  <div className="p-2.5 bg-white rounded-lg border border-emerald-200 font-mono text-[11px] text-gray-800">
+                  <div className="p-2.5 bg-white  border border-emerald-200 font-mono text-[11px] text-gray-800">
                     npm run build &nbsp;&nbsp;&mdash; Generates GitHub Pages ready build in <b>dist/</b>
                   </div>
                 </div>
@@ -2474,6 +3099,16 @@ export default function App() {
           <Users size={16} /> {t.groups}
         </button>
       </nav>
+
+      {/* Function Help Modal with 7-point structured documentation */}
+      <HelpModal
+        helpItem={activeHelpId ? HELP_ITEMS[activeHelpId] : null}
+        isOpen={Boolean(activeHelpId)}
+        onClose={closeHelp}
+        isBn={isBn}
+        currentStatusText={getHelpStatus(activeHelpId).text}
+        isStatusActive={getHelpStatus(activeHelpId).isActive}
+      />
     </div>
   );
 }
