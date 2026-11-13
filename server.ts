@@ -65,6 +65,7 @@ interface BotState {
   status: 'disconnected' | 'connecting' | 'pairing' | 'connected';
   step: 'idle' | 'initializing' | 'waiting_for_phone' | 'connected' | 'error';
   stepMessage: string;
+  lastConnectionStatus: string;
   phoneNumber: string;
   pairingCode: string;
   qrCodeDataUrl: string;
@@ -81,6 +82,7 @@ const botState: BotState = {
   status: 'disconnected',
   step: 'idle',
   stepMessage: 'WhatsApp সংযোগের জন্য প্রস্তুত',
+  lastConnectionStatus: 'Ready to connect',
   phoneNumber: '',
   pairingCode: '',
   qrCodeDataUrl: '',
@@ -97,13 +99,72 @@ const botState: BotState = {
 };
 
 let currentSock: WASocket | null = null;
+let activeSocketToken = 0;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let isRestoringSession = false;
+let pairingInFlightPromise: Promise<{ pairingCode: string; qrCode: string }> | null = null;
+let pairingInFlightPhone = '';
+let manualDisconnect = false;
+let reconnectAttempts = 0;
+let lastPairingRequestAt = 0;
 const logger = pino({ level: 'silent' });
 
+function clearReconnectTimer() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+function hasRegisteredCredsOnDisk(): boolean {
+  try {
+    const credsPath = path.join(SESSIONS_DIR, 'creds.json');
+    if (!fs.existsSync(credsPath)) return false;
+    const content = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
+    return Boolean(content?.registered || content?.me?.id);
+  } catch {
+    return false;
+  }
+}
+
+function destroyCurrentSocket() {
+  clearReconnectTimer();
+  activeSocketToken += 1;
+  if (currentSock) {
+    const oldSock = currentSock;
+    currentSock = null;
+    try {
+      oldSock.ev.removeAllListeners('connection.update');
+      oldSock.ev.removeAllListeners('creds.update');
+      oldSock.ev.removeAllListeners('messages.upsert');
+      oldSock.end(undefined);
+    } catch {
+      // ignore cleanup error
+    }
+  }
+}
+
+function scheduleControlledReconnect(delayMs: number) {
+  if (manualDisconnect) return;
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    if (!manualDisconnect && !pairingInFlightPromise) {
+      initializeExistingSession().catch(() => {});
+    }
+  }, delayMs);
+}
+
 /**
- * Setup lifecycle listeners on a WhatsApp socket
+ * Setup lifecycle listeners on a WhatsApp socket (strictly bound to socketToken)
  */
-function setupSocketEvents(sock: WASocket) {
+function setupSocketEvents(sock: WASocket, socketToken: number) {
   sock.ev.on('connection.update', async (update) => {
+    // Ignore stale events from any previously closed/replaced socket
+    if (socketToken !== activeSocketToken || sock !== currentSock) {
+      return;
+    }
+
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
@@ -115,57 +176,139 @@ function setupSocketEvents(sock: WASocket) {
     if (connection === 'connecting') {
       if (botState.status !== 'pairing') {
         botState.status = 'connecting';
+        botState.step = 'initializing';
         botState.stepMessage = 'WhatsApp সার্ভারের সাথে সংযোগ তৈরি হচ্ছে...';
+        botState.lastConnectionStatus = 'Connecting to WhatsApp...';
       }
     } else if (connection === 'open') {
+      reconnectAttempts = 0;
+      clearReconnectTimer();
       botState.status = 'connected';
       botState.step = 'connected';
       botState.stepMessage = 'সফলভাবে WhatsApp এর সাথে কানেক্ট হয়েছে!';
+      botState.lastConnectionStatus = 'Connected & Active';
       botState.user = sock.user;
+      if (sock.user?.id && !botState.phoneNumber) {
+        botState.phoneNumber = sock.user.id.split(':')[0].split('@')[0];
+      }
       botState.lastError = null;
       botState.pairingCode = '';
       botState.qrCodeDataUrl = '';
+      botState.pairingStartedAt = 0;
       console.log('WhatsApp connection opened successfully for user:', sock.user?.id);
 
-      try {
-        const groups = await sock.groupFetchAllParticipating();
-        const groupList = Object.values(groups).map((g) => ({
-          id: g.id,
-          name: g.subject,
-          participants: g.participants?.length || 0,
-          status: 'Active',
-        }));
-        if (groupList.length > 0) {
-          botState.groups = groupList;
+      setTimeout(async () => {
+        if (socketToken !== activeSocketToken || sock !== currentSock) return;
+        try {
+          const groups = await sock.groupFetchAllParticipating();
+          const groupList = Object.values(groups).map((g) => ({
+            id: g.id,
+            name: g.subject,
+            participants: g.participants?.length || 0,
+            status: 'Active',
+          }));
+          if (groupList.length > 0) {
+            botState.groups = groupList;
+          }
+        } catch {
+          // non-blocking
         }
-      } catch (err) {
-        // non-blocking
-      }
+      }, 4000);
     } else if (connection === 'close') {
       const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-      botState.status = 'disconnected';
-      botState.lastError = lastDisconnect?.error?.message || 'Connection closed';
+      const errMsg = lastDisconnect?.error?.message || 'Connection closed';
+      const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+      const isRestartRequired = statusCode === DisconnectReason.restartRequired || statusCode === 515;
+      const isBannedOrForbidden = statusCode === 403 || statusCode === 405 || /banned|blocked|restricted/i.test(errMsg);
+      const isRegistered = Boolean(sock.authState?.creds?.registered) || hasRegisteredCredsOnDisk();
 
-      if (botState.step !== 'connected') {
+      if (manualDisconnect) {
+        botState.status = 'disconnected';
         botState.step = 'idle';
-        botState.stepMessage = 'সংযোগ বিচ্ছিন্ন হয়েছে। পুনরায় কোড জেনারেট করুন।';
+        botState.lastConnectionStatus = 'Disconnected by user';
+        return;
       }
 
-      if (shouldReconnect && sock.authState?.creds?.registered) {
-        console.log('Reconnecting existing WhatsApp session...');
-        setTimeout(() => initializeExistingSession().catch(() => {}), 5000);
-      } else if (!shouldReconnect) {
+      if (isLoggedOut) {
         console.log('Logged out of WhatsApp. Cleaning up session credentials...');
+        clearReconnectTimer();
+        botState.status = 'disconnected';
+        botState.step = 'idle';
+        botState.stepMessage = 'WhatsApp সেশন লগআউট হয়েছে। পুনরায় কানেক্ট করুন।';
+        botState.lastConnectionStatus = 'Logged out — Re-pairing required';
+        botState.lastError = errMsg;
+        botState.pairingCode = '';
+        botState.qrCodeDataUrl = '';
+        botState.pairingStartedAt = 0;
+        botState.user = null;
         try {
           fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
           fs.mkdirSync(SESSIONS_DIR, { recursive: true });
         } catch (e) {}
+        return;
       }
+
+      if (isBannedOrForbidden) {
+        console.warn(`[Baileys Guard] WhatsApp returned status ${statusCode}: ${errMsg}. Stopping auto-reconnect to protect account.`);
+        clearReconnectTimer();
+        botState.status = 'disconnected';
+        botState.step = 'error';
+        botState.stepMessage = 'WhatsApp থেকে সাময়িক সীমাবদ্ধতা দেওয়া হয়েছে। অন্তত কিছু সময় অপেক্ষা করে আবার চেষ্টা করুন।';
+        botState.lastConnectionStatus = `Paused (${statusCode || 'Restricted'})`;
+        botState.lastError = errMsg;
+        botState.pairingCode = '';
+        botState.pairingStartedAt = 0;
+        return;
+      }
+
+      // After user enters pairing code on phone, WhatsApp closes socket with 515 (restartRequired)
+      if (isRestartRequired || isRegistered) {
+        botState.status = 'connecting';
+        botState.step = 'initializing';
+        botState.stepMessage = isRestartRequired
+          ? 'পেয়ারিং ভেরিফাই সম্পন্ন! চূড়ান্ত WhatsApp সংযোগ স্থাপন হচ্ছে...'
+          : 'নেটওয়ার্ক পুনরুদ্ধার হচ্ছে, পুনরায় সংযোগ চেষ্টা চলছে...';
+        botState.lastConnectionStatus = isRestartRequired
+          ? 'Pairing verified — connecting...'
+          : `Reconnecting (attempt ${reconnectAttempts + 1})...`;
+        botState.lastError = null;
+
+        if (reconnectAttempts >= 8) {
+          botState.status = 'disconnected';
+          botState.step = 'error';
+          botState.stepMessage = 'নেটওয়ার্ক সংযোগ বারবার বিচ্ছিন্ন হয়েছে। ম্যানুয়ালি পুনরায় চেষ্টা করুন।';
+          botState.lastConnectionStatus = 'Reconnect paused after network retries';
+          return;
+        }
+
+        const delayMs = isRestartRequired ? 900 : Math.min(30000, 2500 * Math.pow(2, reconnectAttempts));
+        reconnectAttempts += 1;
+        console.log(`[Baileys Engine] Controlled reconnect scheduled in ${delayMs}ms (statusCode=${statusCode}, attempt=${reconnectAttempts})`);
+        scheduleControlledReconnect(delayMs);
+        return;
+      }
+
+      // If pairing code is still fresh (< 120s), DO NOT erase the displayed code on transient drop
+      const elapsedSec = botState.pairingStartedAt > 0 ? (Date.now() - botState.pairingStartedAt) / 1000 : 999;
+      if (botState.status === 'pairing' && botState.pairingCode && elapsedSec < 120) {
+        botState.lastError = errMsg;
+        botState.lastConnectionStatus = 'Pairing code active — waiting for phone confirmation';
+        botState.stepMessage = 'কোডটি ফোনে এন্টার করুন (সেশন চলমান)...';
+        return;
+      }
+
+      botState.status = 'disconnected';
+      botState.step = 'idle';
+      botState.stepMessage = 'সংযোগ বিচ্ছিন্ন হয়েছে। পুনরায় কোড জেনারেট করুন।';
+      botState.lastConnectionStatus = `Disconnected (${errMsg})`;
+      botState.lastError = errMsg;
     }
   });
 
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    if (socketToken !== activeSocketToken || sock !== currentSock) {
+      return;
+    }
     if (type === 'notify' && Array.isArray(messages)) {
       botState.messagesChecked += messages.length;
       for (const msg of messages) {
@@ -180,19 +323,32 @@ function setupSocketEvents(sock: WASocket) {
 }
 
 /**
- * Initialize existing registered session if available
+ * Initialize existing registered session if available (protected by single-instance lock)
  */
 async function initializeExistingSession() {
+  if (isRestoringSession || manualDisconnect || pairingInFlightPromise) {
+    return;
+  }
+  isRestoringSession = true;
+
   try {
     const { state, saveCreds } = await useMultiFileAuthState(SESSIONS_DIR);
-    if (!state.creds?.registered) {
+    if (!state.creds?.registered && !state.creds?.me?.id) {
       return;
     }
 
+    destroyCurrentSocket();
+    const myToken = activeSocketToken;
+
     const { version } = await fetchLatestBaileysVersion().catch(() => ({
-      version: [2, 3000, 1015901307] as [number, number, number],
+      version: [2, 3000, 1043857760] as [number, number, number],
       isLatest: true,
     }));
+
+    botState.status = 'connecting';
+    botState.step = 'initializing';
+    botState.stepMessage = 'সংরক্ষিত WhatsApp সেশন পুনঃসংযোগ হচ্ছে...';
+    botState.lastConnectionStatus = 'Restoring saved session...';
 
     const sock = makeWASocket({
       version,
@@ -202,16 +358,32 @@ async function initializeExistingSession() {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, logger),
       },
-      browser: Browsers.ubuntu('Chrome'),
+      browser: Browsers.windows('Chrome'),
+      countryCode: 'BD',
+      syncFullHistory: false,
+      shouldSyncHistoryMessage: () => false,
+      markOnlineOnConnect: false,
+      generateHighQualityLinkPreview: false,
+      emitOwnEvents: false,
       connectTimeoutMs: 60000,
-      keepAliveIntervalMs: 25000,
+      keepAliveIntervalMs: 30000,
+      defaultQueryTimeoutMs: 60000,
+      retryRequestDelayMs: 2500,
+      maxMsgRetryCount: 3,
     });
 
     currentSock = sock;
-    sock.ev.on('creds.update', saveCreds);
-    setupSocketEvents(sock);
+    sock.ev.on('creds.update', async () => {
+      if (myToken === activeSocketToken) {
+        await saveCreds();
+      }
+    });
+    setupSocketEvents(sock, myToken);
   } catch (err: any) {
     console.log('Existing session restore note:', err.message);
+    botState.lastConnectionStatus = `Session restore paused: ${err.message}`;
+  } finally {
+    isRestoringSession = false;
   }
 }
 
@@ -246,130 +418,175 @@ function formatAndValidatePhone(inputPhone: string): { valid: boolean; cleanPhon
 
 /**
  * Request real 8-digit WhatsApp pairing code directly from WhatsApp server
+ * Protected against duplicate concurrent requests & rate-limit spam
  */
 async function startRealPairingFlow(cleanPhone: string): Promise<{ pairingCode: string; qrCode: string }> {
-  console.log(`[Baileys Engine] Starting real pairing flow for phone: ${cleanPhone}...`);
+  if (pairingInFlightPromise && pairingInFlightPhone === cleanPhone) {
+    console.log(`[Baileys Engine] Reusing in-flight pairing promise for ${cleanPhone}`);
+    return pairingInFlightPromise;
+  }
 
-  // If an unauthenticated socket is already running, gracefully close it
-  if (currentSock && !currentSock.authState?.creds?.registered) {
+  // Server-side anti-ban guard: prevent spamming WhatsApp requestPairingCode within 30s
+  const msSinceLastReq = Date.now() - lastPairingRequestAt;
+  if (lastPairingRequestAt > 0 && msSinceLastReq < 30000) {
+    const waitSec = Math.ceil((30000 - msSinceLastReq) / 1000);
+    if (botState.pairingCode && botState.phoneNumber === cleanPhone) {
+      return { pairingCode: botState.pairingCode, qrCode: botState.qrCodeDataUrl };
+    }
+    throw new Error(`WhatsApp নিরাপত্তা সীমার জন্য ${waitSec} সেকেন্ড অপেক্ষা করে আবার চেষ্টা করুন।`);
+  }
+
+  pairingInFlightPhone = cleanPhone;
+  pairingInFlightPromise = (async () => {
     try {
-      console.log('[Baileys Engine] Closing existing unauthenticated socket before new pairing attempt...');
-      currentSock.end(undefined);
-    } catch (e) {}
-    currentSock = null;
-  }
+      manualDisconnect = false;
+      reconnectAttempts = 0;
+      lastPairingRequestAt = Date.now();
+      console.log(`[Baileys Engine] Starting real pairing flow for phone: ${cleanPhone}...`);
 
-  // Clear unauthenticated session files completely to avoid stale keys
-  try {
-    const credsPath = path.join(SESSIONS_DIR, 'creds.json');
-    let isRegistered = false;
-    if (fs.existsSync(credsPath)) {
-      const content = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
-      if (content.registered) isRegistered = true;
-    }
-    if (!isRegistered) {
-      console.log('[Baileys Engine] Cleaning unauthenticated session directory for fresh key generation...');
-      fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
-      fs.mkdirSync(SESSIONS_DIR, { recursive: true });
-    }
-  } catch (e) {
-    console.error('[Baileys Engine] Error cleaning session directory:', e);
-  }
+      // Always cleanly destroy any previous unauthenticated/old socket first (prevents multi-socket conflicts)
+      destroyCurrentSocket();
+      const myToken = activeSocketToken;
 
-  const { state, saveCreds } = await useMultiFileAuthState(SESSIONS_DIR);
-  const { version } = await fetchLatestBaileysVersion().catch(() => ({
-    version: [2, 3000, 1015901307] as [number, number, number],
-    isLatest: true,
-  }));
-
-  console.log(`[Baileys Engine] Initializing WASocket with version ${version.join('.')}...`);
-
-  botState.status = 'connecting';
-  botState.step = 'initializing';
-  botState.stepMessage = 'WhatsApp সার্ভারের সাথে সংযোগ ও হ্যান্ডশেক হচ্ছে...';
-  botState.phoneNumber = cleanPhone;
-
-  const sock = makeWASocket({
-    version,
-    logger,
-    printQRInTerminal: false,
-    auth: {
-      creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, logger),
-    },
-    browser: Browsers.ubuntu('Chrome'),
-    connectTimeoutMs: 60000,
-    keepAliveIntervalMs: 25000,
-  });
-
-  currentSock = sock;
-  sock.ev.on('creds.update', saveCreds);
-  setupSocketEvents(sock);
-
-  return new Promise((resolve, reject) => {
-    let resolved = false;
-
-    // Timeout of 30 seconds for Noise handshake and pairing code request
-    const timer = setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        botState.step = 'error';
-        botState.stepMessage = 'WhatsApp সার্ভার রেসপন্স টাইমআউট হয়েছে। পুনরায় চেষ্টা করুন।';
-        console.error(`[Baileys Engine] Timeout generating pairing code for ${cleanPhone}`);
-        reject(new Error('WhatsApp server handshake timeout. Please check number and try again.'));
-      }
-    }, 30000);
-
-    const onUpdate = async (update: any) => {
-      if (resolved) return;
-
-      if (update.qr) {
-        resolved = true;
-        clearTimeout(timer);
-        sock.ev.off('connection.update', onUpdate);
-
-        try {
-          console.log(`[Baileys Engine] Noise handshake successful. Requesting pairing code for ${cleanPhone}...`);
-          const rawCode = await sock.requestPairingCode(cleanPhone);
-          console.log(`[Baileys Engine] SUCCESS! Real WhatsApp pairing code generated: ${rawCode}`);
-
-          const formattedCode =
-            rawCode.length === 8 && !rawCode.includes('-')
-              ? `${rawCode.slice(0, 4)}-${rawCode.slice(4)}`
-              : rawCode;
-
-          const qrUrl = await QRCode.toDataURL(update.qr, { margin: 2, scale: 5 }).catch(() => '');
-
-          botState.status = 'pairing';
-          botState.step = 'waiting_for_phone';
-          botState.stepMessage = 'রিয়েল কোড প্রস্তুত! আপনার ফোনের WhatsApp থেকে কোডটি এন্টার করুন।';
-          botState.pairingCode = formattedCode;
-          botState.qrCodeDataUrl = qrUrl;
-          botState.pairingStartedAt = Date.now();
-
-          resolve({ pairingCode: formattedCode, qrCode: qrUrl });
-        } catch (err: any) {
-          console.error('[Baileys Engine] requestPairingCode failed:', err.message);
-          botState.step = 'error';
-          botState.stepMessage = `কোড জেনারেট ত্রুটি: ${err.message || 'WhatsApp error'}`;
-          reject(err);
+      // Clear unauthenticated session files completely to avoid stale keys
+      try {
+        if (!hasRegisteredCredsOnDisk()) {
+          console.log('[Baileys Engine] Cleaning unauthenticated session directory for fresh key generation...');
+          fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
+          fs.mkdirSync(SESSIONS_DIR, { recursive: true });
         }
-      } else if (update.connection === 'close') {
-        const err = update.lastDisconnect?.error;
-        if (err && !resolved) {
-          resolved = true;
-          clearTimeout(timer);
-          sock.ev.off('connection.update', onUpdate);
-          console.error('[Baileys Engine] Connection closed during pairing:', err?.message || 'Closed');
-          botState.step = 'error';
-          botState.stepMessage = `কানেকশন বন্ধ হয়েছে: ${err?.message || 'Connection closed'}`;
-          reject(err || new Error('Connection closed by WhatsApp server'));
-        }
+      } catch (e) {
+        console.error('[Baileys Engine] Error cleaning session directory:', e);
       }
-    };
 
-    sock.ev.on('connection.update', onUpdate);
-  });
+      const { state, saveCreds } = await useMultiFileAuthState(SESSIONS_DIR);
+      const { version } = await fetchLatestBaileysVersion().catch(() => ({
+        version: [2, 3000, 1043857760] as [number, number, number],
+        isLatest: true,
+      }));
+
+      console.log(`[Baileys Engine] Initializing WASocket with version ${version.join('.')}...`);
+
+      botState.status = 'connecting';
+      botState.step = 'initializing';
+      botState.stepMessage = 'WhatsApp সার্ভারের সাথে সংযোগ ও হ্যান্ডশেক হচ্ছে...';
+      botState.lastConnectionStatus = 'Connecting to WhatsApp server...';
+      botState.phoneNumber = cleanPhone;
+      botState.lastError = null;
+
+      const sock = makeWASocket({
+        version,
+        logger,
+        printQRInTerminal: false,
+        auth: {
+          creds: state.creds,
+          keys: makeCacheableSignalKeyStore(state.keys, logger),
+        },
+        browser: Browsers.windows('Chrome'),
+        countryCode: cleanPhone.startsWith('880') ? 'BD' : 'US',
+        syncFullHistory: false,
+        shouldSyncHistoryMessage: () => false,
+        markOnlineOnConnect: false,
+        generateHighQualityLinkPreview: false,
+        emitOwnEvents: false,
+        connectTimeoutMs: 60000,
+        keepAliveIntervalMs: 30000,
+        defaultQueryTimeoutMs: 60000,
+        retryRequestDelayMs: 2500,
+        maxMsgRetryCount: 3,
+      });
+
+      currentSock = sock;
+      sock.ev.on('creds.update', async () => {
+        if (myToken === activeSocketToken) {
+          await saveCreds();
+        }
+      });
+      setupSocketEvents(sock, myToken);
+
+      return await new Promise<{ pairingCode: string; qrCode: string }>((resolve, reject) => {
+        let resolved = false;
+
+        // Timeout of 35 seconds for Noise handshake and pairing code request
+        const timer = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            sock.ev.off('connection.update', onUpdate);
+            botState.step = 'error';
+            botState.stepMessage = 'WhatsApp সার্ভার রেসপন্স টাইমআউট হয়েছে। পুনরায় চেষ্টা করুন।';
+            botState.lastConnectionStatus = 'Handshake timeout';
+            console.error(`[Baileys Engine] Timeout generating pairing code for ${cleanPhone}`);
+            reject(new Error('WhatsApp server handshake timeout. Please check number and try again.'));
+          }
+        }, 35000);
+
+        const onUpdate = async (update: any) => {
+          if (resolved || myToken !== activeSocketToken || sock !== currentSock) return;
+
+          if (update.qr) {
+            resolved = true;
+            clearTimeout(timer);
+            sock.ev.off('connection.update', onUpdate);
+
+            try {
+              // Small human-like pause after Noise handshake before requesting pairing code
+              await new Promise((r) => setTimeout(r, 600));
+              if (myToken !== activeSocketToken || sock !== currentSock) {
+                return reject(new Error('Socket superseded before pairing request'));
+              }
+
+              console.log(`[Baileys Engine] Noise handshake successful. Requesting pairing code for ${cleanPhone}...`);
+              const rawCode = await sock.requestPairingCode(cleanPhone);
+              console.log(`[Baileys Engine] SUCCESS! Real WhatsApp pairing code generated: ${rawCode}`);
+
+              const formattedCode =
+                rawCode.length === 8 && !rawCode.includes('-')
+                  ? `${rawCode.slice(0, 4)}-${rawCode.slice(4)}`
+                  : rawCode;
+
+              const qrUrl = await QRCode.toDataURL(update.qr, { margin: 2, scale: 5 }).catch(() => '');
+
+              botState.status = 'pairing';
+              botState.step = 'waiting_for_phone';
+              botState.stepMessage = 'রিয়েল কোড প্রস্তুত! আপনার ফোনের WhatsApp থেকে কোডটি এন্টার করুন।';
+              botState.lastConnectionStatus = 'Pairing code active — waiting for confirmation';
+              botState.pairingCode = formattedCode;
+              botState.qrCodeDataUrl = qrUrl;
+              botState.pairingStartedAt = Date.now();
+              botState.lastError = null;
+
+              resolve({ pairingCode: formattedCode, qrCode: qrUrl });
+            } catch (err: any) {
+              console.error('[Baileys Engine] requestPairingCode failed:', err.message);
+              botState.step = 'error';
+              botState.stepMessage = `কোড জেনারেট ত্রুটি: ${err.message || 'WhatsApp error'}`;
+              botState.lastConnectionStatus = `Error: ${err.message || 'Pairing failed'}`;
+              reject(err);
+            }
+          } else if (update.connection === 'close') {
+            const err = update.lastDisconnect?.error;
+            if (err && !resolved) {
+              resolved = true;
+              clearTimeout(timer);
+              sock.ev.off('connection.update', onUpdate);
+              console.error('[Baileys Engine] Connection closed during pairing:', err?.message || 'Closed');
+              botState.step = 'error';
+              botState.stepMessage = `কানেকশন বন্ধ হয়েছে: ${err?.message || 'Connection closed'}`;
+              botState.lastConnectionStatus = `Closed: ${err?.message || 'Connection closed'}`;
+              reject(err || new Error('Connection closed by WhatsApp server'));
+            }
+          }
+        };
+
+        sock.ev.on('connection.update', onUpdate);
+      });
+    } finally {
+      pairingInFlightPromise = null;
+      pairingInFlightPhone = '';
+    }
+  })();
+
+  return pairingInFlightPromise;
 }
 
 // API Routes
@@ -377,7 +594,7 @@ async function startRealPairingFlow(cleanPhone: string): Promise<{ pairingCode: 
 // 1. WhatsApp 8-digit Pairing Code Endpoint
 app.post('/api/whatsapp/pair', async (req: Request, res: Response) => {
   try {
-    const { phoneNumber } = req.body;
+    const { phoneNumber, forceNew } = req.body;
     console.log('[API /api/whatsapp/pair] Received request for phone:', phoneNumber);
 
     const validation = formatAndValidatePhone(phoneNumber);
@@ -398,9 +615,15 @@ app.post('/api/whatsapp/pair', async (req: Request, res: Response) => {
       });
     }
 
-    // Prevent duplicate requests within 90 seconds if pairing code exists for same number
-    const elapsedSec = (Date.now() - botState.pairingStartedAt) / 1000;
-    if (botState.status === 'pairing' && botState.phoneNumber === cleanPhone && botState.pairingCode && elapsedSec < 90) {
+    // Prevent duplicate requests within 120 seconds if active pairing code already exists for same number
+    const elapsedSec = botState.pairingStartedAt > 0 ? (Date.now() - botState.pairingStartedAt) / 1000 : 999;
+    if (
+      botState.status === 'pairing' &&
+      botState.phoneNumber === cleanPhone &&
+      botState.pairingCode &&
+      elapsedSec < 120 &&
+      (!forceNew || elapsedSec < 30)
+    ) {
       console.log(`[API /api/whatsapp/pair] Returning existing active pairing code for ${cleanPhone}`);
       return res.json({
         success: true,
@@ -445,12 +668,13 @@ app.post('/api/whatsapp/pair', async (req: Request, res: Response) => {
 // 2. Real-time Live Status Endpoint (for instant frontend synchronization)
 app.get('/api/whatsapp/status', (req: Request, res: Response) => {
   const elapsed = botState.pairingStartedAt > 0 ? Math.floor((Date.now() - botState.pairingStartedAt) / 1000) : 0;
-  const remainingSeconds = Math.max(0, 120 - elapsed);
+  const remainingSeconds = botState.pairingStartedAt > 0 ? Math.max(0, 120 - elapsed) : 0;
 
   res.json({
     status: botState.status,
     step: botState.step,
     stepMessage: botState.stepMessage,
+    lastConnectionStatus: botState.lastConnectionStatus,
     online: botState.status === 'connected',
     phoneNumber: botState.phoneNumber,
     pairingCode: botState.pairingCode,
@@ -477,6 +701,7 @@ app.get('/api/dashboard', (req: Request, res: Response) => {
       lastError: botState.lastError,
       step: botState.step,
       stepMessage: botState.stepMessage,
+      lastConnectionStatus: botState.lastConnectionStatus,
     },
     overview: {
       messagesChecked: modStats.messagesChecked || botState.messagesChecked,
@@ -591,20 +816,29 @@ app.get('/api/groups', async (req: Request, res: Response) => {
 // 5. Disconnect / Reset Session Endpoint
 app.post('/api/whatsapp/disconnect', async (req: Request, res: Response) => {
   try {
+    manualDisconnect = true;
+    clearReconnectTimer();
+    reconnectAttempts = 0;
+    lastPairingRequestAt = 0;
     if (currentSock) {
-      await currentSock.logout().catch(() => {});
-      currentSock.end(undefined);
-      currentSock = null;
+      const sockToLogout = currentSock;
+      try {
+        await sockToLogout.logout().catch(() => {});
+      } catch {}
+      destroyCurrentSocket();
     }
     fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
     botState.status = 'disconnected';
     botState.step = 'idle';
     botState.stepMessage = 'সেশন ডিসকানেক্ট ও ক্লিয়ার করা হয়েছে';
+    botState.lastConnectionStatus = 'Disconnected by user';
     botState.pairingCode = '';
     botState.qrCodeDataUrl = '';
+    botState.pairingStartedAt = 0;
     botState.phoneNumber = '';
     botState.user = null;
+    botState.lastError = null;
     res.json({ success: true, message: 'Session disconnected and cleared' });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });

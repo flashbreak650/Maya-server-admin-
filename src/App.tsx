@@ -65,6 +65,7 @@ interface LiveStatusData {
   status: 'disconnected' | 'connecting' | 'pairing' | 'connected';
   step: 'idle' | 'initializing' | 'waiting_for_phone' | 'connected' | 'error';
   stepMessage: string;
+  lastConnectionStatus?: string;
   online: boolean;
   phoneNumber?: string;
   pairingCode?: string;
@@ -140,19 +141,14 @@ interface ActivityLog {
 
 export default function App() {
   const [activePage, setActivePage] = useState<'home' | 'security' | 'maya' | 'integrations' | 'pairing' | 'groups'>('home');
-  const [isStaticHost, setIsStaticHost] = useState(false);
-
-  useEffect(() => {
-    // Detect if running on GitHub Pages, similar static host, or Capacitor Android APK
+  const [isStaticHost] = useState(() => {
     const isCapacitor = !!(window as any).Capacitor?.isNativePlatform?.() || window.location.protocol === 'capacitor:';
-    if (isCapacitor || window.location.hostname.includes('github.io') || window.location.hostname.includes('pages.dev')) {
-      setIsStaticHost(true);
-    }
-  }, []);
+    return isCapacitor || window.location.hostname.includes('github.io') || window.location.hostname.includes('pages.dev');
+  });
   const [uiLang, setUiLang] = useState<'bn' | 'en'>((localStorage.getItem('wg_ui_lang') as 'bn' | 'en') || 'bn');
   const [toastMessage, setToastMessage] = useState('');
   const [showToast, setShowToast] = useState(false);
-  const [toastTimer, setToastTimer] = useState<any>(null);
+  const toastTimerRef = useRef<any>(null);
   const [activeHelpId, setActiveHelpId] = useState<string | null>(null);
 
   const openHelp = (id: string) => setActiveHelpId(id);
@@ -326,13 +322,35 @@ export default function App() {
     protectedBadge: isBn ? 'WAGuard দ্বারা সুরক্ষিত' : 'Protected by WAGuard',
   };
 
-  // Live WhatsApp Connection State
-  const [liveStatus, setLiveStatus] = useState<LiveStatusData>({
-    status: 'disconnected',
-    step: 'idle',
-    stepMessage: isBn ? 'WhatsApp সংযোগের জন্য প্রস্তুত' : 'Ready to connect WhatsApp',
-    online: false,
-    remainingSeconds: 0,
+  // Live WhatsApp Connection State (restores active pairing across remount/refresh if still valid)
+  const [liveStatus, setLiveStatus] = useState<LiveStatusData>(() => {
+    try {
+      const saved = sessionStorage.getItem('wg_active_pairing');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.pairingCode && parsed?.startedAt && Date.now() - parsed.startedAt < 120000) {
+          return {
+            status: 'pairing',
+            step: 'waiting_for_phone',
+            stepMessage: 'রিয়েল কোড প্রস্তুত! আপনার ফোনের WhatsApp থেকে কোডটি এন্টার করুন।',
+            lastConnectionStatus: 'Pairing code active — waiting for confirmation',
+            online: false,
+            phoneNumber: parsed.phoneNumber || '',
+            pairingCode: parsed.pairingCode,
+            qrCode: parsed.qrCode || '',
+            remainingSeconds: Math.max(0, 120 - Math.floor((Date.now() - parsed.startedAt) / 1000)),
+          };
+        }
+      }
+    } catch {}
+    return {
+      status: 'disconnected',
+      step: 'idle',
+      stepMessage: isBn ? 'WhatsApp সংযোগের জন্য প্রস্তুত' : 'Ready to connect WhatsApp',
+      lastConnectionStatus: isBn ? 'সংযোগের জন্য প্রস্তুত' : 'Ready to connect',
+      online: false,
+      remainingSeconds: 0,
+    };
   });
 
   // Pairing inputs & presentation
@@ -433,7 +451,9 @@ export default function App() {
   const [openrouterKey, setOpenrouterKey] = useState(localStorage.getItem('wg_openrouter_key') || '');
   const [supabaseUrl, setSupabaseUrl] = useState(localStorage.getItem('wg_supabase_url') || '');
   const [supabaseKey, setSupabaseKey] = useState(localStorage.getItem('wg_supabase_key') || '');
-  const [baileysUrl, setBaileysUrl] = useState(localStorage.getItem('wg_server') || '');
+  const [baileysUrl, setBaileysUrl] = useState(
+    () => localStorage.getItem('wg_server') || (import.meta as any).env?.VITE_API_BASE_URL || ''
+  );
 
   // AI Brain Management State
   const [isAddingKey, setIsAddingKey] = useState(false);
@@ -450,13 +470,29 @@ export default function App() {
   const [showSupabase, setShowSupabase] = useState(false);
 
   const pollIntervalRef = useRef<any>(null);
+  const statusInFlightRef = useRef(false);
+  const pairingLockRef = useRef(false);
+  const activePageRef = useRef(activePage);
+  const liveStatusRef = useRef(liveStatus);
+  const baileysUrlRef = useRef(baileysUrl);
+
+  useEffect(() => {
+    activePageRef.current = activePage;
+  }, [activePage]);
+
+  useEffect(() => {
+    liveStatusRef.current = liveStatus;
+  }, [liveStatus]);
+
+  useEffect(() => {
+    baileysUrlRef.current = baileysUrl;
+  }, [baileysUrl]);
 
   const showNotification = (msg: string) => {
     setToastMessage(msg);
     setShowToast(true);
-    if (toastTimer) clearTimeout(toastTimer);
-    const timer = setTimeout(() => setShowToast(false), 3200);
-    setToastTimer(timer);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setShowToast(false), 3200);
   };
 
   const callApi = async (path: string, method = 'GET', body?: any) => {
@@ -519,20 +555,74 @@ export default function App() {
     }
   };
 
-  // Poll live status from WhatsApp backend
+  // Poll live status from WhatsApp backend without unnecessary re-renders or wiping active pairing codes
   const checkStatus = async () => {
+    if (statusInFlightRef.current || pairingLockRef.current) return;
+    if (isStaticHost && !baileysUrlRef.current.trim()) return;
+
+    statusInFlightRef.current = true;
     try {
       const data: LiveStatusData = await callApi('/api/whatsapp/status');
-      setLiveStatus(data);
+      const prev = liveStatusRef.current;
+
       if (data.online) {
+        try {
+          sessionStorage.removeItem('wg_active_pairing');
+        } catch {}
         setPairingError(null);
       }
+
+      // Guard: if a valid pairing code is still active (< 120s) in sessionStorage, do not wipe it on a transient disconnected poll
+      let merged = data;
+      if (!data.online && !data.pairingCode && data.status === 'disconnected' && !data.lastError) {
+        try {
+          const saved = sessionStorage.getItem('wg_active_pairing');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (parsed?.pairingCode && parsed?.startedAt && Date.now() - parsed.startedAt < 120000) {
+              merged = {
+                ...data,
+                status: 'pairing',
+                step: 'waiting_for_phone',
+                pairingCode: parsed.pairingCode,
+                qrCode: parsed.qrCode || prev.qrCode,
+                phoneNumber: parsed.phoneNumber || prev.phoneNumber,
+                stepMessage: prev.stepMessage || data.stepMessage,
+                lastConnectionStatus: prev.lastConnectionStatus || 'Pairing code active — waiting for phone confirmation',
+              };
+            } else {
+              sessionStorage.removeItem('wg_active_pairing');
+            }
+          }
+        } catch {}
+      }
+
+      // Only trigger React state update when meaningful connection fields change (prevents periodic re-render wobble)
+      const changed =
+        prev.status !== merged.status ||
+        prev.step !== merged.step ||
+        prev.stepMessage !== merged.stepMessage ||
+        prev.lastConnectionStatus !== merged.lastConnectionStatus ||
+        prev.online !== merged.online ||
+        prev.pairingCode !== merged.pairingCode ||
+        prev.qrCode !== merged.qrCode ||
+        prev.phoneNumber !== merged.phoneNumber ||
+        prev.lastError !== merged.lastError ||
+        prev.user?.id !== merged.user?.id ||
+        prev.user?.name !== merged.user?.name;
+
+      if (changed) {
+        setLiveStatus(merged);
+      }
     } catch {
-      // non-blocking
+      // non-blocking: keep current state intact on transient network failure
+    } finally {
+      statusInFlightRef.current = false;
     }
   };
 
   const loadDashboard = async () => {
+    if (isStaticHost && !baileysUrlRef.current.trim()) return;
     try {
       const data = await callApi('/api/dashboard');
       if (data.overview) {
@@ -771,8 +861,10 @@ export default function App() {
     }
   };
 
-  // Start real WhatsApp pairing flow
-  const handleStartPairing = async () => {
+  // Start real WhatsApp pairing flow (protected against double-clicks & redundant calls)
+  const handleStartPairing = async (forceNew = false) => {
+    if (pairingLockRef.current) return;
+
     let clean = phoneNumber.replace(/\D/g, '');
     if (clean.startsWith('1') && clean.length === 10) {
       clean = '880' + clean;
@@ -787,33 +879,94 @@ export default function App() {
     }
 
     localStorage.setItem('wg_phone', clean);
+    pairingLockRef.current = true;
     setIsPairingLoading(true);
     setPairingError(null);
+    setLiveStatus((prev) => ({
+      ...prev,
+      status: prev.pairingCode ? prev.status : 'connecting',
+      step: prev.pairingCode ? prev.step : 'initializing',
+      lastConnectionStatus: isBn ? 'WhatsApp সার্ভারের সাথে সংযোগ হচ্ছে...' : 'Connecting to WhatsApp server...',
+    }));
     showNotification(isBn ? 'WhatsApp সার্ভার থেকে অফিশিয়াল ৮-ডিজিট কোড রিকোয়েস্ট করা হচ্ছে...' : 'Requesting 8-digit code from WhatsApp server...');
 
     try {
-      const res = await callApi('/api/whatsapp/pair', 'POST', { phoneNumber: clean });
+      const res = await callApi('/api/whatsapp/pair', 'POST', { phoneNumber: clean, forceNew });
       if (res.pairingCode) {
-        showNotification(isBn ? 'রিয়েল WhatsApp পেয়ারিং কোড তৈরি হয়েছে!' : 'Real pairing code generated!');
-        await checkStatus();
+        const startedAt = Date.now();
+        try {
+          sessionStorage.setItem(
+            'wg_active_pairing',
+            JSON.stringify({
+              pairingCode: res.pairingCode,
+              qrCode: res.qrCode || '',
+              phoneNumber: clean,
+              startedAt,
+            })
+          );
+        } catch {}
+
+        setLiveStatus((prev) => ({
+          ...prev,
+          status: 'pairing',
+          step: 'waiting_for_phone',
+          stepMessage: isBn
+            ? 'রিয়েল কোড প্রস্তুত! আপনার ফোনের WhatsApp থেকে কোডটি এন্টার করুন।'
+            : 'Real pairing code ready! Enter it in WhatsApp on your phone.',
+          lastConnectionStatus: res.alreadyPairing
+            ? 'Active pairing code reused'
+            : 'Pairing code generated — waiting for confirmation',
+          online: false,
+          phoneNumber: clean,
+          pairingCode: res.pairingCode,
+          qrCode: res.qrCode || prev.qrCode || '',
+          remainingSeconds: 120,
+          lastError: null,
+        }));
+        showNotification(
+          res.alreadyPairing
+            ? isBn ? 'চলমান পেয়ারিং কোডটিই সক্রিয় রয়েছে!' : 'Active pairing code reused!'
+            : isBn ? 'রিয়েল WhatsApp পেয়ারিং কোড তৈরি হয়েছে!' : 'Real pairing code generated!'
+        );
       } else if (res.alreadyConnected) {
+        try {
+          sessionStorage.removeItem('wg_active_pairing');
+        } catch {}
         showNotification(isBn ? 'ইতিমধ্যে WhatsApp কানেক্টেড রয়েছে!' : 'WhatsApp is already connected!');
+        pairingLockRef.current = false;
         await checkStatus();
       }
     } catch (err: any) {
       const msg = err.message || (isBn ? 'WhatsApp সার্ভারের সাথে সংযোগে সমস্যা হয়েছে' : 'Connection error');
       setPairingError(msg);
+      setLiveStatus((prev) => ({
+        ...prev,
+        lastConnectionStatus: `Error: ${msg}`,
+      }));
       showNotification(msg);
     } finally {
+      pairingLockRef.current = false;
       setIsPairingLoading(false);
     }
   };
 
   const handleDisconnect = async () => {
     try {
+      sessionStorage.removeItem('wg_active_pairing');
+    } catch {}
+    try {
       await callApi('/api/whatsapp/disconnect', 'POST');
+      setLiveStatus({
+        status: 'disconnected',
+        step: 'idle',
+        stepMessage: isBn ? 'WhatsApp সেশন ডিসকানেক্ট করা হয়েছে' : 'Disconnected session',
+        lastConnectionStatus: 'Disconnected by user',
+        online: false,
+        pairingCode: '',
+        qrCode: '',
+        remainingSeconds: 0,
+      });
       showNotification(isBn ? 'WhatsApp সেশন ডিসকানেক্ট করা হয়েছে' : 'Disconnected session');
-      await checkStatus();
     } catch {
       showNotification(isBn ? 'ডিসকানেক্ট সম্পন্ন হয়েছে' : 'Disconnected');
     }
@@ -822,7 +975,19 @@ export default function App() {
   const copyToClipboard = async () => {
     if (!liveStatus.pairingCode) return;
     try {
-      await navigator.clipboard.writeText(liveStatus.pairingCode);
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(liveStatus.pairingCode);
+      } else {
+        const el = document.createElement('textarea');
+        el.value = liveStatus.pairingCode;
+        el.setAttribute('readonly', '');
+        el.style.position = 'fixed';
+        el.style.opacity = '0';
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand('copy');
+        document.body.removeChild(el);
+      }
       setIsCopied(true);
       showNotification(isBn ? 'কোড কপি হয়েছে!' : 'Code copied!');
       setTimeout(() => setIsCopied(false), 2000);
@@ -992,15 +1157,41 @@ export default function App() {
     }
   };
 
-  // Setup periodic live status polling (every 2.5 seconds)
+  // Setup controlled adaptive live status polling (pauses in background & prevents overlapping polls)
   useEffect(() => {
+    let mounted = true;
     loadDashboard();
-    pollIntervalRef.current = setInterval(() => {
-      checkStatus();
-    }, 2500);
+
+    const scheduleNext = () => {
+      if (!mounted) return;
+      const isActivelyPairing =
+        liveStatusRef.current.status === 'pairing' ||
+        liveStatusRef.current.status === 'connecting' ||
+        activePageRef.current === 'pairing';
+      const delay = isActivelyPairing ? 3000 : 15000;
+
+      pollIntervalRef.current = setTimeout(async () => {
+        if (!mounted) return;
+        if (document.visibilityState !== 'hidden') {
+          await checkStatus();
+        }
+        scheduleNext();
+      }, delay);
+    };
+
+    scheduleNext();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && mounted) {
+        checkStatus();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+      mounted = false;
+      if (pollIntervalRef.current) clearTimeout(pollIntervalRef.current);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
 
@@ -1021,7 +1212,7 @@ export default function App() {
         </div>
         <div className="header-right">
           <div
-            className={`flex items-center gap-1.5 px-2 py-1 text-[10px] sm:text-[11px] font-semibold whitespace-nowrap shrink-0 ${
+            className={`flex items-center gap-1 px-1.5 sm:px-2 py-1 text-[10px] sm:text-[11px] font-semibold whitespace-nowrap shrink-0 rounded-md ${
               liveStatus.online
                 ? 'bg-[#e9f7ef] text-[#108255]'
                 : liveStatus.status === 'pairing'
@@ -1030,7 +1221,7 @@ export default function App() {
             }`}
           >
             <span
-              className={`w-2 h-2 shrink-0 ${
+              className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full shrink-0 ${
                 liveStatus.online ? 'bg-[#108255]' : liveStatus.status === 'pairing' ? 'bg-amber-500' : 'bg-gray-400'
               }`}
             ></span>
@@ -1045,11 +1236,11 @@ export default function App() {
 
           {/* Bengali / English Language Switcher Button */}
           <button
-            className="flex items-center gap-1 px-2 py-1 border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-[11px] sm:text-xs font-extrabold transition-colors cursor-pointer shadow-xs shrink-0 whitespace-nowrap"
+            className="flex items-center gap-1 px-2 py-1 rounded-md border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-[10px] sm:text-xs font-extrabold transition-colors cursor-pointer shadow-xs shrink-0 whitespace-nowrap"
             onClick={toggleUiLang}
             title={isBn ? 'Switch UI to English' : 'বাংলায় পরিবর্তন করুন'}
           >
-            <Globe size={12} className="text-emerald-700 shrink-0" />
+            <Globe size={11} className="text-emerald-700 shrink-0" />
             <span>{isBn ? 'English' : 'বাংলা'}</span>
           </button>
 
@@ -1156,7 +1347,7 @@ export default function App() {
                   <div className="flex-1">
                     <h4 className="font-bold text-sm">ব্যাকএন্ড সার্ভার কানেক্ট করা নেই!</h4>
                     <p className="text-xs mt-1 leading-relaxed opacity-90">
-                      GitHub Pages শুধুমাত্র ফ্রন্টএন্ড হোস্ট করে। আপনার ড্যাশবোর্ডটি সচল করতে <b>Integrations</b> পেজে গিয়ে আপনার Render/Railway সার্ভার লিঙ্কটি সেভ করুন।
+                      এই অ্যাপটি সরাসরি আপনার <b>Google Cloud Run</b> অথবা ফোনের <b>Termux (127.0.0.1:3000)</b> সার্ভারের সাথে কাজ করে। ফ্রি Render লিংক WhatsApp ব্যান ঝুঁকি বাড়ায়—তাই <b>Integrations</b> পেজে আপনার Google Cloud Run বা লোকাল সার্ভার লিংক সেভ করুন।
                     </p>
                     <button 
                       className="mt-3 px-3 py-1.5 bg-rose-600 text-white text-[10px] font-bold  hover:bg-rose-700 transition-colors"
@@ -2302,11 +2493,40 @@ export default function App() {
 
                   <button
                     className={`btn primary full mt-2 ${isPairingLoading ? 'is-loading' : ''}`}
-                    onClick={handleStartPairing}
+                    onClick={() => handleStartPairing(false)}
                     disabled={isPairingLoading}
                   >
                     <KeyRound size={13} /> {t.genPairCodeBtn}
                   </button>
+
+                  {/* Connection Status, Connecting Indicator & Last Connection Status */}
+                  <div className="mt-3 p-2.5 rounded-lg border border-slate-200 bg-slate-50 text-left space-y-1.5">
+                    <div className="flex items-center justify-between gap-2 text-[11px]">
+                      <span className="font-bold text-slate-600">{isBn ? 'কানেকশন স্ট্যাটাস:' : 'Connection Status:'}</span>
+                      <span
+                        className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded font-bold text-[10px] ${
+                          liveStatus.status === 'pairing'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : liveStatus.status === 'connecting' || isPairingLoading
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-slate-200 text-slate-700'
+                        }`}
+                      >
+                        {(isPairingLoading || liveStatus.status === 'connecting' || liveStatus.status === 'pairing') && (
+                          <RefreshCw size={10} className="animate-spin shrink-0" />
+                        )}
+                        {isPairingLoading || liveStatus.status === 'connecting'
+                          ? isBn ? 'সংযোগ হচ্ছে (Connecting...)' : 'Connecting...'
+                          : liveStatus.status === 'pairing'
+                          ? isBn ? 'পেয়ারিং সক্রিয় (Pairing Active)' : 'Pairing Active'
+                          : isBn ? 'ডিসকানেক্টেড' : 'Disconnected'}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-slate-600 leading-relaxed">
+                      <span className="font-semibold text-slate-700">{isBn ? 'সর্বশেষ স্ট্যাটাস:' : 'Last Connection Status:'}</span>{' '}
+                      {liveStatus.lastConnectionStatus || liveStatus.stepMessage}
+                    </div>
+                  </div>
 
                   {/* Display generated code or QR */}
                   {(liveStatus.pairingCode || liveStatus.qrCode) && (
@@ -2325,7 +2545,11 @@ export default function App() {
                             <button className="btn soft" onClick={copyToClipboard}>
                               <Copy size={13} /> {isCopied ? (isBn ? 'কপি হয়েছে!' : 'Copied!') : t.copyCodeBtn}
                             </button>
-                            <button className="btn outline" onClick={handleStartPairing}>
+                            <button
+                              className="btn outline"
+                              onClick={() => handleStartPairing(true)}
+                              disabled={isPairingLoading}
+                            >
                               <RefreshCw size={13} /> {t.getNewCodeBtn}
                             </button>
                           </div>
@@ -3038,7 +3262,7 @@ export default function App() {
                   </div>
 
                   <p className="pt-1">
-                    <b>💡 গুরুত্বপূর্ণ নোট:</b> GitHub Pages শুধুমাত্র ফ্রন্টএন্ড স্ট্যাটিক ফাইল হোস্ট করে। লাইভ WhatsApp সকেট (Baileys) ও মায়া AI ২৪/৭ সচল রাখতে প্রজেক্টটির ব্যাকএন্ড Render/Railway/VPS-এ চালিয়ে উপরের <b>Baileys Socket Server URL</b> বক্সে আপনার সার্ভার লিঙ্ক সেভ করুন।
+                    <b>💡 গুরুত্বপূর্ণ নোট (Anti-Ban টিপস):</b> ফ্রি Render (`onrender.com`) সার্ভার প্রতি ১৫ মিনিটে স্লিপ করে এবং শেয়ার্ড IP থেকে বারবার সেশন রিসেট করায় WhatsApp টেম্পোরারি ব্যান দেয়। ২৪/৭ নিরাপদ ও ব্যান-মুক্ত সংযোগের জন্য প্রজেক্টটি <b>Google Cloud Run</b>-এ (রিপোতে থাকা `Dockerfile` দিয়ে) অথবা নিজের ফোনের <b>Termux</b> (`http://127.0.0.1:3000`)-এ চালিয়ে উপরের <b>Baileys Socket Server URL</b> বক্সে সেভ করুন।
                   </p>
 
                   <div className="p-2.5 bg-white  border border-emerald-200 font-mono text-[11px] text-gray-800">

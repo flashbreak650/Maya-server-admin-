@@ -54,6 +54,8 @@ jobs:
           echo "$SDK_DIR/platform-tools" >> $GITHUB_PATH
 
       - name: Install dependencies & build web app
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || '' }}
         run: |
           npm install --legacy-peer-deps
           npm run build
