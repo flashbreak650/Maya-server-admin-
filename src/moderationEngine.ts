@@ -1090,13 +1090,14 @@ export function checkLinkViolation(text: string): { isLink: boolean; matchedLink
 export function extractRealMessage(message: proto.IMessage | null | undefined): proto.IMessage | null | undefined {
   if (!message) return null;
   let current: any = message;
-  for (let depth = 0; depth < 6; depth++) {
+  for (let depth = 0; depth < 8; depth++) {
     const wrapped =
       current?.ephemeralMessage?.message ||
       current?.viewOnceMessage?.message ||
       current?.viewOnceMessageV2?.message ||
       current?.viewOnceMessageV2Extension?.message ||
       current?.documentWithCaptionMessage?.message ||
+      current?.deviceSentMessage?.message ||
       current?.editedMessage?.message ||
       current?.associatedChildMessage?.message ||
       current?.lottieStickerMessage?.message ||
@@ -1128,12 +1129,51 @@ export function extractMessageText(realMsg: proto.IMessage | null | undefined): 
   );
 }
 
-// Check if message is View Once
+// Bulletproof View-Once detector (handles ephemeral-wrapped ViewOnce, V2/V2Extension, Photo, Video, Voice Note Audio, PTV)
 export function isViewOnceMessage(rawMsg: proto.IWebMessageInfo, realMsg: proto.IMessage | null | undefined): boolean {
-  if (rawMsg.message?.viewOnceMessage || rawMsg.message?.viewOnceMessageV2 || rawMsg.message?.viewOnceMessageV2Extension) {
-    return true;
+  let cursor: any = rawMsg?.message;
+  for (let depth = 0; depth < 8 && cursor; depth++) {
+    if (
+      cursor.viewOnceMessage ||
+      cursor.viewOnceMessageV2 ||
+      cursor.viewOnceMessageV2Extension ||
+      cursor.imageMessage?.viewOnce ||
+      cursor.videoMessage?.viewOnce ||
+      cursor.audioMessage?.viewOnce ||
+      cursor.ptvMessage?.viewOnce ||
+      cursor.documentMessage?.viewOnce ||
+      cursor.extendedTextMessage?.viewOnce ||
+      cursor.viewOnce === true
+    ) {
+      return true;
+    }
+    cursor =
+      cursor.ephemeralMessage?.message ||
+      cursor.viewOnceMessage?.message ||
+      cursor.viewOnceMessageV2?.message ||
+      cursor.viewOnceMessageV2Extension?.message ||
+      cursor.documentWithCaptionMessage?.message ||
+      cursor.deviceSentMessage?.message ||
+      cursor.editedMessage?.message ||
+      cursor.associatedChildMessage?.message ||
+      cursor.groupMentionedMessage?.message ||
+      cursor.botInvokeMessage?.message ||
+      cursor.botForwardedMessage?.message ||
+      cursor.groupStatusMessage?.message ||
+      cursor.groupStatusMessageV2?.message ||
+      null;
   }
-  if (realMsg?.imageMessage?.viewOnce || realMsg?.videoMessage?.viewOnce) {
+
+  const r: any = realMsg;
+  if (
+    r?.imageMessage?.viewOnce ||
+    r?.videoMessage?.viewOnce ||
+    r?.audioMessage?.viewOnce ||
+    r?.ptvMessage?.viewOnce ||
+    r?.documentMessage?.viewOnce ||
+    r?.extendedTextMessage?.viewOnce ||
+    r?.viewOnce === true
+  ) {
     return true;
   }
   return false;
@@ -1751,6 +1791,11 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
     violationType = 'Anti-Sticker';
     violationDetails = 'স্টিকার পাঠানো নিষিদ্ধ';
   }
+  // Feature 7: ANTI-VIEW ONCE (Must run before antiVideo/antiImage so view-once photo/video/audio is properly caught)
+    else if (settings.antiViewOnce && isViewOnce) {
+      violationType = 'Anti-View Once';
+      violationDetails = 'View Once মিডিয়া (ছবি/ভিডিও/ভয়েস) পাঠানো নিষিদ্ধ';
+    }
   // Feature 4: ANTI-GIF
     else if (settings.antiGif && isGif) {
       violationType = 'Anti-GIF';
@@ -1765,11 +1810,6 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
     else if (settings.antiImage && isImage) {
       violationType = 'Anti-Image';
       violationDetails = 'ছবি বা ফটো পাঠানো নিষিদ্ধ';
-    }
-    // Feature 7: ANTI-VIEW ONCE
-    else if (settings.antiViewOnce && isViewOnce) {
-      violationType = 'Anti-View Once';
-      violationDetails = 'View Once মিডিয়া পাঠানো নিষিদ্ধ';
     }
     // Feature 9: ANTI-LINK
     else if (settings.antiLink && messageText) {
