@@ -88,6 +88,8 @@ interface ModerationSettings {
   antiBadword: boolean;
   antiLink: boolean;
   autoKick3Warnings: boolean;
+  autoWelcome: boolean;
+  welcomeMessage?: string;
   botReply: boolean;
   customBadwords: string[];
   // Maya AI Settings
@@ -419,6 +421,8 @@ export default function App() {
     antiBadword: true,
     antiLink: true,
     autoKick3Warnings: true,
+    autoWelcome: true,
+    welcomeMessage: '',
     botReply: true,
     customBadwords: [],
     mayaAiEnabled: true,
@@ -1932,6 +1936,63 @@ export default function App() {
                     <span className="slider"></span>
                   </label>
                 </div>
+
+                {/* Auto Welcome New Member with @Mention */}
+                <div className="toggle-row">
+                  <div className="toggle-info">
+                    <h4>
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {isBn ? 'অটো ওয়েলকাম মেসেজ (@Mention সহ)' : 'Auto Welcome New Members (@Mention)'}
+                        <span className={`badge ${settings.autoWelcome ? 'badge-green' : 'badge-amber'}`}>
+                          {settings.autoWelcome ? 'ACTIVE' : 'OFF'}
+                        </span>
+                      </span>
+                    </h4>
+                    <p>
+                      {isBn
+                        ? 'গ্রুপে নতুন কোনো সদস্য যুক্ত হলে বট স্বয়ংক্রিয়ভাবে @মেনশন দিয়ে সুন্দর ওয়েলকাম জানাবে।'
+                        : 'Automatically greet newly added group members with @mention.'}
+                    </p>
+                  </div>
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.autoWelcome !== false}
+                      onChange={(e) => updateSettingToggle('autoWelcome', e.target.checked)}
+                    />
+                    <span className="slider"></span>
+                  </label>
+                </div>
+
+                {settings.autoWelcome !== false && (
+                  <div className="mt-2 pt-2 border-t border-slate-100">
+                    <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                      {isBn
+                        ? 'কাস্টম ওয়েলকাম মেসেজ (ঐচ্ছিক — {user} ও {group} ব্যবহার করতে পারেন)'
+                        : 'Custom Welcome Template (optional — supports {user} & {group})'}
+                    </label>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="text"
+                        className="field flex-1"
+                        value={settings.welcomeMessage || ''}
+                        onChange={(e) => setSettings((prev) => ({ ...prev, welcomeMessage: e.target.value }))}
+                        placeholder={
+                          isBn
+                            ? 'ফাঁকা রাখলে ডিফল্ট সুন্দর বাংলা ওয়েলকাম পাঠাবে...'
+                            : 'Leave blank for default welcome message...'
+                        }
+                      />
+                      <button
+                        type="button"
+                        className="btn soft shrink-0"
+                        onClick={() => updateSettingToggle('welcomeMessage', settings.welcomeMessage || '')}
+                      >
+                        <Save size={12} /> {isBn ? 'সেভ করুন' : 'Save'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
 
@@ -2981,88 +3042,86 @@ export default function App() {
               </div>
 
               {liveStatus.online ? (
-                <div className="card max-w-xl mx-auto overflow-hidden border border-emerald-200 bg-gradient-to-b from-emerald-50/90 via-white to-slate-50 p-6  shadow-sm">
+                <div className="card max-w-xl mx-auto overflow-hidden border border-emerald-200 bg-gradient-to-b from-emerald-50/90 via-white to-slate-50/90 p-4 sm:p-6 shadow-sm rounded-2xl">
                   {/* Connected Header Banner */}
-                  <div className="flex items-center justify-between border-b border-emerald-100 pb-4 mb-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-11 h-11  bg-emerald-600 text-white flex items-center justify-center shadow-md shadow-emerald-600/20">
+                  <div className="flex items-start justify-between gap-2.5 border-b border-emerald-100 pb-4 mb-4">
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white flex items-center justify-center shadow-md shadow-emerald-600/20 shrink-0">
                         <ShieldCheck size={22} />
                       </div>
-                      <div className="text-left">
-                        <div className="flex items-center gap-2">
-                          <h3 className="text-slate-900 text-base font-extrabold tracking-tight">
-                            {isBn ? 'WhatsApp একাউন্ট সফলভাবে যুক্ত' : 'WhatsApp Linked Successfully'}
-                          </h3>
-                          <span className="flex items-center gap-1 px-2 py-0.5  bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                            <span className="w-1.5 h-1.5  bg-emerald-600"></span>
-                            Live
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-500 font-medium mt-0.5">
+                      <div className="text-left min-w-0 flex-1">
+                        <h3 className="text-slate-900 text-[15px] sm:text-base font-extrabold tracking-tight leading-snug">
+                          {isBn ? 'WhatsApp একাউন্ট সফলভাবে যুক্ত' : 'WhatsApp Linked Successfully'}
+                        </h3>
+                        <p className="text-[11px] sm:text-xs text-slate-500 font-medium mt-0.5 leading-relaxed">
                           {isBn ? 'Real Baileys Sockets মডারেশন ইঞ্জিন সক্রিয় আছে' : 'Real Baileys Socket Moderation Engine Active'}
                         </p>
                       </div>
                     </div>
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-extrabold border border-emerald-200 whitespace-nowrap shrink-0">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+                      Live
+                    </span>
                   </div>
 
                   {/* Account Info Box */}
-                  <div className="bg-white  border border-emerald-100 p-4 shadow-2xs text-left mb-5">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10  bg-gradient-to-tr from-emerald-500 to-teal-400 text-white font-bold flex items-center justify-center text-sm shadow-sm">
+                  <div className="bg-white rounded-xl border border-emerald-100 p-3.5 sm:p-4 shadow-2xs text-left mb-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-white font-bold flex items-center justify-center text-base shadow-sm shrink-0">
                           🌺
                         </div>
-                        <div>
-                          <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400">
+                        <div className="min-w-0">
+                          <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400 block">
                             {isBn ? 'সংযুক্ত হোয়াটসঅ্যাপ একাউন্ট' : 'CONNECTED WHATSAPP ACCOUNT'}
                           </span>
-                          <h4 className="text-sm font-bold text-slate-900 flex items-center gap-1.5 mt-0.5">
+                          <h4 className="text-sm font-extrabold text-slate-900 truncate mt-0.5">
                             {liveStatus.user?.name || '🌺 Maya Ai 🌺'}
                           </h4>
-                          <p className="text-xs font-mono text-emerald-700 font-medium">
+                          <p className="text-xs font-mono text-emerald-700 font-bold break-all">
                             {liveStatus.phoneNumber || liveStatus.user?.id?.split(':')[0] || '8801838489457'}
                           </p>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <span className="inline-block px-2.5 py-1  bg-emerald-50 text-emerald-800 text-[11px] font-bold border border-emerald-200">
+                      <div className="self-start sm:self-center shrink-0">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 text-[11px] font-bold border border-emerald-200 whitespace-nowrap">
                           ✓ Verified Socket
                         </span>
                       </div>
                     </div>
 
                     {/* Metric Chips inside the card */}
-                    <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-slate-100 text-center">
-                      <div className="bg-slate-50 p-2  border border-slate-100">
-                        <span className="text-[10px] text-slate-500 block">{isBn ? 'সার্ভার স্টেট' : 'Server State'}</span>
-                        <span className="text-xs font-bold text-emerald-700">Online</span>
+                    <div className="grid grid-cols-3 gap-2 mt-3.5 pt-3 border-t border-slate-100 text-center">
+                      <div className="bg-slate-50/90 p-2 rounded-xl border border-slate-100">
+                        <span className="text-[9.5px] text-slate-500 block">{isBn ? 'সার্ভার স্টেট' : 'Server State'}</span>
+                        <span className="text-[11px] sm:text-xs font-extrabold text-emerald-700">Online</span>
                       </div>
-                      <div className="bg-slate-50 p-2  border border-slate-100">
-                        <span className="text-[10px] text-slate-500 block">{isBn ? 'অটো মডারেশন' : 'Auto Moderation'}</span>
-                        <span className="text-xs font-bold text-slate-800">24/7 Active</span>
+                      <div className="bg-slate-50/90 p-2 rounded-xl border border-slate-100">
+                        <span className="text-[9.5px] text-slate-500 block">{isBn ? 'অটো মডারেশন' : 'Auto Moderation'}</span>
+                        <span className="text-[11px] sm:text-xs font-extrabold text-slate-800">24/7 Active</span>
                       </div>
-                      <div className="bg-slate-50 p-2  border border-slate-100">
-                        <span className="text-[10px] text-slate-500 block">{isBn ? 'মায়া AI' : 'Maya AI'}</span>
-                        <span className="text-xs font-bold text-teal-700">Ready</span>
+                      <div className="bg-slate-50/90 p-2 rounded-xl border border-slate-100">
+                        <span className="text-[9.5px] text-slate-500 block">{isBn ? 'মায়া AI' : 'Maya AI'}</span>
+                        <span className="text-[11px] sm:text-xs font-extrabold text-teal-700">Ready</span>
                       </div>
                     </div>
                   </div>
 
-                  {/* Action Buttons */}
-                  <div className="flex flex-wrap items-center justify-center gap-2.5">
-                    <button className="btn primary px-4 py-2 text-xs font-bold shadow-sm" onClick={() => setActivePage('home')}>
+                  {/* Balanced 2x2 Action Button Cards */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button className="btn primary py-2.5 text-xs font-bold shadow-sm w-full" onClick={() => setActivePage('home')}>
                       <LayoutDashboard size={14} /> {isBn ? 'ড্যাশবোর্ডে যান' : 'Go to Dashboard'}
                     </button>
                     <button
-                      className="btn soft px-4 py-2 text-xs font-bold"
+                      className="btn soft py-2.5 text-xs font-bold w-full"
                       onClick={() => sessionCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
                     >
-                      <Download size={14} /> {isBn ? 'সেশন ব্যাকআপ নিন' : 'Backup Session'}
+                      <Download size={14} /> {isBn ? 'সেশন ব্যাকআপ' : 'Backup Session'}
                     </button>
-                    <button className="btn outline px-4 py-2 text-xs font-semibold" onClick={checkStatus}>
+                    <button className="btn outline py-2.5 text-xs font-semibold w-full" onClick={checkStatus}>
                       <RefreshCw size={14} /> {isBn ? 'স্ট্যাটাস রিফ্রেশ' : 'Sync Status'}
                     </button>
-                    <button className="btn danger px-4 py-2 text-xs font-semibold" onClick={handleDisconnect}>
+                    <button className="btn danger py-2.5 text-xs font-semibold w-full" onClick={handleDisconnect}>
                       <LogOut size={14} /> {isBn ? 'ডিসকানেক্ট করুন' : 'Disconnect'}
                     </button>
                   </div>

@@ -25,6 +25,8 @@ export interface ModerationSettings {
   antiBadword: boolean;
   antiLink: boolean;
   autoKick3Warnings: boolean;
+  autoWelcome: boolean;
+  welcomeMessage?: string;
   botReply: boolean;
   customBadwords: string[];
   // Individual Temporary Mute (Auto-Delete Interception for Sticker Spammers)
@@ -142,6 +144,8 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   antiBadword: true,
   antiLink: true,
   autoKick3Warnings: true,
+  autoWelcome: true,
+  welcomeMessage: '',
   botReply: true,
   customBadwords: [],
   individualMuteEnabled: true,
@@ -770,14 +774,15 @@ export function startRestrictedUsersMonitor(sockGetter?: () => WASocket | null) 
 
 // Comprehensive dictionary covering Bangla, Sylheti, Banglish, Hindi/Urdu, English, Arabic
 const BENGALI_BADWORDS = [
-  'খানকি', 'খানকির', 'খানকিরপোলা', 'মাগি', 'মাগির', 'মাগী', 'মাগীর', 'বেশ্যা', 'বেশ্যার',
-  'রান্ডি', 'রান্ডির', 'চুদা', 'চুদানি', 'চুদানির', 'চুদ', 'চুদি', 'চুদির', 'চোদ', 'চোদা',
-  'চোদনা', 'চুদনা', 'চোদানি', 'চোদানির', 'বোকাচোদা', 'বোকচোদা', 'মাদারচোদ', 'মাদারচুদা',
-  'বাইনচোদ', 'বাইনচুদা', 'ভোনচোদ', 'কুত্তা', 'কুত্তার', 'কুত্তির', 'শুয়োর', 'শুয়োরের',
+  'খানকি', 'খানকির', 'খানকিরপোলা', 'খাঁনকি', 'মাগি', 'মাগির', 'মাগী', 'মাগীর', 'বেশ্যা', 'বেশ্যার',
+  'রান্ডি', 'রান্ডির', 'চুদা', 'চুদানি', 'চুদানির', 'চুদ', 'চুদি', 'চুদির', 'চোদ', 'চোদা', 'চুদাই',
+  'চোদনা', 'চুদনা', 'চোদানি', 'চোদানির', 'বোকাচোদা', 'বোকচোদা', 'বোকাচুদা', 'মাদারচোদ', 'মাদারচুদা', 'মাদারচুদ',
+  'বাইনচোদ', 'বাইনচুদা', 'বাইনচুদ', 'ভোনচোদ', 'কুত্তা', 'কুত্তার', 'কুত্তির', 'শুয়োর', 'শুয়োরের',
   'শুয়োর', 'শুয়োরের', 'হারামি', 'হারামী', 'হারামজাদা', 'হারামখোর', 'ভোদা', 'ভোদাই',
-  'ধোন', 'লুচ্চা', 'লুচ্চামি', 'গুয়া', 'গুয়ার', 'গুদে', 'গুদ', 'বাল', 'বালের', 'বালছাল',
-  'সালা', 'শালা', 'শালার', 'সালার', 'চুতিয়া', 'চুতিয়া', 'নটি', 'নটির', 'জারজ',
-  'কুত্তার বাচ্চা', 'শুয়োরের বাচ্চা', 'শুয়োরের বাচ্চা', 'মাগির পোলা', 'খানকির পোলা'
+  'ধোন', 'ধন', 'লুচ্চা', 'লুচ্চামি', 'গুয়া', 'গুয়ার', 'গুদে', 'গুদ', 'বাল', 'বালের', 'বালছাল',
+  'সালা', 'শালা', 'শালার', 'সালার', 'চুতিয়া', 'চুতিয়া', 'নটি', 'নটির', 'জারজ', 'পুটকি', 'ফকিন্নি',
+  'বেয়াদব', 'বেয়াদব', 'লেংটা', 'ল্যাংটা', 'চুদুরবুদুর',
+  'কুত্তার বাচ্চা', 'শুয়োরের বাচ্চা', 'শুয়োরের বাচ্চা', 'মাগির পোলা', 'খানকির পোলা', 'তোর মারে', 'তোর মাকে'
 ].map((w) => w.normalize('NFC'));
 
 // Sylheti local slang
@@ -788,10 +793,11 @@ const SYLHETI_BADWORDS = [
 // Banglish (slang transliterated into English letters)
 const BANGLISH_BADWORDS = [
   'khanki', 'khankir', 'magi', 'magir', 'besha', 'beshar', 'beshya',
-  'randi', 'randir', 'raandi', 'choda', 'chudani', 'chuda', 'chudanir', 'chodna', 'chudna',
-  'bokachoda', 'madarchod', 'madarchuda', 'bainchod', 'baimchod', 'bhenchod', 'behnchod',
-  'harami', 'haramzada', 'kuttar baccha', 'shuorer baccha', 'bhoda', 'bhodai',
-  'dhon', 'guya', 'gud', 'bal', 'baler', 'chutia', 'chutiya', 'chod', 'sala', 'shala', 'shalar'
+  'randi', 'randir', 'raandi', 'choda', 'chudani', 'chuda', 'chudanir', 'chodna', 'chudna', 'chudi', 'chudai',
+  'bokachoda', 'bokachuda', 'madarchod', 'madarchuda', 'madarchud', 'bainchod', 'baimchod', 'bhenchod', 'behnchod',
+  'harami', 'haramzada', 'kuttar baccha', 'shuorer baccha', 'magir pola', 'khankir pola', 'bhoda', 'bhodai',
+  'dhon', 'guya', 'gud', 'putki', 'bal', 'baler', 'chutia', 'chutiya', 'chod', 'sala', 'shala', 'shalar',
+  'fokinni', 'beyadob', 'mc', 'bc', 'bsdk'
 ].map((w) => w.normalize('NFC'));
 
 // Hindi / Urdu slang
@@ -1168,7 +1174,17 @@ export async function safeSendMessage(
 export async function getGroupMeta(sock: WASocket, groupId: string, forceRefresh = false) {
   const cached = groupMetaCache[groupId];
   const now = Date.now();
-  if (!forceRefresh && cached && now - cached.fetchedAt < 30000) {
+  // Fast path: serve fresh cache within 5 minutes (0ms latency for instant sticker/profanity removal)
+  if (!forceRefresh && cached && now - cached.fetchedAt < 300000) {
+    return cached.meta;
+  }
+  // Stale-while-revalidate: if older cache exists, return immediately & refresh silently in background
+  if (!forceRefresh && cached) {
+    sock.groupMetadata(groupId)
+      .then((freshMeta) => {
+        groupMetaCache[groupId] = { meta: freshMeta, fetchedAt: Date.now() };
+      })
+      .catch(() => {});
     return cached.meta;
   }
   try {
@@ -1178,6 +1194,117 @@ export async function getGroupMeta(sock: WASocket, groupId: string, forceRefresh
   } catch (err: any) {
     console.error(`Failed to fetch metadata for group ${groupId}:`, err.message);
     return cached ? cached.meta : null;
+  }
+}
+
+export function primeGroupMetaCache(groupsMap: Record<string, any>) {
+  if (!groupsMap || typeof groupsMap !== 'object') return;
+  const now = Date.now();
+  for (const [groupId, meta] of Object.entries(groupsMap)) {
+    if (groupId && meta) {
+      groupMetaCache[groupId] = { meta, fetchedAt: now };
+    }
+  }
+}
+
+export async function handleGroupParticipantsUpdate(
+  sock: WASocket,
+  update: { id: string; participants: any[]; action: string }
+) {
+  try {
+    const groupId = update?.id;
+    if (!groupId || !groupId.endsWith('@g.us')) return;
+
+    // Always invalidate cache when members or admin roles change so moderation stays accurate
+    delete groupMetaCache[groupId];
+
+    if (update.action !== 'add' || !Array.isArray(update.participants) || update.participants.length === 0) {
+      return;
+    }
+
+    const settings = getSettings();
+    if (!settings.autoWelcome) {
+      return;
+    }
+
+    const meta = await getGroupMeta(sock, groupId, true);
+    const groupSubject = meta?.subject || 'আমাদের গ্রুপ';
+    const memberCount = meta?.participants?.length || 0;
+
+    // Build bot identity set so we don't welcome the bot itself
+    const botUsers = new Set<string>();
+    for (const b of [
+      sock.user?.id,
+      sock.user?.lid,
+      sock.authState?.creds?.me?.id,
+      sock.authState?.creds?.me?.lid,
+    ]) {
+      const cu = cleanJidUser(b);
+      if (cu) botUsers.add(cu);
+    }
+
+    const mentions: string[] = [];
+    const mentionLabels: string[] = [];
+
+    for (const rawParticipant of update.participants) {
+      const rawJid =
+        typeof rawParticipant === 'string'
+          ? rawParticipant
+          : rawParticipant?.id || rawParticipant?.jid || rawParticipant?.lid || '';
+      if (!rawJid) continue;
+
+      const normalized = normalizeJid(rawJid);
+      const participantUser = cleanJidUser(normalized);
+      if (botUsers.has(participantUser)) continue;
+
+      // Resolve phone number from participant object or group metadata if @lid
+      let displayNum = participantUser;
+      const metaMatch = meta?.participants?.find(
+        (p: any) =>
+          cleanJidUser(p.id) === participantUser ||
+          cleanJidUser(p.lid) === participantUser ||
+          cleanJidUser(p.phoneNumber) === participantUser
+      );
+      if (typeof rawParticipant === 'object' && rawParticipant?.phoneNumber) {
+        displayNum = cleanJidUser(rawParticipant.phoneNumber) || displayNum;
+      } else if (metaMatch?.phoneNumber) {
+        displayNum = cleanJidUser(metaMatch.phoneNumber) || displayNum;
+      }
+
+      if (!mentions.includes(normalized)) {
+        mentions.push(normalized);
+        mentionLabels.push(`@${displayNum}`);
+      }
+    }
+
+    if (mentions.length === 0) return;
+
+    const userTagString = mentionLabels.join(', ');
+    const customTemplate = (settings.welcomeMessage || '').trim();
+    const welcomeText = customTemplate
+      ? customTemplate.replace(/\{user\}/gi, userTagString).replace(/\{group\}/gi, groupSubject)
+      : `🌸 *আসসালামু আলাইকুম ও স্বাগতম!* 🌸\n\nহ্যালো ${userTagString},\n✨ *${groupSubject}* গ্রুপে আপনাকে আন্তরিক স্বাগতম!\n\n🛡️ অনুগ্রহ করে গ্রুপের নিয়মকানুন মেনে চলুন এবং সবার সাথে ভদ্র ও সুন্দর ব্যবহার করুন।${
+          memberCount > 0 ? `\n👥 বর্তমান সদস্য সংখ্যা: ${memberCount} জন` : ''
+        }`;
+
+    const sent = await safeSendMessage(sock, groupId, {
+      text: welcomeText,
+      mentions,
+    });
+
+    if (sent) {
+      addActivityLog({
+        groupId,
+        groupName: groupSubject,
+        senderJid: mentions[0],
+        senderPhone: mentionLabels[0].replace(/^@/, ''),
+        action: 'replied',
+        reason: 'নতুন সদস্যকে অটো ওয়েলকাম জানানো হয়েছে (Auto Welcome)',
+        details: `${userTagString} গ্রুপে যুক্ত হয়েছেন`,
+      });
+    }
+  } catch (err: any) {
+    console.error('[Auto Welcome Error]:', err?.message || err);
   }
 }
 

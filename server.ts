@@ -18,6 +18,8 @@ import makeWASocket, {
 
 import {
   processIncomingMessage,
+  handleGroupParticipantsUpdate,
+  primeGroupMetaCache,
   startGroupLockMonitor,
   startRestrictedUsersMonitor,
   getSettings as getModerationSettings,
@@ -219,6 +221,7 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
         if (socketToken !== activeSocketToken || sock !== currentSock) return;
         try {
           const groups = await sock.groupFetchAllParticipating();
+          primeGroupMetaCache(groups);
           const groupList = Object.values(groups).map((g) => ({
             id: g.id,
             name: g.subject,
@@ -231,7 +234,7 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
         } catch {
           // non-blocking
         }
-      }, 4000);
+      }, 800);
     } else if (connection === 'close') {
       const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
       const errMsg = lastDisconnect?.error?.message || 'Connection closed';
@@ -339,19 +342,30 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
     }
   });
 
+  sock.ev.on('group-participants.update', async (update) => {
+    if (socketToken !== activeSocketToken || sock !== currentSock) {
+      return;
+    }
+    try {
+      await handleGroupParticipantsUpdate(sock, update);
+    } catch (err: any) {
+      console.error('Error in group-participants.update handler:', err?.message || err);
+    }
+  });
+
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (socketToken !== activeSocketToken || sock !== currentSock) {
       return;
     }
     if (type === 'notify' && Array.isArray(messages)) {
       botState.messagesChecked += messages.length;
-      for (const msg of messages) {
-        try {
-          await processIncomingMessage(sock, msg);
-        } catch (err: any) {
-          console.error('Error processing group message in moderation engine:', err.message);
-        }
-      }
+      await Promise.allSettled(
+        messages.map((msg) =>
+          processIncomingMessage(sock, msg).catch((err: any) => {
+            console.error('Error processing group message in moderation engine:', err?.message || err);
+          })
+        )
+      );
     }
   });
 }
