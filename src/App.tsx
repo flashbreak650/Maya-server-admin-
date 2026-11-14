@@ -363,7 +363,17 @@ export default function App() {
   const [pairingMode, setPairingMode] = useState<'code' | 'qr'>('code');
   const [sessionPassphrase, setSessionPassphrase] = useState('');
   const [isTransferringSession, setIsTransferringSession] = useState(false);
+  const [showSessionPasteBox, setShowSessionPasteBox] = useState(false);
+  const [sessionPasteText, setSessionPasteText] = useState('');
   const sessionFileInputRef = useRef<HTMLInputElement | null>(null);
+  const sessionCardRef = useRef<HTMLDivElement | null>(null);
+
+  const openSessionBackupSection = () => {
+    setActivePage('pairing');
+    setTimeout(() => {
+      sessionCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 120);
+  };
 
   // Stats
   const [overview, setOverview] = useState({
@@ -1001,10 +1011,10 @@ export default function App() {
     }
   };
 
-  const handleExportSession = async () => {
+  const handleExportSession = async (copyOnly = false) => {
     const pass = sessionPassphrase.trim();
     if (pass.length < 4) {
-      showNotification(isBn ? 'কমপক্ষে ৪ অক্ষরের পাসওয়ার্ড/পিন দিন' : 'Enter at least a 4-char passphrase');
+      showNotification(isBn ? 'আগে কমপক্ষে ৪ অক্ষরের পাসওয়ার্ড/পিন দিন' : 'Enter at least a 4-char passphrase first');
       return;
     }
     setIsTransferringSession(true);
@@ -1015,6 +1025,17 @@ export default function App() {
         return;
       }
       const jsonStr = JSON.stringify(res.bundle, null, 2);
+      if (copyOnly) {
+        try {
+          await navigator.clipboard.writeText(jsonStr);
+          showNotification(isBn ? 'সেশন ব্যাকআপ কোড কপি হয়েছে! নিরাপদ জায়গায় সেভ করে রাখুন।' : 'Encrypted backup copied to clipboard!');
+        } catch {
+          setSessionPasteText(jsonStr);
+          setShowSessionPasteBox(true);
+          showNotification(isBn ? 'নিচের বক্স থেকে ব্যাকআপ কোড কপি করে নিন।' : 'Copy the backup text from the box below.');
+        }
+        return;
+      }
       const blob = new Blob([jsonStr], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -1023,10 +1044,35 @@ export default function App() {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      showNotification(isBn ? 'সেশন ব্যাকআপ ডাউনলোড হয়েছে!' : 'Session backup downloaded!');
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      showNotification(isBn ? 'সেশন ব্যাকআপ ফাইল ডাউনলোড হয়েছে!' : 'Session backup downloaded!');
     } catch (err: any) {
-      showNotification(err?.message || (isBn ? 'ব্যাকআপ ডাউনলোড ব্যর্থ' : 'Export failed'));
+      showNotification(err?.message || (isBn ? 'ব্যাকআপ ডাউনলোড ব্যর্থ — "ব্যাকআপ কপি" বাটন ব্যবহার করুন' : 'Export failed — try Copy Backup'));
+    } finally {
+      setIsTransferringSession(false);
+    }
+  };
+
+  const restoreSessionFromJsonText = async (text: string) => {
+    const pass = sessionPassphrase.trim();
+    if (pass.length < 4) {
+      showNotification(isBn ? 'রিস্টোর করতে একই ৪+ অক্ষরের পাসওয়ার্ড/পিন দিন' : 'Enter the 4+ char passphrase first');
+      return;
+    }
+    setIsTransferringSession(true);
+    try {
+      const bundle = JSON.parse(text.trim());
+      const res = await callApi('/api/whatsapp/session-import', 'POST', { passphrase: pass, bundle });
+      if (!res?.success) {
+        showNotification(res?.error || (isBn ? 'সেশন রিস্টোর ব্যর্থ হয়েছে' : 'Session import failed'));
+        return;
+      }
+      setSessionPasteText('');
+      setShowSessionPasteBox(false);
+      showNotification(res.message || (isBn ? 'সেশন রিস্টোর সম্পন্ন! কানেক্ট হচ্ছে...' : 'Session restored! Connecting...'));
+      await checkStatus();
+    } catch (err: any) {
+      showNotification(err?.message || (isBn ? 'ব্যাকআপ ডাটা সঠিক নয়' : 'Invalid backup data'));
     } finally {
       setIsTransferringSession(false);
     }
@@ -1034,27 +1080,10 @@ export default function App() {
 
   const handleImportSession = async (file: File | undefined) => {
     if (!file) return;
-    const pass = sessionPassphrase.trim();
-    if (pass.length < 4) {
-      showNotification(isBn ? 'রিস্টোর করতে একই ৪+ অক্ষরের পাসওয়ার্ড/পিন দিন' : 'Enter the 4+ char passphrase first');
-      if (sessionFileInputRef.current) sessionFileInputRef.current.value = '';
-      return;
-    }
-    setIsTransferringSession(true);
     try {
       const text = await file.text();
-      const bundle = JSON.parse(text);
-      const res = await callApi('/api/whatsapp/session-import', 'POST', { passphrase: pass, bundle });
-      if (!res?.success) {
-        showNotification(res?.error || (isBn ? 'সেশন রিস্টোর ব্যর্থ হয়েছে' : 'Session import failed'));
-        return;
-      }
-      showNotification(res.message || (isBn ? 'সেশন রিস্টোর সম্পন্ন! কানেক্ট হচ্ছে...' : 'Session restored! Connecting...'));
-      await checkStatus();
-    } catch (err: any) {
-      showNotification(err?.message || (isBn ? 'ব্যাকআপ ফাইল পড়া যায়নি' : 'Invalid backup file'));
+      await restoreSessionFromJsonText(text);
     } finally {
-      setIsTransferringSession(false);
       if (sessionFileInputRef.current) sessionFileInputRef.current.value = '';
     }
   };
@@ -1501,12 +1530,20 @@ export default function App() {
 
                     <div className="hero-actions">
                       {liveStatus.online ? (
-                        <button
-                          className="btn bg-rose-600 hover:bg-rose-700 text-white"
-                          onClick={handleDisconnect}
-                        >
-                          <LogOut size={13} /> {t.disconnectWa}
-                        </button>
+                        <>
+                          <button
+                            className="btn bg-rose-600 hover:bg-rose-700 text-white"
+                            onClick={handleDisconnect}
+                          >
+                            <LogOut size={13} /> {t.disconnectWa}
+                          </button>
+                          <button
+                            className="btn bg-white/20 text-white"
+                            onClick={openSessionBackupSection}
+                          >
+                            <Download size={13} /> {isBn ? 'সেশন ব্যাকআপ' : 'Session Backup'}
+                          </button>
+                        </>
                       ) : (
                         <button className="btn" onClick={() => setActivePage('pairing')}>
                           <LinkIcon size={13} /> {t.connectWa}
@@ -2504,6 +2541,12 @@ export default function App() {
                     <button className="btn primary px-4 py-2 text-xs font-bold shadow-sm" onClick={() => setActivePage('home')}>
                       <LayoutDashboard size={14} /> {isBn ? 'ড্যাশবোর্ডে যান' : 'Go to Dashboard'}
                     </button>
+                    <button
+                      className="btn soft px-4 py-2 text-xs font-bold"
+                      onClick={() => sessionCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                    >
+                      <Download size={14} /> {isBn ? 'সেশন ব্যাকআপ নিন' : 'Backup Session'}
+                    </button>
                     <button className="btn outline px-4 py-2 text-xs font-semibold" onClick={checkStatus}>
                       <RefreshCw size={14} /> {isBn ? 'স্ট্যাটাস রিফ্রেশ' : 'Sync Status'}
                     </button>
@@ -2636,13 +2679,13 @@ export default function App() {
               )}
 
               {/* Encrypted Session Transfer Card (Export from Google / Import to Any Host without Re-pairing) */}
-              <div className="card mt-4">
+              <div ref={sessionCardRef} className="card mt-4 border border-emerald-200">
                 <div className="card-head">
                   <div>
                     <h3>{isBn ? 'সেশন ব্যাকআপ ও অন্য হোস্টিংয়ে স্থানান্তর' : 'Session Transfer (Zero-Ban Migration)'}</h3>
                     <p>
                       {isBn
-                        ? 'এখানে (Google সার্ভারে) কানেক্ট করা সেশন পাসওয়ার্ড দিয়ে ডাউনলোড করে অন্য যেকোনো হোস্টিংয়ে আপলোড করুন—নতুন কোড ছাড়াই সরাসরি চলবে।'
+                        ? 'এখানে (Google সার্ভারে) কানেক্ট করা সেশন পাসওয়ার্ড দিয়ে ডাউনলোড বা কপি করে অন্য যেকোনো হোস্টিংয়ে দিন—নতুন কোড ছাড়াই সরাসরি চলবে।'
                         : 'Export your verified session from Google and restore it on any hosting without sending a new pairing code request.'}
                     </p>
                   </div>
@@ -2667,12 +2710,21 @@ export default function App() {
 
                   <div className="flex flex-wrap gap-2">
                     <button
-                      className="btn soft"
-                      onClick={handleExportSession}
-                      disabled={isTransferringSession || !liveStatus.online}
+                      className="btn primary"
+                      onClick={() => handleExportSession(false)}
+                      disabled={isTransferringSession}
                     >
                       <Download size={13} />{' '}
-                      {isBn ? 'সেশন ব্যাকআপ ডাউনলোড' : 'Download Session Backup'}
+                      {isBn ? 'ব্যাকআপ ফাইল ডাউনলোড' : 'Download Session Backup'}
+                    </button>
+
+                    <button
+                      className="btn soft"
+                      onClick={() => handleExportSession(true)}
+                      disabled={isTransferringSession}
+                    >
+                      <Copy size={13} />{' '}
+                      {isBn ? 'ব্যাকআপ কোড কপি' : 'Copy Backup Text'}
                     </button>
 
                     <button
@@ -2681,8 +2733,18 @@ export default function App() {
                       disabled={isTransferringSession}
                     >
                       <Upload size={13} />{' '}
-                      {isBn ? 'ব্যাকআপ থেকে কানেক্ট (Restore)' : 'Restore Session File'}
+                      {isBn ? 'ফাইল থেকে রিস্টোর' : 'Restore Session File'}
                     </button>
+
+                    <button
+                      className="btn outline"
+                      onClick={() => setShowSessionPasteBox((prev) => !prev)}
+                      disabled={isTransferringSession}
+                    >
+                      <FileText size={13} />{' '}
+                      {isBn ? 'পেস্ট করে রিস্টোর' : 'Restore by Paste'}
+                    </button>
+
                     <input
                       ref={sessionFileInputRef}
                       type="file"
@@ -2691,6 +2753,36 @@ export default function App() {
                       onChange={(e) => handleImportSession(e.target.files?.[0])}
                     />
                   </div>
+
+                  {showSessionPasteBox && (
+                    <div className="mt-2 p-3 bg-slate-50 border border-slate-200 space-y-2">
+                      <label className="block text-[11px] font-bold text-slate-700">
+                        {isBn ? 'কপি করা ব্যাকআপ JSON এখানে পেস্ট করুন:' : 'Paste Encrypted Backup JSON:'}
+                      </label>
+                      <textarea
+                        rows={4}
+                        value={sessionPasteText}
+                        onChange={(e) => setSessionPasteText(e.target.value)}
+                        placeholder='{"version":1,"alg":"aes-256-gcm",...}'
+                        className="w-full p-2 border border-gray-300 text-[11px] font-mono outline-none focus:border-emerald-500 bg-white"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          className="btn primary"
+                          onClick={() => restoreSessionFromJsonText(sessionPasteText)}
+                          disabled={isTransferringSession || !sessionPasteText.trim()}
+                        >
+                          <Check size={13} /> {isBn ? 'সেশন রিস্টোর করুন' : 'Restore Now'}
+                        </button>
+                        <button
+                          className="btn outline"
+                          onClick={() => setShowSessionPasteBox(false)}
+                        >
+                          {isBn ? 'বাতিল' : 'Cancel'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </section>
