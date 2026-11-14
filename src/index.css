@@ -105,10 +105,10 @@
 
 /* Compact Cards & Stats - Locked Width & Zero Horizontal Overflow */
 .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow);min-width:0;max-width:100%;margin-bottom:12px;overflow-wrap:anywhere;word-break:break-word}
-.card-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;min-width:0}
-.card-head > div{min-width:0}
+.card-head{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:12px;min-width:0}
+.card-head > div{min-width:0;flex:1 1 180px}
 .card-head h3{font-size:12.5px;font-weight:750}
-.card-head p{font-size:9.5px;color:var(--muted);margin-top:2px}
+.card-head p{font-size:9.5px;color:var(--muted);margin-top:2px;line-height:1.45}
 .symbol{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;flex-shrink:0}
 .symbol svg{width:16px}
 .sg{background:#e9f7ef;color:#0b9360}
@@ -168,6 +168,7 @@ td{font-size:10.5px;padding:9px 10px;border-bottom:1px solid #f0f3f1}
  .grid2{grid-template-columns:minmax(0,1fr);gap:10px}
  .form-grid{grid-template-columns:minmax(0,1fr)}
  .card{padding:12px}
+ .card-head > div{flex:1 1 100%}
  .mobile-nav{
   position:fixed;
   bottom:0;

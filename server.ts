@@ -25,6 +25,10 @@ import {
   getActivityLogs,
   getStats as getModerationStats,
   resetWarnings as resetAllWarnings,
+  resetSingleWarning,
+  getActiveWarnings,
+  getActiveGroupLocks,
+  unlockGroupManually,
   clearActivityLogs,
   loadDatabase,
   getActiveRestrictedUsers,
@@ -808,11 +812,77 @@ app.get('/api/moderation/logs', (req: Request, res: Response) => {
   res.json({ success: true, logs: getActivityLogs(limit) });
 });
 
+const resolveKnownGroupName = (groupId: string, currentName?: string): string => {
+  if (currentName && currentName !== 'Protected Group') return currentName;
+  const found = botState.groups.find((g) => g.id === groupId);
+  return found?.name || currentName || 'Protected Group';
+};
+
+// Active User Warnings & Single Reset Endpoints
+app.get('/api/moderation/warnings', (req: Request, res: Response) => {
+  const warnings = getActiveWarnings().map((w) => ({
+    ...w,
+    groupName: resolveKnownGroupName(w.groupId, w.groupName),
+  }));
+  res.json({ success: true, warnings });
+});
+
+app.post('/api/moderation/reset-warning', (req: Request, res: Response) => {
+  try {
+    const key = String(req.body?.key || '').trim();
+    if (!key) {
+      return res.status(400).json({ success: false, error: 'warning key is required' });
+    }
+    const removed = resetSingleWarning(key);
+    const warnings = getActiveWarnings().map((w) => ({
+      ...w,
+      groupName: resolveKnownGroupName(w.groupId, w.groupName),
+    }));
+    res.json({
+      success: true,
+      removed,
+      warnings,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Active 10-Min Group Locks & Manual Unlock Endpoints
+app.get('/api/moderation/group-locks', (req: Request, res: Response) => {
+  const groupLocks = getActiveGroupLocks().map((g) => ({
+    ...g,
+    groupName: resolveKnownGroupName(g.groupId, g.groupName),
+  }));
+  res.json({ success: true, groupLocks });
+});
+
+app.post('/api/moderation/unlock-group', async (req: Request, res: Response) => {
+  try {
+    const groupId = String(req.body?.groupId || '').trim();
+    if (!groupId) {
+      return res.status(400).json({ success: false, error: 'groupId is required' });
+    }
+    const unlocked = await unlockGroupManually(currentSock, groupId);
+    const groupLocks = getActiveGroupLocks().map((g) => ({
+      ...g,
+      groupName: resolveKnownGroupName(g.groupId, g.groupName),
+    }));
+    res.json({
+      success: true,
+      unlocked,
+      groupLocks,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Reset User Warnings Endpoint
 app.post('/api/moderation/reset-warnings', (req: Request, res: Response) => {
   try {
     resetAllWarnings();
-    res.json({ success: true, message: 'All user warnings reset successfully' });
+    res.json({ success: true, message: 'All user warnings reset successfully', warnings: [] });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }

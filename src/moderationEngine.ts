@@ -88,10 +88,15 @@ export interface UserWarning {
   count: number;
   lastViolation: number;
   violations: Array<{ timestamp: number; reason: string }>;
+  groupId?: string;
+  groupName?: string;
+  senderJid?: string;
+  senderPhone?: string;
 }
 
 export interface GroupLock {
   groupId: string;
+  groupName?: string;
   lockedUntil: number;
   originalSetting: string;
   reason: string;
@@ -376,6 +381,118 @@ export function getActivityLogs(limit = 50): ActivityLog[] {
 export function resetWarnings(): boolean {
   db.warnings = {};
   saveDatabase();
+  return true;
+}
+
+export function resetSingleWarning(warningKey: string): boolean {
+  if (!db.warnings || !db.warnings[warningKey]) return false;
+  delete db.warnings[warningKey];
+  saveDatabase();
+  return true;
+}
+
+export function getActiveWarnings() {
+  if (!db.warnings) return [];
+  const logLookupByGroupSender = new Map<string, { groupName?: string; senderPhone?: string }>();
+  const groupNameLookup = new Map<string, string>();
+  for (const log of db.activityLogs) {
+    if (log.groupId && log.groupName) {
+      groupNameLookup.set(log.groupId, log.groupName);
+    }
+    if (log.groupId && log.senderJid) {
+      logLookupByGroupSender.set(`${log.groupId}:${normalizeJid(log.senderJid)}`, {
+        groupName: log.groupName,
+        senderPhone: log.senderPhone,
+      });
+    }
+  }
+
+  return Object.entries(db.warnings)
+    .filter(([, w]) => w && w.count > 0)
+    .map(([key, w]) => {
+      const splitIdx = key.indexOf('@g.us:');
+      const parsedGroupId = w.groupId || (splitIdx !== -1 ? key.slice(0, splitIdx + 5) : key.split(':')[0] || '');
+      const parsedSenderJid = w.senderJid || (splitIdx !== -1 ? key.slice(splitIdx + 6) : key.slice(parsedGroupId.length + 1));
+      const logMeta = logLookupByGroupSender.get(`${parsedGroupId}:${normalizeJid(parsedSenderJid)}`);
+      const fallbackPhone = parsedSenderJid ? parsedSenderJid.split('@')[0].split(':')[0] : 'Unknown';
+
+      return {
+        key,
+        groupId: parsedGroupId,
+        groupName: w.groupName || logMeta?.groupName || groupNameLookup.get(parsedGroupId) || 'Protected Group',
+        senderJid: parsedSenderJid,
+        senderPhone: w.senderPhone || logMeta?.senderPhone || fallbackPhone,
+        count: w.count,
+        maxWarnings: 3,
+        lastViolation: w.lastViolation,
+        violations: (w.violations || []).slice(-5),
+      };
+    })
+    .sort((a, b) => b.lastViolation - a.lastViolation);
+}
+
+export function getActiveGroupLocks() {
+  if (!db.groupLocks) return [];
+  const now = Date.now();
+  const groupNameLookup = new Map<string, string>();
+  for (const log of db.activityLogs) {
+    if (log.groupId && log.groupName) {
+      groupNameLookup.set(log.groupId, log.groupName);
+    }
+  }
+
+  const active: Array<GroupLock & { groupName: string; remainingSeconds: number; remainingText: string }> = [];
+  for (const [groupId, lock] of Object.entries(db.groupLocks)) {
+    if (!lock) continue;
+    if (now >= lock.lockedUntil) continue;
+    const remainingSec = Math.max(0, Math.ceil((lock.lockedUntil - now) / 1000));
+    const mins = Math.floor(remainingSec / 60);
+    const secs = remainingSec % 60;
+    const remainingText = mins > 0 ? `${mins} মি. ${secs} সে.` : `${secs} সেকেন্ড`;
+    active.push({
+      ...lock,
+      groupId,
+      groupName: lock.groupName || groupNameLookup.get(groupId) || 'Protected Group',
+      remainingSeconds: remainingSec,
+      remainingText,
+    });
+  }
+  return active.sort((a, b) => a.lockedUntil - b.lockedUntil);
+}
+
+export async function unlockGroupManually(sock: WASocket | null, groupId: string): Promise<boolean> {
+  if (!db.groupLocks || !db.groupLocks[groupId]) return false;
+  const lock = db.groupLocks[groupId];
+  delete db.groupLocks[groupId];
+  saveDatabase();
+
+  let groupName = lock.groupName || 'Protected Group';
+  for (const log of db.activityLogs) {
+    if (log.groupId === groupId && log.groupName) {
+      groupName = log.groupName;
+      break;
+    }
+  }
+
+  if (sock && sock.authState?.creds?.registered) {
+    try {
+      await sock.groupSettingUpdate(groupId, 'not_announcement');
+      await safeSendMessage(sock, groupId, {
+        text: '✅ [WAGuard Security]\nঅ্যাডমিন ড্যাশবোর্ড থেকে গ্রুপটি আনলক করা হয়েছে। এখন সবাই স্বাভাবিকভাবে মেসেজ পাঠাতে পারবেন।',
+      });
+    } catch (err: any) {
+      console.error(`Manual unlock failed for ${groupId}:`, err?.message || err);
+    }
+  }
+
+  addActivityLog({
+    groupId,
+    groupName,
+    senderJid: 'ADMIN',
+    senderPhone: 'ADMIN',
+    action: 'unlocked',
+    reason: 'ড্যাশবোর্ড থেকে ম্যানুয়ালি গ্রুপ আনলক করা হয়েছে।',
+  });
   return true;
 }
 
@@ -1573,9 +1690,17 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
         count: 0,
         lastViolation: Date.now(),
         violations: [],
+        groupId: remoteJid,
+        groupName: groupSubject,
+        senderJid: canonicalSender,
+        senderPhone: cleanPhone,
       };
     }
 
+    db.warnings[warningKey].groupId = remoteJid;
+    db.warnings[warningKey].groupName = groupSubject;
+    db.warnings[warningKey].senderJid = canonicalSender;
+    db.warnings[warningKey].senderPhone = cleanPhone;
     db.warnings[warningKey].count++;
     db.warnings[warningKey].lastViolation = Date.now();
     db.warnings[warningKey].violations.push({

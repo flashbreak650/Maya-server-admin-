@@ -141,6 +141,28 @@ interface ActivityLog {
   warningCount?: number;
 }
 
+interface ActiveWarningItem {
+  key: string;
+  groupId: string;
+  groupName: string;
+  senderJid: string;
+  senderPhone: string;
+  count: number;
+  maxWarnings: number;
+  lastViolation: number;
+  violations: Array<{ timestamp: number; reason: string }>;
+}
+
+interface ActiveGroupLockItem {
+  groupId: string;
+  groupName: string;
+  lockedUntil: number;
+  originalSetting: string;
+  reason: string;
+  remainingSeconds: number;
+  remainingText: string;
+}
+
 export default function App() {
   const [activePage, setActivePage] = useState<'home' | 'security' | 'maya' | 'integrations' | 'pairing' | 'groups'>('home');
   const [isStaticHost] = useState(() => {
@@ -420,15 +442,40 @@ export default function App() {
   const [customBadwordsText, setCustomBadwordsText] = useState('');
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [restrictedUsers, setRestrictedUsers] = useState<any[]>([]);
+  const [activeWarnings, setActiveWarnings] = useState<ActiveWarningItem[]>([]);
+  const [groupLocks, setGroupLocks] = useState<ActiveGroupLockItem[]>([]);
+  const [logFilter, setLogFilter] = useState<'all' | 'warned' | 'blocks' | 'deleted' | 'error'>('all');
   const [isLogsLoading, setIsLogsLoading] = useState(false);
 
-  // Live countdown timer for active restricted users dashboard
+  const warningsCardRef = useRef<HTMLDivElement | null>(null);
+  const blocksCardRef = useRef<HTMLDivElement | null>(null);
+  const logsCardRef = useRef<HTMLDivElement | null>(null);
+  const rulesCardRef = useRef<HTMLDivElement | null>(null);
+
+  const jumpToSecuritySection = (
+    target: 'warnings' | 'blocks' | 'logs' | 'rules',
+    nextLogFilter?: 'all' | 'warned' | 'blocks' | 'deleted' | 'error'
+  ) => {
+    if (nextLogFilter) setLogFilter(nextLogFilter);
+    setActivePage('security');
+    setTimeout(() => {
+      const refMap = {
+        warnings: warningsCardRef,
+        blocks: blocksCardRef,
+        logs: logsCardRef,
+        rules: rulesCardRef,
+      };
+      refMap[target].current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
+  };
+
+  // Live countdown timer for active restricted users & 10-min group locks
   useEffect(() => {
     const timer = setInterval(() => {
+      const now = Date.now();
       setRestrictedUsers((prev) => {
         if (!prev || prev.length === 0) return prev;
-        const now = Date.now();
-        const updated = prev
+        return prev
           .filter((u) => u.expiresAt > now)
           .map((u) => {
             const remainingSec = Math.max(0, Math.ceil((u.expiresAt - now) / 1000));
@@ -437,7 +484,18 @@ export default function App() {
             const remainingText = mins > 0 ? `${mins} মি. ${secs} সে.` : `${secs} সেকেন্ড`;
             return { ...u, remainingSeconds: remainingSec, remainingText };
           });
-        return updated;
+      });
+      setGroupLocks((prev) => {
+        if (!prev || prev.length === 0) return prev;
+        return prev
+          .filter((g) => g.lockedUntil > now)
+          .map((g) => {
+            const remainingSec = Math.max(0, Math.ceil((g.lockedUntil - now) / 1000));
+            const mins = Math.floor(remainingSec / 60);
+            const secs = remainingSec % 60;
+            const remainingText = mins > 0 ? `${mins} মি. ${secs} সে.` : `${secs} সেকেন্ড`;
+            return { ...g, remainingSeconds: remainingSec, remainingText };
+          });
       });
     }, 1000);
     return () => clearInterval(timer);
@@ -639,7 +697,13 @@ export default function App() {
   const loadDashboard = async () => {
     if (isStaticHost && !baileysUrlRef.current.trim()) return;
     try {
-      const data = await callApi('/api/dashboard');
+      const [data, warningsRes, locksRes, restrictedRes, logsRes] = await Promise.all([
+        callApi('/api/dashboard'),
+        callApi('/api/moderation/warnings').catch(() => null),
+        callApi('/api/moderation/group-locks').catch(() => null),
+        callApi('/api/moderation/restricted-users').catch(() => null),
+        callApi('/api/moderation/logs?limit=50').catch(() => null),
+      ]);
       if (data.overview) {
         setOverview(data.overview);
       }
@@ -652,6 +716,10 @@ export default function App() {
         if (s.openrouterApiKey) setOpenrouterKey(s.openrouterApiKey);
         if (s.geminiModel) setGeminiModel(s.geminiModel);
       }
+      if (warningsRes?.warnings) setActiveWarnings(warningsRes.warnings);
+      if (locksRes?.groupLocks) setGroupLocks(locksRes.groupLocks);
+      if (restrictedRes?.restrictedUsers) setRestrictedUsers(restrictedRes.restrictedUsers);
+      if (logsRes?.logs) setActivityLogs(logsRes.logs);
       await checkStatus();
     } catch {
       // non-blocking
@@ -661,10 +729,12 @@ export default function App() {
   const loadModerationData = async () => {
     setIsLogsLoading(true);
     try {
-      const [settingsRes, logsRes, restrictedRes] = await Promise.all([
+      const [settingsRes, logsRes, restrictedRes, warningsRes, locksRes] = await Promise.all([
         callApi('/api/moderation/settings'),
         callApi('/api/moderation/logs?limit=50'),
         callApi('/api/moderation/restricted-users'),
+        callApi('/api/moderation/warnings').catch(() => null),
+        callApi('/api/moderation/group-locks').catch(() => null),
       ]);
       if (settingsRes.settings) {
         const s = settingsRes.settings;
@@ -681,7 +751,13 @@ export default function App() {
       if (restrictedRes && restrictedRes.restrictedUsers) {
         setRestrictedUsers(restrictedRes.restrictedUsers);
       }
-      showNotification(isBn ? 'সেটিংস ও লগ প্রস্তুত' : 'Settings & Logs Synced');
+      if (warningsRes && warningsRes.warnings) {
+        setActiveWarnings(warningsRes.warnings);
+      }
+      if (locksRes && locksRes.groupLocks) {
+        setGroupLocks(locksRes.groupLocks);
+      }
+      showNotification(isBn ? 'সেটিংস, ওয়ার্নিং ও ব্লক তথ্য আপডেট হয়েছে' : 'Settings & Logs Synced');
     } catch (err: any) {
       showNotification((isBn ? 'ডাটা লোড ত্রুটি: ' : 'Failed to load data: ') + err.message);
     } finally {
@@ -702,6 +778,31 @@ export default function App() {
       }
     } catch (err: any) {
       showNotification((isBn ? 'Unrestrict ব্যর্থ: ' : 'Unrestrict failed: ') + err.message);
+    }
+  };
+
+  const handleResetSingleWarning = async (warningKey: string) => {
+    try {
+      const res = await callApi('/api/moderation/reset-warning', 'POST', { key: warningKey });
+      if (res.success) {
+        if (res.warnings) setActiveWarnings(res.warnings);
+        showNotification(isBn ? 'সদস্যের ওয়ার্নিং রিসেট করা হয়েছে!' : 'Member warning reset!');
+      }
+    } catch (err: any) {
+      showNotification((isBn ? 'রিসেট ব্যর্থ: ' : 'Reset failed: ') + err.message);
+    }
+  };
+
+  const handleUnlockGroup = async (groupId: string) => {
+    try {
+      const res = await callApi('/api/moderation/unlock-group', 'POST', { groupId });
+      if (res.success) {
+        if (res.groupLocks) setGroupLocks(res.groupLocks);
+        showNotification(isBn ? 'গ্রুপ আনলক করা হয়েছে!' : 'Group unlocked!');
+        loadModerationData();
+      }
+    } catch (err: any) {
+      showNotification((isBn ? 'আনলক ব্যর্থ: ' : 'Unlock failed: ') + err.message);
     }
   };
 
@@ -845,6 +946,7 @@ export default function App() {
   const resetAllWarnings = async () => {
     try {
       await callApi('/api/moderation/reset-warnings', 'POST');
+      setActiveWarnings([]);
       showNotification(isBn ? 'সকল Warning রিসেট করা হয়েছে!' : 'All warnings reset successfully!');
       loadDashboard();
     } catch (err: any) {
@@ -1584,6 +1686,85 @@ export default function App() {
                   </button>
                 </div>
               </div>
+
+              {/* Separate Quick Action Button Cards on Home for Mobile */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-3">
+                <button
+                  type="button"
+                  onClick={() => jumpToSecuritySection('warnings', 'warned')}
+                  className="text-left p-3 bg-white border border-amber-200 rounded-xl shadow-2xs hover:border-amber-400 transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 grid place-items-center">
+                      <AlertTriangle size={15} />
+                    </span>
+                    <span className="badge badge-amber">{activeWarnings.length}</span>
+                  </div>
+                  <div className="text-xs font-extrabold text-slate-900">
+                    {isBn ? 'সতর্কবার্তা (Warnings)' : 'Active Warnings'}
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
+                    {isBn ? 'কার কয়টা ওয়ার্নিং দেখুন' : 'View member warnings'}
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => jumpToSecuritySection('blocks', 'blocks')}
+                  className="text-left p-3 bg-white border border-rose-200 rounded-xl shadow-2xs hover:border-rose-400 transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 grid place-items-center">
+                      <Lock size={15} />
+                    </span>
+                    <span className="badge badge-red">{restrictedUsers.length + groupLocks.length}</span>
+                  </div>
+                  <div className="text-xs font-extrabold text-slate-900">
+                    {isBn ? '১০ মি. ব্লক তথ্য' : '10-Min Block Info'}
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
+                    {isBn ? 'ব্লক সদস্য ও গ্রুপ লক' : 'Active locks & timers'}
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => jumpToSecuritySection('logs', 'all')}
+                  className="text-left p-3 bg-white border border-blue-200 rounded-xl shadow-2xs hover:border-blue-400 transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 grid place-items-center">
+                      <Activity size={15} />
+                    </span>
+                    <span className="badge badge-blue">{activityLogs.length}</span>
+                  </div>
+                  <div className="text-xs font-extrabold text-slate-900">
+                    {isBn ? 'লাইভ লগ দেখুন' : 'Live Logs'}
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
+                    {isBn ? 'ডিলিট, কিক ও লক রেকর্ড' : 'Moderation activity'}
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={openSessionBackupSection}
+                  className="text-left p-3 bg-white border border-emerald-200 rounded-xl shadow-2xs hover:border-emerald-400 transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 grid place-items-center">
+                      <Download size={15} />
+                    </span>
+                    <span className="badge badge-green">ZIP/JSON</span>
+                  </div>
+                  <div className="text-xs font-extrabold text-slate-900">
+                    {isBn ? 'সেশন ব্যাকআপ' : 'Session Backup'}
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
+                    {isBn ? 'হোস্টিং ট্রান্সফার ফাইল' : 'Export / Restore bot'}
+                  </p>
+                </button>
+              </div>
             </section>
           )}
 
@@ -1595,7 +1776,7 @@ export default function App() {
                   <h1>{t.securityTitle}</h1>
                   <p>{t.securitySub}</p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <button className="btn outline" onClick={loadModerationData} disabled={isLogsLoading}>
                     <RefreshCw size={13} className={isLogsLoading ? 'animate-spin' : ''} />
                     <span className="btn-text">{t.refreshRules}</span>
@@ -1610,8 +1791,79 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Separate Quick Navigation Button Cards on Security Page */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-5">
+                <button
+                  type="button"
+                  onClick={() => jumpToSecuritySection('warnings')}
+                  className="text-left p-3 bg-white border border-amber-200 rounded-xl shadow-2xs hover:border-amber-400 transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <AlertTriangle size={16} className="text-amber-600" />
+                    <span className="badge badge-amber">{activeWarnings.length}</span>
+                  </div>
+                  <div className="text-xs font-extrabold text-slate-900">
+                    {isBn ? 'সতর্কবার্তা (Warnings)' : 'Active Warnings'}
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    {isBn ? 'সদস্যদের ১/৩, ২/৩ ওয়ার্নিং' : 'Member strike counters'}
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => jumpToSecuritySection('blocks')}
+                  className="text-left p-3 bg-white border border-rose-200 rounded-xl shadow-2xs hover:border-rose-400 transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <Lock size={16} className="text-rose-600" />
+                    <span className="badge badge-red">{restrictedUsers.length + groupLocks.length}</span>
+                  </div>
+                  <div className="text-xs font-extrabold text-slate-900">
+                    {isBn ? '১০ মি. ব্লক ও লক' : '10-Min Blocks'}
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    {isBn ? 'গ্রুপ লক ও মিউট তালিকা' : 'Timers & unblock'}
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => jumpToSecuritySection('logs')}
+                  className="text-left p-3 bg-white border border-blue-200 rounded-xl shadow-2xs hover:border-blue-400 transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <Activity size={16} className="text-blue-600" />
+                    <span className="badge badge-blue">{activityLogs.length}</span>
+                  </div>
+                  <div className="text-xs font-extrabold text-slate-900">
+                    {isBn ? 'মডারেশন লগ' : 'Moderation Logs'}
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    {isBn ? 'ব্লক ও ডিলিটের ইতিহাস' : 'Filter by category'}
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => jumpToSecuritySection('rules')}
+                  className="text-left p-3 bg-white border border-emerald-200 rounded-xl shadow-2xs hover:border-emerald-400 transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <ShieldCheck size={16} className="text-emerald-600" />
+                    <span className="badge badge-green">ON</span>
+                  </div>
+                  <div className="text-xs font-extrabold text-slate-900">
+                    {isBn ? 'সিকিউরিটি রুলস' : 'Security Rules'}
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-0.5">
+                    {isBn ? 'স্টিকার, লিংক ও গালি ফিল্টার' : 'Toggle protection rules'}
+                  </p>
+                </button>
+              </div>
+
               {/* CATEGORY A: SECURITY & PROTECTION */}
-              <div className="category-system-header mt-8 mb-4 px-1">
+              <div ref={rulesCardRef} className="category-system-header mt-6 mb-4 px-1">
                  <div className="flex items-center gap-2 mb-1">
                     <div className="w-1.5 h-1.5  bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
                     <span className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.2em]">System A</span>
@@ -1849,86 +2101,290 @@ export default function App() {
                 </div>
               </div>
 
-              {/* ACTIVE RESTRICTED USERS DASHBOARD CARD */}
-              <div className="card mt-4 border-amber-500/30 bg-amber-500/5">
+              {/* DEDICATED ACTIVE WARNINGS CARD (Mobile-First Card Grid) */}
+              <div ref={warningsCardRef} className="card mt-4 border-amber-300 bg-white">
                 <div className="card-head">
                   <div>
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <h3 className="font-extrabold text-[13px] text-amber-900">
-                        {isBn ? 'সক্রিয় সাময়িক রেস্ট্রিকশনপ্রাপ্ত সদস্য (Active Restricted Users)' : 'Active Restricted Users Dashboard'}
+                        {isBn ? 'সক্রিয় সতর্কবার্তা তালিকা (Active Member Warnings)' : 'Active Member Warnings'}
                       </h3>
-                      <span className="badge badge-amber">{restrictedUsers.length}</span>
-                      {renderInfoBtn('antiStickerSpam')}
+                      <span className="badge badge-amber">{activeWarnings.length}</span>
+                      {renderInfoBtn('warningManagement')}
                     </div>
-                    <p className="text-xs text-amber-800/80">
-                      {isBn ? 'অতিরিক্ত স্টিকার স্প্যাম করার কারণে ১০ মিনিটের জন্য মেসেজিং রেস্ট্রিকশনে থাকা সদস্যবৃন্দ' : 'Members temporarily restricted for 10 minutes due to sticker spam'}
+                    <p>
+                      {isBn
+                        ? 'প্রতিটি সদস্যের ১/৩, ২/৩ ও ৩/৩ ওয়ার্নিং এবং কোন নিয়ম ভঙ্গের কারণে ওয়ার্নিং হয়েছে তা এখানে দেখা যাবে।'
+                        : 'Live 1/3, 2/3, 3/3 strike details per member across protected groups.'}
                     </p>
                   </div>
-                  <div className="symbol so">
-                    <UserX size={16} />
+                  <div className="flex flex-wrap gap-2">
+                    <button className="btn outline" onClick={loadModerationData} disabled={isLogsLoading}>
+                      <RefreshCw size={12} /> {isBn ? 'রিফ্রেশ' : 'Refresh'}
+                    </button>
+                    <button className="btn danger" onClick={resetAllWarnings}>
+                      <RotateCcw size={12} /> {isBn ? 'সব রিসেট' : 'Reset All'}
+                    </button>
                   </div>
                 </div>
 
-                <div className="tablewrap mt-3">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>{isBn ? 'সদস্যের নাম / নম্বর' : 'MEMBER'}</th>
-                        <th>{isBn ? 'গ্রুপ নাম' : 'GROUP'}</th>
-                        <th>{isBn ? 'কারণ' : 'REASON'}</th>
-                        <th>{isBn ? 'শুরু সময়' : 'START TIME'}</th>
-                        <th>{isBn ? 'অবশিষ্ট সময় (LIVE)' : 'REMAINING'}</th>
-                        <th>{isBn ? 'স্ট্যাটাস' : 'STATUS'}</th>
-                        <th>{isBn ? 'অ্যাকশন' : 'ACTION'}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {restrictedUsers.length > 0 ? (
-                        restrictedUsers.map((user) => (
-                          <tr key={`${user.groupId}:${user.senderJid}`}>
-                            <td className="font-mono text-xs font-bold text-slate-800 whitespace-nowrap">
-                              @{user.senderPhone}
-                            </td>
-                            <td className="text-xs font-medium text-slate-700">
-                              {user.groupName || 'Protected Group'}
-                            </td>
-                            <td className="text-xs text-rose-700 font-medium">
-                              {user.reason || 'Sticker Spam'}
-                            </td>
-                            <td className="text-[10px] text-slate-500 whitespace-nowrap">
-                              {new Date(user.restrictedAt).toLocaleTimeString()}
-                            </td>
-                            <td className="whitespace-nowrap font-mono text-xs font-bold text-amber-700">
-                              <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 px-2 py-0.5 border border-amber-300">
-                                <Clock size={11} className="animate-spin text-amber-600" />
-                                {user.remainingText || `${Math.ceil((user.expiresAt - Date.now()) / 1000)}s`}
+                {activeWarnings.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 mt-2">
+                    {activeWarnings.map((w) => (
+                      <div
+                        key={w.key}
+                        className="p-3 rounded-xl border border-amber-200 bg-amber-50/40 flex flex-col gap-2"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-mono text-xs font-extrabold text-slate-900 break-all">
+                                @{w.senderPhone}
                               </span>
-                            </td>
-                            <td>
-                              <span className="badge badge-red">
-                                Restricted
-                              </span>
-                            </td>
-                            <td>
-                              <button
-                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold transition-all shadow-xs shrink-0 cursor-pointer"
-                                onClick={() => handleManualUnmute(user.groupId, user.senderJid)}
+                              <span
+                                className={`badge ${
+                                  w.count >= 3 ? 'badge-red' : 'badge-amber'
+                                }`}
                               >
-                                {isBn ? 'Unrestrict' : 'Unrestrict'}
-                              </button>
-                            </td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={7} className="empty py-4 text-xs text-slate-500 text-center">
-                            {isBn ? 'বর্তমানে কোনো সদস্য রেস্ট্রিকশন তালিকায় নেই।' : 'No members currently restricted.'}
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+                                {isBn ? `সতর্কতা ${w.count}/${w.maxWarnings}` : `Strike ${w.count}/${w.maxWarnings}`}
+                              </span>
+                            </div>
+                            <p className="text-[11px] font-bold text-slate-700 mt-1 break-words">
+                              {isBn ? 'গ্রুপ:' : 'Group:'} {w.groupName}
+                            </p>
+                            <p className="text-[10px] text-slate-500">
+                              {isBn ? 'সর্বশেষ:' : 'Last:'} {new Date(w.lastViolation).toLocaleString()}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn outline shrink-0"
+                            onClick={() => handleResetSingleWarning(w.key)}
+                          >
+                            <RotateCcw size={12} /> {isBn ? 'রিসেট' : 'Reset'}
+                          </button>
+                        </div>
+
+                        {w.violations && w.violations.length > 0 && (
+                          <div className="pt-2 border-t border-amber-200/70 space-y-1">
+                            {w.violations.map((v, idx) => (
+                              <div key={idx} className="text-[11px] text-slate-700 flex items-start justify-between gap-2">
+                                <span className="font-medium break-words">• {v.reason}</span>
+                                <span className="text-[10px] text-slate-500 shrink-0">
+                                  {new Date(v.timestamp).toLocaleTimeString()}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-center space-y-2">
+                    <p className="text-xs text-slate-600">
+                      {isBn
+                        ? 'বর্তমানে কোনো সদস্যের পেন্ডিং ওয়ার্নিং (১/৩ বা ২/৩) নেই। কেউ নিয়ম ভঙ্গ করলে সাথে সাথে এখানে কার্ড আকারে দেখাবে।'
+                        : 'No active pending warnings right now.'}
+                    </p>
+                    <button
+                      type="button"
+                      className="btn soft"
+                      onClick={() => jumpToSecuritySection('logs', 'warned')}
+                    >
+                      <AlertTriangle size={12} /> {isBn ? 'পূর্বের ওয়ার্নিং লগ দেখুন' : 'View Warning History'}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* DEDICATED 10-MINUTE GROUP LOCKS & RESTRICTED MEMBERS CARDS */}
+              <div ref={blocksCardRef} className="card mt-4 border-rose-300/70 bg-white">
+                <div className="card-head">
+                  <div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <h3 className="font-extrabold text-[13px] text-rose-900">
+                        {isBn ? '১০ মিনিট গ্রুপ ব্লক ও সদস্য রেস্ট্রিকশন তথ্য' : '10-Minute Group Locks & Member Blocks'}
+                      </h3>
+                      <span className="badge badge-red">{restrictedUsers.length + groupLocks.length}</span>
+                      {renderInfoBtn('antiStickerSpam')}
+                    </div>
+                    <p>
+                      {isBn
+                        ? 'স্টিকার স্প্যাম বা নিয়ম ভঙ্গের কারণে কোন গ্রুপ লক হয়েছে বা কোন সদস্য ১০ মিনিটের ব্লক খেয়েছে তার পূর্ণাঙ্গ তথ্য ও লাইভ টাইমার।'
+                        : 'Live timers, blocked group/member details, manual unlock buttons, and 10-min block history.'}
+                    </p>
+                  </div>
+                  <button className="btn outline" onClick={loadModerationData} disabled={isLogsLoading}>
+                    <RefreshCw size={12} /> {isBn ? 'আপডেট' : 'Refresh'}
+                  </button>
                 </div>
+
+                {/* Part 1: Active 10-Minute Whole Group Locks */}
+                <div className="mt-2">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] font-extrabold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                      <Lock size={13} className="text-rose-600" />
+                      {isBn ? 'সক্রিয় ১০ মিনিট গ্রুপ লক (Group Locks)' : 'Active 10-Min Group Locks'}
+                    </span>
+                    <span className="badge badge-amber">{groupLocks.length}</span>
+                  </div>
+
+                  {groupLocks.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 mb-4">
+                      {groupLocks.map((lock) => (
+                        <div
+                          key={lock.groupId}
+                          className="p-3 rounded-xl border border-rose-200 bg-rose-50/50 space-y-2"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <h4 className="text-xs font-extrabold text-slate-900 break-words">
+                                {lock.groupName}
+                              </h4>
+                              <p className="text-[11px] text-rose-700 font-semibold mt-0.5 break-words">
+                                {lock.reason}
+                              </p>
+                            </div>
+                            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-100 text-amber-900 text-[11px] font-mono font-bold shrink-0">
+                              <Clock size={11} /> {lock.remainingText}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2 pt-2 border-t border-rose-200/70">
+                            <span className="text-[10px] text-slate-500">
+                              {isBn ? 'লক শেষ:' : 'Ends:'} {new Date(lock.lockedUntil).toLocaleTimeString()}
+                            </span>
+                            <button
+                              type="button"
+                              className="btn primary"
+                              onClick={() => handleUnlockGroup(lock.groupId)}
+                            >
+                              <CheckCircle2 size={12} /> {isBn ? 'এখনই আনলক করুন' : 'Unlock Group'}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-600 mb-4">
+                      {isBn ? 'বর্তমানে কোনো সম্পূর্ণ গ্রুপ ১০ মিনিটের লকে নেই।' : 'No groups are currently locked.'}
+                    </div>
+                  )}
+                </div>
+
+                {/* Part 2: Active 10-Minute Restricted Members (Mobile Card Grid instead of cramped table) */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] font-extrabold text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                      <UserX size={13} className="text-amber-600" />
+                      {isBn ? 'সক্রিয় ১০ মিনিট সদস্য ব্লক (Restricted Members)' : 'Active 10-Min Member Restrictions'}
+                    </span>
+                    <span className="badge badge-red">{restrictedUsers.length}</span>
+                  </div>
+
+                  {restrictedUsers.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                      {restrictedUsers.map((user) => (
+                        <div
+                          key={`${user.groupId}:${user.senderJid}`}
+                          className="p-3 rounded-xl border border-amber-300 bg-amber-50/60 flex flex-col gap-2"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-mono text-xs font-extrabold text-slate-900 break-all">
+                                  @{user.senderPhone}
+                                </span>
+                                <span className="badge badge-red">10-Min Block</span>
+                              </div>
+                              <p className="text-[11px] font-bold text-slate-700 mt-1 break-words">
+                                {isBn ? 'গ্রুপ:' : 'Group:'} {user.groupName || 'Protected Group'}
+                              </p>
+                            </div>
+                            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-100 text-amber-900 text-[11px] font-mono font-bold border border-amber-300 shrink-0">
+                              <Clock size={11} />
+                              {user.remainingText || `${Math.ceil((user.expiresAt - Date.now()) / 1000)}s`}
+                            </span>
+                          </div>
+
+                          <p className="text-[11px] text-rose-700 font-semibold break-words">
+                            {isBn ? 'কারণ:' : 'Reason:'} {user.reason || 'Sticker Spam'}
+                          </p>
+
+                          <div className="flex items-center justify-between gap-2 pt-2 border-t border-amber-200/80 flex-wrap">
+                            <span className="text-[10px] text-slate-600">
+                              {isBn ? 'শুরু:' : 'Start:'} {new Date(user.restrictedAt).toLocaleTimeString()} • {isBn ? 'বার:' : 'Count:'} {user.violationCount || 1}
+                            </span>
+                            <button
+                              type="button"
+                              className="btn primary"
+                              onClick={() => handleManualUnmute(user.groupId, user.senderJid)}
+                            >
+                              <CheckCircle2 size={12} /> {isBn ? 'ব্লক তুলুন (Unrestrict)' : 'Unrestrict'}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-600">
+                      {isBn ? 'এই মুহূর্তে কোনো সদস্য ১০ মিনিটের ব্লকে নেই।' : 'No members currently restricted.'}
+                    </div>
+                  )}
+                </div>
+
+                {/* Part 3: Recent 10-Minute Block History (so info stays visible even after 10 mins expire!) */}
+                {(() => {
+                  const blockHistory = activityLogs
+                    .filter((l) => l.action === 'restricted' || l.action === 'locked' || l.action === 'unmuted' || l.action === 'unlocked')
+                    .slice(0, 8);
+                  if (blockHistory.length === 0) return null;
+                  return (
+                    <div className="mt-4 pt-3 border-t border-slate-200">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[11px] font-extrabold text-slate-700">
+                          {isBn ? 'সাম্প্রতিক ১০ মিনিট ব্লকের ইতিহাস' : 'Recent 10-Min Block History'}
+                        </span>
+                        <button
+                          type="button"
+                          className="text-[11px] font-bold text-emerald-700 cursor-pointer"
+                          onClick={() => jumpToSecuritySection('logs', 'blocks')}
+                        >
+                          {isBn ? 'সব দেখুন →' : 'View All →'}
+                        </button>
+                      </div>
+                      <div className="space-y-2">
+                        {blockHistory.map((item) => (
+                          <div
+                            key={item.id}
+                            className="p-2.5 rounded-lg border border-slate-200 bg-slate-50/70 flex flex-col gap-1"
+                          >
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className={`badge ${item.action === 'unmuted' || item.action === 'unlocked' ? 'badge-green' : 'badge-red'}`}>
+                                  {item.action === 'restricted'
+                                    ? isBn ? '১০ মি. ব্লক' : '10M BLOCK'
+                                    : item.action === 'locked'
+                                    ? isBn ? 'গ্রুপ লক' : 'GROUP LOCK'
+                                    : isBn ? 'আনব্লক/আনলক' : 'UNLOCKED'}
+                                </span>
+                                <span className="font-mono text-[11px] font-bold text-slate-800">
+                                  @{item.senderPhone || item.senderJid}
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-slate-500">
+                                {new Date(item.timestamp).toLocaleTimeString()}
+                              </span>
+                            </div>
+                            <p className="text-[11px] font-semibold text-slate-700 break-words">
+                              {item.groupName || 'Protected Group'} — {item.reason}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* CATEGORY C: MESSAGE MODERATION */}
@@ -2100,7 +2556,7 @@ export default function App() {
               </div>
 
               {/* CATEGORY E: LOGS & STATUS */}
-              <div className="category-system-header mt-8 mb-4 px-1">
+              <div ref={logsCardRef} className="category-system-header mt-8 mb-4 px-1">
                  <div className="flex items-center gap-2 mb-1">
                     <div className="w-1.5 h-1.5  bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
                     <span className="text-[10px] font-black text-blue-600 uppercase tracking-[0.2em]">System E</span>
@@ -2117,7 +2573,7 @@ export default function App() {
                     </div>
                     <p>{t.activitySub}</p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <button className="btn outline" onClick={loadModerationData}>
                       <RefreshCw size={13} /> {t.refreshRules}
                     </button>
@@ -2127,71 +2583,127 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="tablewrap">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>TIME</th>
-                        <th>GROUP</th>
-                        <th>SENDER</th>
-                        <th>ACTION</th>
-                        <th>REASON / DETAILS</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {activityLogs.length > 0 ? (
-                        activityLogs.map((log) => (
-                          <tr key={log.id}>
-                            <td style={{ whiteSpace: 'nowrap', fontSize: '10px', color: '#64748b' }}>
-                              {new Date(log.timestamp).toLocaleTimeString()}
-                            </td>
-                            <td>
-                              <b>{log.groupName || log.groupId}</b>
-                            </td>
-                            <td>
-                              <span className="font-mono text-xs text-gray-700">
-                                {log.senderPhone ? `@${log.senderPhone}` : log.senderJid}
-                              </span>
-                            </td>
-                            <td>
+                {/* Separate Filter Button Cards for Mobile */}
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {[
+                    { id: 'all', label: isBn ? `সবগুলো (${activityLogs.length})` : `All (${activityLogs.length})` },
+                    {
+                      id: 'warned',
+                      label: isBn
+                        ? `⚠️ ওয়ার্নিং (${activityLogs.filter((l) => l.action === 'warned').length})`
+                        : `Warnings (${activityLogs.filter((l) => l.action === 'warned').length})`,
+                    },
+                    {
+                      id: 'blocks',
+                      label: isBn
+                        ? `🔒 ১০ মি. ব্লক (${activityLogs.filter((l) => l.action === 'restricted' || l.action === 'locked' || l.action === 'unmuted' || l.action === 'unlocked').length})`
+                        : `10M Blocks (${activityLogs.filter((l) => l.action === 'restricted' || l.action === 'locked' || l.action === 'unmuted' || l.action === 'unlocked').length})`,
+                    },
+                    {
+                      id: 'deleted',
+                      label: isBn
+                        ? `🗑️ ডিলিট ও কিক (${activityLogs.filter((l) => l.action === 'deleted' || l.action === 'kicked').length})`
+                        : `Deletes/Kicks (${activityLogs.filter((l) => l.action === 'deleted' || l.action === 'kicked').length})`,
+                    },
+                    {
+                      id: 'error',
+                      label: isBn
+                        ? `❌ এরর (${activityLogs.filter((l) => l.action === 'error').length})`
+                        : `Errors (${activityLogs.filter((l) => l.action === 'error').length})`,
+                    },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setLogFilter(tab.id as any)}
+                      className={`btn ${logFilter === tab.id ? 'primary' : 'outline'}`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Mobile-First Card List (No horizontal cutoff on narrow screens) */}
+                {(() => {
+                  const filteredLogs = activityLogs.filter((log) => {
+                    if (logFilter === 'all') return true;
+                    if (logFilter === 'warned') return log.action === 'warned';
+                    if (logFilter === 'blocks') {
+                      return (
+                        log.action === 'restricted' ||
+                        log.action === 'locked' ||
+                        log.action === 'unmuted' ||
+                        log.action === 'unlocked'
+                      );
+                    }
+                    if (logFilter === 'deleted') return log.action === 'deleted' || log.action === 'kicked';
+                    if (logFilter === 'error') return log.action === 'error';
+                    return true;
+                  });
+
+                  if (filteredLogs.length === 0) {
+                    return (
+                      <div className="empty py-6">
+                        {t.noLogsMsg}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-2.5">
+                      {filteredLogs.map((log) => (
+                        <div
+                          key={log.id}
+                          className="p-3 rounded-xl border border-slate-200 bg-slate-50/40 flex flex-col gap-1.5"
+                        >
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <span
                                 className={`badge ${
-                                  log.action === 'kicked' || log.action === 'restricted'
+                                  log.action === 'kicked' || log.action === 'restricted' || log.action === 'error'
                                     ? 'badge-red'
-                                    : log.action === 'locked'
+                                    : log.action === 'locked' || log.action === 'warned'
                                     ? 'badge-amber'
-                                    : log.action === 'warned'
-                                    ? 'badge-amber'
-                                    : log.action === 'error'
-                                    ? 'badge-red'
                                     : log.action === 'replied'
                                     ? 'badge-blue'
-                                    : log.action === 'unmuted'
-                                    ? 'badge-green'
                                     : 'badge-green'
                                 }`}
                               >
                                 {log.action.toUpperCase()}
                               </span>
-                            </td>
-                            <td style={{ fontSize: '11px' }}>
-                              <span className="font-semibold text-gray-800">{log.reason}</span>
-                              {log.details && (
-                                <p className="text-[10px] text-gray-500 mt-0.5">{log.details}</p>
+                              {typeof log.warningCount === 'number' && log.warningCount > 0 && (
+                                <span className="badge badge-amber">
+                                  {isBn ? `সতর্কতা ${log.warningCount}/3` : `${log.warningCount}/3`}
+                                </span>
                               )}
-                            </td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={5} className="empty">
-                            {t.noLogsMsg}
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                            </div>
+                            <span className="text-[10px] text-slate-500">
+                              {new Date(log.timestamp).toLocaleTimeString()}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
+                            <span className="font-bold text-slate-900 break-words">
+                              {log.groupName || log.groupId}
+                            </span>
+                            <span className="font-mono text-[11px] font-semibold text-emerald-700 break-all">
+                              {log.senderPhone ? `@${log.senderPhone}` : log.senderJid}
+                            </span>
+                          </div>
+
+                          <div className="text-[11px] text-slate-800 font-semibold break-words">
+                            {log.reason}
+                          </div>
+                          {log.details && (
+                            <p className="text-[10px] text-slate-500 leading-relaxed break-words">
+                              {log.details}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             </section>
           )}
