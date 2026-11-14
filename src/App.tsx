@@ -49,6 +49,8 @@ import {
   ChevronUp,
   ChevronDown,
   Info,
+  Download,
+  Upload,
 } from 'lucide-react';
 import { HELP_ITEMS } from './helpData.ts';
 import { HelpModal } from './components/HelpModal.tsx';
@@ -359,6 +361,9 @@ export default function App() {
   const [pairingError, setPairingError] = useState<string | null>(null);
   const [isCopied, setIsCopied] = useState(false);
   const [pairingMode, setPairingMode] = useState<'code' | 'qr'>('code');
+  const [sessionPassphrase, setSessionPassphrase] = useState('');
+  const [isTransferringSession, setIsTransferringSession] = useState(false);
+  const sessionFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Stats
   const [overview, setOverview] = useState({
@@ -993,6 +998,64 @@ export default function App() {
       setTimeout(() => setIsCopied(false), 2000);
     } catch {
       showNotification('Copy failed');
+    }
+  };
+
+  const handleExportSession = async () => {
+    const pass = sessionPassphrase.trim();
+    if (pass.length < 4) {
+      showNotification(isBn ? 'কমপক্ষে ৪ অক্ষরের পাসওয়ার্ড/পিন দিন' : 'Enter at least a 4-char passphrase');
+      return;
+    }
+    setIsTransferringSession(true);
+    try {
+      const res = await callApi('/api/whatsapp/session-export', 'POST', { passphrase: pass });
+      if (!res?.success || !res?.bundle) {
+        showNotification(res?.error || (isBn ? 'সেশন এক্সপোর্ট ব্যর্থ হয়েছে' : 'Session export failed'));
+        return;
+      }
+      const jsonStr = JSON.stringify(res.bundle, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = res.filename || 'waguard-session-backup.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showNotification(isBn ? 'সেশন ব্যাকআপ ডাউনলোড হয়েছে!' : 'Session backup downloaded!');
+    } catch (err: any) {
+      showNotification(err?.message || (isBn ? 'ব্যাকআপ ডাউনলোড ব্যর্থ' : 'Export failed'));
+    } finally {
+      setIsTransferringSession(false);
+    }
+  };
+
+  const handleImportSession = async (file: File | undefined) => {
+    if (!file) return;
+    const pass = sessionPassphrase.trim();
+    if (pass.length < 4) {
+      showNotification(isBn ? 'রিস্টোর করতে একই ৪+ অক্ষরের পাসওয়ার্ড/পিন দিন' : 'Enter the 4+ char passphrase first');
+      if (sessionFileInputRef.current) sessionFileInputRef.current.value = '';
+      return;
+    }
+    setIsTransferringSession(true);
+    try {
+      const text = await file.text();
+      const bundle = JSON.parse(text);
+      const res = await callApi('/api/whatsapp/session-import', 'POST', { passphrase: pass, bundle });
+      if (!res?.success) {
+        showNotification(res?.error || (isBn ? 'সেশন রিস্টোর ব্যর্থ হয়েছে' : 'Session import failed'));
+        return;
+      }
+      showNotification(res.message || (isBn ? 'সেশন রিস্টোর সম্পন্ন! কানেক্ট হচ্ছে...' : 'Session restored! Connecting...'));
+      await checkStatus();
+    } catch (err: any) {
+      showNotification(err?.message || (isBn ? 'ব্যাকআপ ফাইল পড়া যায়নি' : 'Invalid backup file'));
+    } finally {
+      setIsTransferringSession(false);
+      if (sessionFileInputRef.current) sessionFileInputRef.current.value = '';
     }
   };
 
@@ -2571,6 +2634,65 @@ export default function App() {
                   )}
                 </div>
               )}
+
+              {/* Encrypted Session Transfer Card (Export from Google / Import to Any Host without Re-pairing) */}
+              <div className="card mt-4">
+                <div className="card-head">
+                  <div>
+                    <h3>{isBn ? 'সেশন ব্যাকআপ ও অন্য হোস্টিংয়ে স্থানান্তর' : 'Session Transfer (Zero-Ban Migration)'}</h3>
+                    <p>
+                      {isBn
+                        ? 'এখানে (Google সার্ভারে) কানেক্ট করা সেশন পাসওয়ার্ড দিয়ে ডাউনলোড করে অন্য যেকোনো হোস্টিংয়ে আপলোড করুন—নতুন কোড ছাড়াই সরাসরি চলবে।'
+                        : 'Export your verified session from Google and restore it on any hosting without sending a new pairing code request.'}
+                    </p>
+                  </div>
+                  <div className="symbol sg">
+                    <Lock size={16} />
+                  </div>
+                </div>
+
+                <div className="mt-3 space-y-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                      {isBn ? 'সেশন ব্যাকআপ পাসওয়ার্ড / পিন (কমপক্ষে ৪ অক্ষর)' : 'Backup Passphrase / PIN (min 4 chars)'}
+                    </label>
+                    <input
+                      type="password"
+                      value={sessionPassphrase}
+                      onChange={(e) => setSessionPassphrase(e.target.value)}
+                      placeholder={isBn ? 'যেমন: 1234 বা গোপন পাসওয়ার্ড' : 'e.g. secret123'}
+                      className="w-full px-3 py-2 border border-gray-300 text-xs outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className="btn soft"
+                      onClick={handleExportSession}
+                      disabled={isTransferringSession || !liveStatus.online}
+                    >
+                      <Download size={13} />{' '}
+                      {isBn ? 'সেশন ব্যাকআপ ডাউনলোড' : 'Download Session Backup'}
+                    </button>
+
+                    <button
+                      className="btn outline"
+                      onClick={() => sessionFileInputRef.current?.click()}
+                      disabled={isTransferringSession}
+                    >
+                      <Upload size={13} />{' '}
+                      {isBn ? 'ব্যাকআপ থেকে কানেক্ট (Restore)' : 'Restore Session File'}
+                    </button>
+                    <input
+                      ref={sessionFileInputRef}
+                      type="file"
+                      accept=".json,application/json"
+                      className="hidden"
+                      onChange={(e) => handleImportSession(e.target.files?.[0])}
+                    />
+                  </div>
+                </div>
+              </div>
             </section>
           )}
 

@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import crypto from 'crypto';
 import dotenv from 'dotenv';
 import pino from 'pino';
 import QRCode from 'qrcode';
@@ -66,7 +67,7 @@ app.use((req: Request, res: Response, next) => {
   next();
 });
 
-app.use(express.json());
+app.use(express.json({ limit: '15mb' }));
 
 // Persistent directory for WhatsApp session auth keys
 const SESSIONS_DIR = path.join(__dirname, '.sessions');
@@ -231,6 +232,7 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
       const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
       const errMsg = lastDisconnect?.error?.message || 'Connection closed';
       const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+      const isConnectionReplaced = statusCode === DisconnectReason.connectionReplaced || statusCode === 440;
       const isRestartRequired = statusCode === DisconnectReason.restartRequired || statusCode === 515;
       const isBannedOrForbidden = statusCode === 403 || statusCode === 405 || /banned|blocked|restricted/i.test(errMsg);
       const isRegistered = Boolean(sock.authState?.creds?.registered) || hasRegisteredCredsOnDisk();
@@ -274,6 +276,17 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
         return;
       }
 
+      if (isConnectionReplaced) {
+        console.warn('[Baileys Guard] Connection replaced by another session (440). Pausing auto-reconnect to avoid conflict.');
+        clearReconnectTimer();
+        botState.status = 'disconnected';
+        botState.step = 'error';
+        botState.stepMessage = 'অন্য আরেকটি ডিভাইস/সার্ভারে একই সেশন চালু হওয়ায় সংযোগ বিচ্ছিন্ন হয়েছে।';
+        botState.lastConnectionStatus = 'Replaced by another session (440)';
+        botState.lastError = errMsg;
+        return;
+      }
+
       // After user enters pairing code on phone, WhatsApp closes socket with 515 (restartRequired)
       if (isRestartRequired || isRegistered) {
         botState.status = 'connecting';
@@ -286,15 +299,19 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
           : `Reconnecting (attempt ${reconnectAttempts + 1})...`;
         botState.lastError = null;
 
-        if (reconnectAttempts >= 8) {
+        if (reconnectAttempts >= 40) {
           botState.status = 'disconnected';
           botState.step = 'error';
-          botState.stepMessage = 'নেটওয়ার্ক সংযোগ বারবার বিচ্ছিন্ন হয়েছে। ম্যানুয়ালি পুনরায় চেষ্টা করুন।';
-          botState.lastConnectionStatus = 'Reconnect paused after network retries';
+          botState.stepMessage = 'দীর্ঘ সময় নেটওয়ার্ক সংযোগ পাওয়া যায়নি। ম্যানুয়ালি পুনরায় চেষ্টা করুন।';
+          botState.lastConnectionStatus = 'Reconnect paused after extended outage';
           return;
         }
 
-        const delayMs = isRestartRequired ? 900 : Math.min(30000, 2500 * Math.pow(2, reconnectAttempts));
+        const delayMs = isRestartRequired
+          ? 900
+          : reconnectAttempts < 8
+            ? Math.min(30000, 2500 * Math.pow(2, reconnectAttempts))
+            : 60000;
         reconnectAttempts += 1;
         console.log(`[Baileys Engine] Controlled reconnect scheduled in ${delayMs}ms (statusCode=${statusCode}, attempt=${reconnectAttempts})`);
         scheduleControlledReconnect(delayMs);
@@ -679,6 +696,10 @@ app.post('/api/whatsapp/pair', async (req: Request, res: Response) => {
 });
 
 // 2. Real-time Live Status Endpoint (for instant frontend synchronization)
+app.get('/health', (_req: Request, res: Response) => {
+  res.json({ ok: true, status: botState.status, online: botState.status === 'connected', uptimeSec: Math.round(process.uptime()) });
+});
+
 app.get('/api/whatsapp/status', (req: Request, res: Response) => {
   const elapsed = botState.pairingStartedAt > 0 ? Math.floor((Date.now() - botState.pairingStartedAt) / 1000) : 0;
   const remainingSeconds = botState.pairingStartedAt > 0 ? Math.max(0, 120 - elapsed) : 0;
@@ -853,6 +874,162 @@ app.post('/api/whatsapp/disconnect', async (req: Request, res: Response) => {
     botState.user = null;
     botState.lastError = null;
     res.json({ success: true, message: 'Session disconnected and cleared' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5b. Encrypted Session Backup Export (Transfer verified Google session to any hosting without re-pairing)
+app.post('/api/whatsapp/session-export', async (req: Request, res: Response) => {
+  try {
+    const passphrase = String(req.body?.passphrase || '').trim();
+    if (passphrase.length < 4) {
+      return res.status(400).json({
+        success: false,
+        error: 'সেশন সুরক্ষার জন্য কমপক্ষে ৪ অক্ষরের একটি পাসওয়ার্ড/পিন দিন।',
+      });
+    }
+
+    if (!hasRegisteredCredsOnDisk()) {
+      return res.status(400).json({
+        success: false,
+        error: 'আগে WhatsApp কানেক্ট করুন, তারপর সেশন ব্যাকআপ ডাউনলোড করুন।',
+      });
+    }
+
+    const files: Record<string, string> = {};
+    for (const entry of fs.readdirSync(SESSIONS_DIR, { withFileTypes: true })) {
+      if (entry.isFile()) {
+        const fullPath = path.join(SESSIONS_DIR, entry.name);
+        files[entry.name] = fs.readFileSync(fullPath).toString('base64');
+      }
+    }
+
+    if (!files['creds.json']) {
+      return res.status(400).json({
+        success: false,
+        error: 'সক্রিয় WhatsApp সেশন ফাইল পাওয়া যায়নি।',
+      });
+    }
+
+    const payload = JSON.stringify({
+      exportedAt: Date.now(),
+      phoneNumber: botState.phoneNumber || '',
+      files,
+    });
+
+    const salt = crypto.randomBytes(16);
+    const iv = crypto.randomBytes(12);
+    const key = crypto.scryptSync(passphrase, salt, 32);
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    const encrypted = Buffer.concat([cipher.update(payload, 'utf8'), cipher.final()]);
+    const tag = cipher.getAuthTag();
+
+    res.json({
+      success: true,
+      filename: `waguard-session-${botState.phoneNumber || 'backup'}.json`,
+      bundle: {
+        v: 1,
+        alg: 'aes-256-gcm',
+        salt: salt.toString('base64'),
+        iv: iv.toString('base64'),
+        tag: tag.toString('base64'),
+        data: encrypted.toString('base64'),
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5c. Encrypted Session Backup Import (Restore verified session on another host with zero pairing request)
+app.post('/api/whatsapp/session-import', async (req: Request, res: Response) => {
+  try {
+    const passphrase = String(req.body?.passphrase || '').trim();
+    const bundle = req.body?.bundle;
+
+    if (passphrase.length < 4) {
+      return res.status(400).json({
+        success: false,
+        error: 'ব্যাকআপ আনলক করতে কমপক্ষে ৪ অক্ষরের পাসওয়ার্ড/পিন দিন।',
+      });
+    }
+
+    if (!bundle || bundle.v !== 1 || bundle.alg !== 'aes-256-gcm' || !bundle.salt || !bundle.iv || !bundle.tag || !bundle.data) {
+      return res.status(400).json({
+        success: false,
+        error: 'ব্যাকআপ ফাইলের ফরম্যাট সঠিক নয়।',
+      });
+    }
+
+    let decryptedText = '';
+    try {
+      const salt = Buffer.from(bundle.salt, 'base64');
+      const iv = Buffer.from(bundle.iv, 'base64');
+      const tag = Buffer.from(bundle.tag, 'base64');
+      const encrypted = Buffer.from(bundle.data, 'base64');
+      const key = crypto.scryptSync(passphrase, salt, 32);
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+      decipher.setAuthTag(tag);
+      decryptedText = Buffer.concat([decipher.update(encrypted), decipher.final()]).toString('utf8');
+    } catch {
+      return res.status(400).json({
+        success: false,
+        error: 'পাসওয়ার্ড ভুল হয়েছে অথবা ব্যাকআপ ফাইল নষ্ট হয়ে গেছে।',
+      });
+    }
+
+    const parsed = JSON.parse(decryptedText);
+    const files = parsed?.files;
+    if (!files || typeof files !== 'object' || !files['creds.json']) {
+      return res.status(400).json({
+        success: false,
+        error: 'ব্যাকআপে বৈধ WhatsApp creds.json পাওয়া যায়নি।',
+      });
+    }
+
+    const credsRaw = Buffer.from(String(files['creds.json']), 'base64').toString('utf8');
+    const credsObj = JSON.parse(credsRaw);
+    if (!credsObj?.registered && !credsObj?.me?.id) {
+      return res.status(400).json({
+        success: false,
+        error: 'এই ব্যাকআপের WhatsApp সেশনটি নিবন্ধিত নয়।',
+      });
+    }
+
+    clearReconnectTimer();
+    manualDisconnect = false;
+    reconnectAttempts = 0;
+    destroyCurrentSocket();
+
+    fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
+    fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+
+    for (const [rawName, b64] of Object.entries(files)) {
+      const safeName = path.basename(rawName);
+      if (!safeName || safeName === '.' || safeName === '..') continue;
+      fs.writeFileSync(path.join(SESSIONS_DIR, safeName), Buffer.from(String(b64), 'base64'));
+    }
+
+    botState.phoneNumber = parsed.phoneNumber || '';
+    botState.pairingCode = '';
+    botState.qrCodeDataUrl = '';
+    botState.pairingStartedAt = 0;
+    botState.lastError = null;
+    botState.status = 'connecting';
+    botState.step = 'initializing';
+    botState.stepMessage = 'ব্যাকআপ সেশন রিস্টোর সম্পন্ন! সরাসরি WhatsApp-এ সংযোগ হচ্ছে...';
+    botState.lastConnectionStatus = 'Restoring transferred session...';
+
+    initializeExistingSession().catch((err) => {
+      console.error('[Session Import] Restore connect error:', err?.message || err);
+    });
+
+    res.json({
+      success: true,
+      phoneNumber: botState.phoneNumber,
+      message: 'সেশন সফলভাবে রিস্টোর হয়েছে! নতুন কোড ছাড়াই সংযোগ চালু হচ্ছে।',
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
