@@ -19,8 +19,10 @@ import makeWASocket, {
 import {
   processIncomingMessage,
   handleGroupParticipantsUpdate,
+  handleIncomingCall,
   primeGroupMetaCache,
   startGroupLockMonitor,
+  startNightModeScheduler,
   startRestrictedUsersMonitor,
   getSettings as getModerationSettings,
   updateSettings as updateModerationSettings,
@@ -35,9 +37,22 @@ import {
   loadDatabase,
   getActiveRestrictedUsers,
   unrestrictUser,
+  getNightModeStatus,
+  applyNightModeManually,
+  getCallLogs,
+  clearCallLogs,
+  resetCallCounts,
+  getMemberActivityReport,
+  resetMemberActivity,
+  getKeywordTriggers,
+  addKeywordTrigger,
+  toggleKeywordTrigger,
+  removeKeywordTrigger,
 } from './src/moderationEngine.ts';
 
 startRestrictedUsersMonitor(() => currentSock);
+startGroupLockMonitor(() => currentSock);
+startNightModeScheduler(() => currentSock);
 
 dotenv.config();
 
@@ -66,7 +81,7 @@ app.use((req: Request, res: Response, next) => {
   res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, x-admin-token');
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
@@ -74,6 +89,146 @@ app.use((req: Request, res: Response, next) => {
 });
 
 app.use(express.json({ limit: '15mb' }));
+
+// Persistent HMAC secret for Dashboard Admin PIN Lock
+const AUTH_SECRET_PATH = path.join(__dirname, 'data', '.auth_secret');
+function getAuthSecret(): string {
+  try {
+    if (fs.existsSync(AUTH_SECRET_PATH)) {
+      const s = fs.readFileSync(AUTH_SECRET_PATH, 'utf8').trim();
+      if (s.length >= 32) return s;
+    }
+    const created = crypto.randomBytes(32).toString('hex');
+    fs.mkdirSync(path.dirname(AUTH_SECRET_PATH), { recursive: true });
+    fs.writeFileSync(AUTH_SECRET_PATH, created, 'utf8');
+    return created;
+  } catch {
+    return 'waguard_fallback_auth_secret_key_2026';
+  }
+}
+const AUTH_SECRET = getAuthSecret();
+
+function signAdminToken(pin: string): string {
+  const issuedAt = Date.now();
+  const pinDigest = crypto.createHash('sha256').update(pin).digest('hex').slice(0, 12);
+  const payload = `${issuedAt}.${pinDigest}`;
+  const sig = crypto.createHmac('sha256', AUTH_SECRET).update(payload).digest('hex');
+  return `${payload}.${sig}`;
+}
+
+function verifyAdminToken(token: string | undefined, activePin: string): boolean {
+  if (!token || !activePin) return false;
+  const parts = String(token).trim().split('.');
+  if (parts.length !== 3) return false;
+  const [issuedAtStr, pinDigest, sig] = parts;
+  const issuedAt = Number(issuedAtStr);
+  if (!Number.isFinite(issuedAt) || Date.now() - issuedAt > 7 * 24 * 60 * 60 * 1000) return false;
+  const expectedPinDigest = crypto.createHash('sha256').update(activePin).digest('hex').slice(0, 12);
+  if (pinDigest !== expectedPinDigest) return false;
+  const expectedSig = crypto.createHmac('sha256', AUTH_SECRET).update(`${issuedAtStr}.${pinDigest}`).digest('hex');
+  try {
+    return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig));
+  } catch {
+    return false;
+  }
+}
+
+function extractRequestToken(req: Request): string {
+  const headerToken = req.headers['x-admin-token'];
+  if (typeof headerToken === 'string' && headerToken.trim()) return headerToken.trim();
+  const auth = req.headers.authorization;
+  if (typeof auth === 'string' && auth.startsWith('Bearer ')) return auth.slice(7).trim();
+  return '';
+}
+
+app.use('/api', (req: Request, res: Response, next) => {
+  if (req.path === '/auth/status' || req.path === '/auth/verify' || req.path === '/auth/lock') {
+    return next();
+  }
+  const settings = getModerationSettings();
+  if (!settings.dashboardPinEnabled || !settings.dashboardPin) {
+    return next();
+  }
+  const token = extractRequestToken(req);
+  if (verifyAdminToken(token, settings.dashboardPin)) {
+    return next();
+  }
+  return res.status(401).json({
+    success: false,
+    pinRequired: true,
+    error: 'অ্যাডমিন পিন লক সক্রিয় রয়েছে। অনুগ্রহ করে সঠিক পিন দিয়ে আনলক করুন।',
+  });
+});
+
+app.get('/api/auth/status', (req: Request, res: Response) => {
+  const settings = getModerationSettings();
+  const pinEnabled = Boolean(settings.dashboardPinEnabled && settings.dashboardPin);
+  const authenticated = !pinEnabled || verifyAdminToken(extractRequestToken(req), settings.dashboardPin);
+  res.json({
+    success: true,
+    pinEnabled,
+    authenticated,
+  });
+});
+
+app.post('/api/auth/verify', (req: Request, res: Response) => {
+  const settings = getModerationSettings();
+  const pin = String(req.body?.pin || '').trim();
+  if (!settings.dashboardPinEnabled || !settings.dashboardPin) {
+    return res.json({ success: true, token: '' });
+  }
+  if (!pin || pin !== settings.dashboardPin) {
+    return res.status(401).json({
+      success: false,
+      error: 'ভুল পিন কোড দিয়েছেন! সঠিক অ্যাডমিন পিন দিন।',
+    });
+  }
+  const token = signAdminToken(settings.dashboardPin);
+  return res.json({ success: true, token });
+});
+
+app.post('/api/auth/lock', (_req: Request, res: Response) => {
+  res.json({ success: true });
+});
+
+app.post('/api/auth/update-pin', (req: Request, res: Response) => {
+  try {
+    const enabled = Boolean(req.body?.enabled);
+    const newPin = typeof req.body?.newPin === 'string' ? req.body.newPin.trim() : '';
+    const current = getModerationSettings();
+
+    if (enabled && !newPin && !current.dashboardPin) {
+      return res.status(400).json({
+        success: false,
+        error: 'পিন লক চালু করতে কমপক্ষে ৪ অক্ষরের একটি পিন/পাসওয়ার্ড দিন।',
+      });
+    }
+
+    if (newPin && newPin.length < 4) {
+      return res.status(400).json({
+        success: false,
+        error: 'অ্যাডমিন পিন কমপক্ষে ৪ অক্ষরের হতে হবে।',
+      });
+    }
+
+    const patch: any = { dashboardPinEnabled: enabled };
+    if (newPin) {
+      patch.dashboardPin = newPin;
+    }
+    const updated = updateModerationSettings(patch);
+    const activePin = updated.dashboardPin || '';
+    const token = enabled && activePin ? signAdminToken(activePin) : '';
+
+    res.json({
+      success: true,
+      pinEnabled: Boolean(updated.dashboardPinEnabled && activePin),
+      token,
+      message: enabled ? 'অ্যাডমিন পিন লক চালু ও সেভ হয়েছে!' : 'অ্যাডমিন পিন লক বন্ধ করা হয়েছে।',
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 // Persistent directory for WhatsApp session auth keys
 const SESSIONS_DIR = path.join(__dirname, '.sessions');
@@ -157,6 +312,8 @@ function destroyCurrentSocket() {
       oldSock.ev.removeAllListeners('connection.update');
       oldSock.ev.removeAllListeners('creds.update');
       oldSock.ev.removeAllListeners('messages.upsert');
+      oldSock.ev.removeAllListeners('group-participants.update');
+      oldSock.ev.removeAllListeners('call');
       oldSock.end(undefined);
     } catch {
       // ignore cleanup error
@@ -350,6 +507,19 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
       await handleGroupParticipantsUpdate(sock, update);
     } catch (err: any) {
       console.error('Error in group-participants.update handler:', err?.message || err);
+    }
+  });
+
+  sock.ev.on('call', async (calls) => {
+    if (socketToken !== activeSocketToken || sock !== currentSock) {
+      return;
+    }
+    if (Array.isArray(calls)) {
+      for (const call of calls) {
+        await handleIncomingCall(sock, call).catch((err: any) => {
+          console.error('Error in call handler:', err?.message || err);
+        });
+      }
     }
   });
 
@@ -766,6 +936,7 @@ app.get('/api/dashboard', (req: Request, res: Response) => {
     moderation: {
       settings: {
         ...modSettings,
+        dashboardPin: modSettings.dashboardPin ? '****' : '',
         aiKeys: (modSettings.aiKeys || []).map(k => ({ ...k, key: maskAiKey(k.key) }))
       },
       stats: modStats,
@@ -780,17 +951,19 @@ app.get('/api/moderation/settings', (req: Request, res: Response) => {
   if (settings.aiKeys) {
     settings.aiKeys = settings.aiKeys.map(k => ({ ...k, key: maskAiKey(k.key) }));
   }
-  // Mask legacy single keys
+  // Mask sensitive keys & PIN
   if (settings.geminiApiKey) settings.geminiApiKey = maskAiKey(settings.geminiApiKey);
   if (settings.groqApiKey) settings.groqApiKey = maskAiKey(settings.groqApiKey);
   if (settings.openrouterApiKey) settings.openrouterApiKey = maskAiKey(settings.openrouterApiKey);
-  
+  if (settings.dashboardPin) settings.dashboardPin = '****';
+
   res.json({ success: true, settings });
 });
 
 app.post('/api/moderation/settings', (req: Request, res: Response) => {
   try {
     const updated = updateModerationSettings(req.body);
+    if (updated.dashboardPin) updated.dashboardPin = '****';
     res.json({ success: true, settings: updated, message: 'Settings saved and active in real-time' });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -1119,11 +1292,92 @@ app.post('/api/whatsapp/session-import', async (req: Request, res: Response) => 
   }
 });
 
+// Feature 2: Night Mode Status & Manual Trigger
+app.get('/api/moderation/night-mode', (_req: Request, res: Response) => {
+  res.json({ success: true, status: getNightModeStatus() });
+});
+
+app.post('/api/moderation/night-mode/toggle-now', async (req: Request, res: Response) => {
+  try {
+    const lock = Boolean(req.body?.lock);
+    const result = await applyNightModeManually(currentSock, lock);
+    res.json({
+      success: true,
+      affected: result.affected,
+      status: getNightModeStatus(),
+      message: lock
+        ? `${result.affected}টি গ্রুপে নাইট লক চালু করা হয়েছে!`
+        : `${result.affected}টি গ্রুপ নাইট লক থেকে আনলক করা হয়েছে!`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Feature 3: Anti-Call Logs & Reset
+app.get('/api/moderation/calls', (_req: Request, res: Response) => {
+  res.json({ success: true, calls: getCallLogs(60) });
+});
+
+app.post('/api/moderation/calls/clear', (_req: Request, res: Response) => {
+  clearCallLogs();
+  resetCallCounts();
+  res.json({ success: true, calls: [], message: 'কল লগ ও কাউন্টার ক্লিয়ার করা হয়েছে।' });
+});
+
+// Feature 5: Member Activity Rank & Ghost/Inactive List
+app.get('/api/moderation/activity-rank', (req: Request, res: Response) => {
+  const groupId = req.query.groupId ? String(req.query.groupId) : 'all';
+  const ghostDays = req.query.ghostDays ? Math.max(1, parseInt(String(req.query.ghostDays), 10) || 7) : 7;
+  const report = getMemberActivityReport(groupId, ghostDays);
+  report.groups = report.groups.map((g) => ({
+    ...g,
+    name: resolveKnownGroupName(g.id, g.name),
+  }));
+  res.json({ success: true, ...report });
+});
+
+app.post('/api/moderation/activity-rank/reset', (req: Request, res: Response) => {
+  const groupId = req.body?.groupId ? String(req.body.groupId) : 'all';
+  resetMemberActivity(groupId);
+  res.json({ success: true, ...getMemberActivityReport('all', 7) });
+});
+
+// Feature 6: Keyword Auto-Responder CRUD
+app.get('/api/moderation/keywords', (_req: Request, res: Response) => {
+  res.json({ success: true, keywords: getKeywordTriggers() });
+});
+
+app.post('/api/moderation/keywords/add', (req: Request, res: Response) => {
+  const keyword = String(req.body?.keyword || '').trim();
+  const reply = String(req.body?.reply || '').trim();
+  const matchType = req.body?.matchType === 'exact' ? 'exact' : 'contains';
+  if (!keyword || !reply) {
+    return res.status(400).json({ success: false, error: 'কীওয়ার্ড এবং উত্তর দুটিই লিখুন।' });
+  }
+  const keywords = addKeywordTrigger(keyword, reply, matchType);
+  res.json({ success: true, keywords });
+});
+
+app.post('/api/moderation/keywords/toggle', (req: Request, res: Response) => {
+  const id = String(req.body?.id || '').trim();
+  if (!id) return res.status(400).json({ success: false, error: 'id is required' });
+  const keywords = toggleKeywordTrigger(id);
+  res.json({ success: true, keywords });
+});
+
+app.post('/api/moderation/keywords/remove', (req: Request, res: Response) => {
+  const id = String(req.body?.id || '').trim();
+  if (!id) return res.status(400).json({ success: false, error: 'id is required' });
+  const keywords = removeKeywordTrigger(id);
+  res.json({ success: true, keywords });
+});
+
 // 6. Test AI Endpoint
 app.post('/api/ai/test', async (req: Request, res: Response) => {
   res.json({
     success: true,
-    message: 'AI Moderation Engine is active and ready (Gemini 1.5 Flash supported).',
+    message: 'AI Moderation Engine is active and ready (Gemini Flash Multimodal supported).',
   });
 });
 

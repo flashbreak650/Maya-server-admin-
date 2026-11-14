@@ -1,8 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { jidNormalizedUser, type proto, type WASocket } from '@whiskeysockets/baileys';
-import { getMayaResponse } from './aiEngine.ts';
+import { downloadMediaMessage, jidNormalizedUser, type proto, type WASocket } from '@whiskeysockets/baileys';
+import { getMayaMultimodalResponse, getMayaResponse, inspectImageSafetyWithAi } from './aiEngine.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,6 +12,37 @@ const DB_PATH = path.join(DATA_DIR, 'moderation_db.json');
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+export interface KeywordTrigger {
+  id: string;
+  keyword: string;
+  reply: string;
+  matchType: 'exact' | 'contains';
+  enabled: boolean;
+  createdAt: number;
+  hitCount?: number;
+}
+
+export interface CallLogItem {
+  id: string;
+  timestamp: number;
+  callerJid: string;
+  callerPhone: string;
+  isVideo: boolean;
+  status: string;
+  blocked: boolean;
+}
+
+export interface MemberActivityItem {
+  groupId: string;
+  groupName: string;
+  senderJid: string;
+  senderPhone: string;
+  name: string;
+  messageCount: number;
+  lastSeen: number;
+  firstSeen: number;
 }
 
 export interface ModerationSettings {
@@ -29,6 +60,28 @@ export interface ModerationSettings {
   welcomeMessage?: string;
   botReply: boolean;
   customBadwords: string[];
+  // Feature 1: Dashboard Admin PIN Lock
+  dashboardPinEnabled: boolean;
+  dashboardPin: string;
+  // Feature 2: Scheduled Night Mode
+  nightModeEnabled: boolean;
+  nightLockStart: string;
+  nightLockEnd: string;
+  nightModeTimezone: string;
+  nightModeNotify: boolean;
+  // Feature 3: Anti-Call Protection
+  antiCallEnabled: boolean;
+  antiCallMessage: string;
+  antiCallAutoBlockCount: number;
+  // Feature 4: Maya Voice, Vision & Anti-NSFW Image
+  mayaVoiceEnabled: boolean;
+  mayaVisionEnabled: boolean;
+  antiNsfwImage: boolean;
+  // Feature 5: Activity Tracking
+  activityTrackingEnabled: boolean;
+  // Feature 6: Keyword Auto-Responder
+  keywordAutoReplyEnabled: boolean;
+  keywordTriggers: KeywordTrigger[];
   // Individual Temporary Mute (Auto-Delete Interception for Sticker Spammers)
   individualMuteEnabled: boolean;
   individualMuteStickerLimit: number;
@@ -120,7 +173,11 @@ export interface ModerationDB {
   settings: ModerationSettings;
   warnings: Record<string, UserWarning>; // key: `${groupId}:${senderJid}`
   groupLocks: Record<string, GroupLock>; // key: groupId
+  nightLockedGroups: Record<string, { groupName: string; lockedAt: number }>;
   restrictedUsers: Record<string, RestrictedUser>; // key: `${groupId}:${normalizeJid(senderJid)}`
+  callLogs: CallLogItem[];
+  callCounts: Record<string, number>;
+  memberActivity: Record<string, MemberActivityItem>;
   activityLogs: ActivityLog[];
   stats: {
     messagesChecked: number;
@@ -130,6 +187,7 @@ export interface ModerationDB {
     groupLocksTriggered: number;
     individualMutesTriggered?: number;
     restrictedMessagesBlocked?: number;
+    callsRejected?: number;
   };
 }
 
@@ -148,6 +206,22 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   welcomeMessage: '',
   botReply: true,
   customBadwords: [],
+  dashboardPinEnabled: false,
+  dashboardPin: '',
+  nightModeEnabled: false,
+  nightLockStart: '00:00',
+  nightLockEnd: '06:00',
+  nightModeTimezone: 'Asia/Dhaka',
+  nightModeNotify: true,
+  antiCallEnabled: true,
+  antiCallMessage: '📵 দুঃখিত! এটি একটি অটোমেটেড WhatsApp সিকিউরিটি বট। অনুগ্রহ করে কল না করে মেসেজ পাঠান।',
+  antiCallAutoBlockCount: 3,
+  mayaVoiceEnabled: true,
+  mayaVisionEnabled: true,
+  antiNsfwImage: false,
+  activityTrackingEnabled: true,
+  keywordAutoReplyEnabled: true,
+  keywordTriggers: [],
   individualMuteEnabled: true,
   individualMuteStickerLimit: 3,
   individualMuteTimeWindow: 5,
@@ -180,7 +254,11 @@ let db: ModerationDB = {
   settings: { ...DEFAULT_SETTINGS },
   warnings: {},
   groupLocks: {},
+  nightLockedGroups: {},
   restrictedUsers: {},
+  callLogs: [],
+  callCounts: {},
+  memberActivity: {},
   activityLogs: [],
   stats: {
     messagesChecked: 0,
@@ -190,6 +268,7 @@ let db: ModerationDB = {
     groupLocksTriggered: 0,
     individualMutesTriggered: 0,
     restrictedMessagesBlocked: 0,
+    callsRejected: 0,
   },
 };
 
@@ -199,10 +278,18 @@ export function loadDatabase() {
     if (fs.existsSync(DB_PATH)) {
       const data = JSON.parse(fs.readFileSync(DB_PATH, 'utf-8'));
       db = {
-        settings: { ...DEFAULT_SETTINGS, ...(data.settings || {}) },
+        settings: {
+          ...DEFAULT_SETTINGS,
+          ...(data.settings || {}),
+          keywordTriggers: Array.isArray(data.settings?.keywordTriggers) ? data.settings.keywordTriggers : [],
+        },
         warnings: data.warnings || {},
         groupLocks: data.groupLocks || {},
+        nightLockedGroups: data.nightLockedGroups || {},
         restrictedUsers: data.restrictedUsers || {},
+        callLogs: Array.isArray(data.callLogs) ? data.callLogs.slice(-100) : [],
+        callCounts: data.callCounts || {},
+        memberActivity: data.memberActivity || {},
         activityLogs: Array.isArray(data.activityLogs) ? data.activityLogs.slice(-100) : [],
         stats: {
           messagesChecked: data.stats?.messagesChecked || 0,
@@ -212,6 +299,7 @@ export function loadDatabase() {
           groupLocksTriggered: data.stats?.groupLocksTriggered || 0,
           individualMutesTriggered: data.stats?.individualMutesTriggered || 0,
           restrictedMessagesBlocked: data.stats?.restrictedMessagesBlocked || 0,
+          callsRejected: data.stats?.callsRejected || 0,
         },
       };
       console.log('Moderation DB loaded successfully. Logs count:', db.activityLogs.length, 'Restricted users:', Object.keys(db.restrictedUsers).length);
@@ -274,6 +362,11 @@ const isMaskedKeyString = (str?: string): boolean => {
 
 export function updateSettings(newSettings: Partial<ModerationSettings>): ModerationSettings {
   const patch = { ...newSettings };
+
+  // Never accidentally overwrite dashboardPin with masked string or empty string from general settings updates
+  if (patch.dashboardPin === undefined || isMaskedKeyString(patch.dashboardPin)) {
+    delete patch.dashboardPin;
+  }
 
   // 1. Prevent masked strings from overwriting real plaintext keys in single card settings
   if (isMaskedKeyString(patch.geminiApiKey)) {
@@ -1551,6 +1644,463 @@ export function startGroupLockMonitor(sockGetter: () => WASocket | null) {
 }
 
 // -------------------------------------------------------------
+// FEATURE 2: SCHEDULED NIGHT MODE (AUTO NIGHT LOCK)
+// -------------------------------------------------------------
+function getLocalTimeHHMM(timeZone: string = 'Asia/Dhaka'): string {
+  try {
+    const formatter = new Intl.DateTimeFormat('en-GB', {
+      timeZone: timeZone || 'Asia/Dhaka',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(new Date());
+    const h = parts.find((p) => p.type === 'hour')?.value || '00';
+    const m = parts.find((p) => p.type === 'minute')?.value || '00';
+    return `${h === '24' ? '00' : h}:${m}`;
+  } catch {
+    const d = new Date();
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+}
+
+function parseTimeToMinutes(hhmm: string): number {
+  const match = String(hhmm || '').match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return 0;
+  const h = Math.min(23, Math.max(0, parseInt(match[1], 10)));
+  const m = Math.min(59, Math.max(0, parseInt(match[2], 10)));
+  return h * 60 + m;
+}
+
+export function isWithinNightWindow(nowHHMM: string, startHHMM: string, endHHMM: string): boolean {
+  const nowMin = parseTimeToMinutes(nowHHMM);
+  const startMin = parseTimeToMinutes(startHHMM || '00:00');
+  const endMin = parseTimeToMinutes(endHHMM || '06:00');
+  if (startMin === endMin) return false;
+  if (startMin < endMin) {
+    return nowMin >= startMin && nowMin < endMin;
+  }
+  return nowMin >= startMin || nowMin < endMin;
+}
+
+export function getNightModeStatus() {
+  const settings = getSettings();
+  const tz = settings.nightModeTimezone || 'Asia/Dhaka';
+  const currentLocalTime = getLocalTimeHHMM(tz);
+  const inWindow = isWithinNightWindow(
+    currentLocalTime,
+    settings.nightLockStart || '00:00',
+    settings.nightLockEnd || '06:00'
+  );
+  const lockedGroups = Object.entries(db.nightLockedGroups || {}).map(([groupId, info]) => ({
+    groupId,
+    groupName: info.groupName,
+    lockedAt: info.lockedAt,
+  }));
+  return {
+    enabled: Boolean(settings.nightModeEnabled),
+    start: settings.nightLockStart || '00:00',
+    end: settings.nightLockEnd || '06:00',
+    timezone: tz,
+    notify: settings.nightModeNotify !== false,
+    currentLocalTime,
+    isNightWindowNow: Boolean(settings.nightModeEnabled && inWindow),
+    lockedCount: lockedGroups.length,
+    lockedGroups,
+  };
+}
+
+function isBotGroupAdminFromMeta(sock: WASocket, meta: any): boolean {
+  if (!meta?.participants) return false;
+  const botIds = [sock.user?.id, sock.user?.lid, sock.authState?.creds?.me?.id, sock.authState?.creds?.me?.lid]
+    .filter(Boolean)
+    .map((j) => cleanJidUser(String(j)));
+  const botSet = new Set(botIds);
+  for (const p of meta.participants) {
+    const pAny = p as any;
+    const isAdmin = p.admin === 'admin' || p.admin === 'superadmin' || Boolean(pAny.isAdmin) || Boolean(pAny.isSuperAdmin);
+    if (!isAdmin) continue;
+    const candidates = [p.id, pAny.lid, pAny.phoneNumber].filter(Boolean).map((j) => cleanJidUser(String(j)));
+    if (candidates.some((c) => botSet.has(c))) return true;
+  }
+  return false;
+}
+
+export async function applyNightModeManually(sock: WASocket | null, lock: boolean): Promise<{ affected: number }> {
+  if (!sock || !sock.authState?.creds?.registered) {
+    return { affected: 0 };
+  }
+  const settings = getSettings();
+  let affected = 0;
+
+  if (lock) {
+    const groups = await sock.groupFetchAllParticipating().catch(() => ({} as Record<string, any>));
+    primeGroupMetaCache(groups);
+    for (const [groupId, meta] of Object.entries(groups)) {
+      if (!isBotGroupAdminFromMeta(sock, meta)) continue;
+      if (meta?.announce) {
+        if (!db.nightLockedGroups[groupId]) {
+          db.nightLockedGroups[groupId] = { groupName: meta.subject || 'WhatsApp Group', lockedAt: Date.now() };
+        }
+        continue;
+      }
+      try {
+        await sock.groupSettingUpdate(groupId, 'announcement');
+        db.nightLockedGroups[groupId] = { groupName: meta.subject || 'WhatsApp Group', lockedAt: Date.now() };
+        affected++;
+        if (settings.nightModeNotify !== false) {
+          await safeSendMessage(sock, groupId, {
+            text: `🌙 *শুভ রাত্রি — নাইট মোড চালু হয়েছে*\n\nগ্রুপটি সাময়িকভাবে অ্যাডমিনদের জন্য লক করা হয়েছে (${settings.nightLockStart || '00:00'} – ${settings.nightLockEnd || '06:00'})।\n☀️ সকালে নির্ধারিত সময়ে গ্রুপটি আবার সবার জন্য খুলে দেওয়া হবে।`,
+          });
+        }
+        addActivityLog({
+          groupId,
+          groupName: meta.subject || 'WhatsApp Group',
+          senderJid: 'SYSTEM',
+          senderPhone: 'NIGHT-MODE',
+          action: 'locked',
+          reason: 'শিডিউল নাইট মোড: গ্রুপ লক করা হয়েছে',
+        });
+      } catch (err: any) {
+        console.warn(`[Night Mode Lock Failed] ${groupId}:`, err?.message || err);
+      }
+    }
+    saveDatabase();
+  } else {
+    const entries = Object.entries(db.nightLockedGroups || {});
+    for (const [groupId, info] of entries) {
+      try {
+        await sock.groupSettingUpdate(groupId, 'not_announcement');
+        affected++;
+        if (settings.nightModeNotify !== false) {
+          await safeSendMessage(sock, groupId, {
+            text: `☀️ *সুপ্রভাত — নাইট মোড শেষ হয়েছে*\n\nগ্রুপটি আবার সকল সদস্যের জন্য উন্মুক্ত করা হলো। সবার দিনটি শুভ হোক! 🌸`,
+          });
+        }
+        addActivityLog({
+          groupId,
+          groupName: info.groupName || 'WhatsApp Group',
+          senderJid: 'SYSTEM',
+          senderPhone: 'NIGHT-MODE',
+          action: 'unlocked',
+          reason: 'নাইট মোড শেষ: গ্রুপ সবার জন্য আনলক করা হয়েছে',
+        });
+      } catch (err: any) {
+        console.warn(`[Night Mode Unlock Failed] ${groupId}:`, err?.message || err);
+      }
+      delete db.nightLockedGroups[groupId];
+    }
+    saveDatabase();
+  }
+  return { affected };
+}
+
+let nightModeBusy = false;
+export function startNightModeScheduler(sockGetter: () => WASocket | null) {
+  setInterval(async () => {
+    if (nightModeBusy) return;
+    const sock = sockGetter();
+    if (!sock || !sock.authState?.creds?.registered) return;
+    const settings = getSettings();
+    const tz = settings.nightModeTimezone || 'Asia/Dhaka';
+    const nowHHMM = getLocalTimeHHMM(tz);
+    const shouldBeLocked =
+      Boolean(settings.nightModeEnabled) &&
+      isWithinNightWindow(nowHHMM, settings.nightLockStart || '00:00', settings.nightLockEnd || '06:00');
+
+    nightModeBusy = true;
+    try {
+      if (shouldBeLocked) {
+        await applyNightModeManually(sock, true);
+      } else if (Object.keys(db.nightLockedGroups || {}).length > 0) {
+        await applyNightModeManually(sock, false);
+      }
+    } catch (err: any) {
+      console.warn('[Night Mode Scheduler Error]:', err?.message || err);
+    } finally {
+      nightModeBusy = false;
+    }
+  }, 30000);
+}
+
+// -------------------------------------------------------------
+// FEATURE 3: ANTI-CALL PROTECTION
+// -------------------------------------------------------------
+export function getCallLogs(limit = 50): CallLogItem[] {
+  return (db.callLogs || []).slice(-limit).reverse();
+}
+
+export function clearCallLogs(): boolean {
+  db.callLogs = [];
+  saveDatabase();
+  return true;
+}
+
+export function resetCallCounts(): boolean {
+  db.callCounts = {};
+  saveDatabase();
+  return true;
+}
+
+export async function handleIncomingCall(sock: WASocket, call: any) {
+  try {
+    if (!call || !call.id || !call.from) return;
+    if (call.status !== 'offer') return;
+
+    const settings = getSettings();
+    if (!settings.antiCallEnabled) return;
+
+    const callerJid = normalizeJid(call.from);
+    const callerPhone = cleanJidUser(callerJid);
+    const isVideo = Boolean(call.isVideo);
+
+    try {
+      await sock.rejectCall(call.id, call.from);
+    } catch (err: any) {
+      console.warn(`[Anti-Call] rejectCall failed for ${callerPhone}:`, err?.message || err);
+    }
+
+    if (!db.callCounts) db.callCounts = {};
+    db.callCounts[callerJid] = (db.callCounts[callerJid] || 0) + 1;
+    const count = db.callCounts[callerJid];
+    const autoBlockLimit = Number(settings.antiCallAutoBlockCount ?? 3);
+    let blocked = false;
+
+    if (autoBlockLimit > 0 && count >= autoBlockLimit) {
+      try {
+        await sock.updateBlockStatus(call.from, 'block');
+        blocked = true;
+      } catch (err: any) {
+        console.warn(`[Anti-Call] updateBlockStatus failed:`, err?.message || err);
+      }
+    }
+
+    if (!db.callLogs) db.callLogs = [];
+    db.callLogs.push({
+      id: 'call_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+      timestamp: Date.now(),
+      callerJid,
+      callerPhone,
+      isVideo,
+      status: blocked ? 'Rejected & Blocked' : 'Auto-Rejected',
+      blocked,
+    });
+    if (db.callLogs.length > 100) db.callLogs = db.callLogs.slice(-100);
+    db.stats.callsRejected = (db.stats.callsRejected || 0) + 1;
+    saveDatabase();
+
+    const warnText = blocked
+      ? `🚫 বারবার কল করার কারণে (@${callerPhone}) অটো-ব্লক করা হয়েছে!`
+      : `${settings.antiCallMessage || DEFAULT_SETTINGS.antiCallMessage}${
+          autoBlockLimit > 0 ? `\n\n⚠️ সতর্কতা: কল সংখ্যা ${count}/${autoBlockLimit} (${autoBlockLimit} বার হলে অটো-ব্লক হবে)` : ''
+        }`;
+
+    await safeSendMessage(sock, callerJid, { text: warnText });
+
+    addActivityLog({
+      groupId: 'call',
+      groupName: isVideo ? 'Incoming Video Call' : 'Incoming Voice Call',
+      senderJid: callerJid,
+      senderPhone: callerPhone,
+      action: blocked ? 'kicked' : 'deleted',
+      reason: blocked ? `অ্যান্টি-কল: বারবার কল করায় ব্লক (${count} বার)` : `অ্যান্টি-কল: ${isVideo ? 'ভিডিও' : 'অডিও'} কল অটো-রিজেক্ট`,
+    });
+  } catch (err: any) {
+    console.error('[Anti-Call Error]:', err?.message || err);
+  }
+}
+
+// -------------------------------------------------------------
+// FEATURE 5: MEMBER ACTIVITY RANK & GHOST/INACTIVE DETECTOR
+// -------------------------------------------------------------
+function recordMemberActivity(
+  groupId: string,
+  groupName: string,
+  senderJid: string,
+  senderPhone: string,
+  pushName?: string | null
+) {
+  const settings = getSettings();
+  if (settings.activityTrackingEnabled === false) return;
+  if (!db.memberActivity) db.memberActivity = {};
+
+  const cleanSender = normalizeJid(senderJid);
+  const key = `${groupId}:${cleanSender}`;
+  const now = Date.now();
+  const prev = db.memberActivity[key];
+
+  db.memberActivity[key] = {
+    groupId,
+    groupName: groupName || prev?.groupName || 'WhatsApp Group',
+    senderJid: cleanSender,
+    senderPhone: senderPhone || prev?.senderPhone || cleanJidUser(cleanSender),
+    name: (pushName && pushName.trim()) || prev?.name || senderPhone || 'Member',
+    messageCount: (prev?.messageCount || 0) + 1,
+    lastSeen: now,
+    firstSeen: prev?.firstSeen || now,
+  };
+
+  // Prune if table grows huge
+  const entries = Object.entries(db.memberActivity);
+  if (entries.length > 2000) {
+    entries
+      .sort((a, b) => a[1].lastSeen - b[1].lastSeen)
+      .slice(0, entries.length - 1800)
+      .forEach(([k]) => delete db.memberActivity[k]);
+  }
+  saveDatabase();
+}
+
+export function getMemberActivityReport(groupId?: string, ghostDays: number = 7) {
+  const all = Object.values(db.memberActivity || {});
+  const groupMap = new Map<string, { id: string; name: string; members: number; totalMessages: number }>();
+
+  for (const m of all) {
+    const cur = groupMap.get(m.groupId) || { id: m.groupId, name: m.groupName, members: 0, totalMessages: 0 };
+    cur.members += 1;
+    cur.totalMessages += m.messageCount;
+    if (m.groupName && m.groupName !== 'WhatsApp Group') cur.name = m.groupName;
+    groupMap.set(m.groupId, cur);
+  }
+
+  const filtered = groupId && groupId !== 'all' ? all.filter((m) => m.groupId === groupId) : all;
+  const now = Date.now();
+  const ghostCutoffMs = Math.max(1, ghostDays) * 24 * 60 * 60 * 1000;
+
+  const topActive = [...filtered]
+    .sort((a, b) => b.messageCount - a.messageCount || b.lastSeen - a.lastSeen)
+    .slice(0, 30);
+
+  const ghostMembers = [...filtered]
+    .filter((m) => now - m.lastSeen >= ghostCutoffMs || m.messageCount <= 2)
+    .sort((a, b) => a.lastSeen - b.lastSeen)
+    .slice(0, 40)
+    .map((m) => ({
+      ...m,
+      inactiveDays: Math.floor((now - m.lastSeen) / (24 * 60 * 60 * 1000)),
+    }));
+
+  return {
+    groups: Array.from(groupMap.values()),
+    topActive,
+    ghostMembers,
+    totalTracked: filtered.length,
+    totalMessages: filtered.reduce((acc, cur) => acc + cur.messageCount, 0),
+  };
+}
+
+export function resetMemberActivity(groupId?: string): boolean {
+  if (!db.memberActivity) return true;
+  if (!groupId || groupId === 'all') {
+    db.memberActivity = {};
+  } else {
+    for (const [key, item] of Object.entries(db.memberActivity)) {
+      if (item.groupId === groupId) delete db.memberActivity[key];
+    }
+  }
+  saveDatabase();
+  return true;
+}
+
+// -------------------------------------------------------------
+// FEATURE 6: KEYWORD AUTO-RESPONDER (ZERO AI COST)
+// -------------------------------------------------------------
+export function getKeywordTriggers(): KeywordTrigger[] {
+  return [...(db.settings.keywordTriggers || [])];
+}
+
+export function addKeywordTrigger(keyword: string, reply: string, matchType: 'exact' | 'contains' = 'contains'): KeywordTrigger[] {
+  const list = [...(db.settings.keywordTriggers || [])];
+  const item: KeywordTrigger = {
+    id: 'kw_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    keyword: keyword.trim(),
+    reply: reply.trim(),
+    matchType,
+    enabled: true,
+    createdAt: Date.now(),
+    hitCount: 0,
+  };
+  list.unshift(item);
+  updateSettings({ keywordTriggers: list });
+  return list;
+}
+
+export function toggleKeywordTrigger(id: string): KeywordTrigger[] {
+  const list = (db.settings.keywordTriggers || []).map((t) =>
+    t.id === id ? { ...t, enabled: !t.enabled } : t
+  );
+  updateSettings({ keywordTriggers: list });
+  return list;
+}
+
+export function removeKeywordTrigger(id: string): KeywordTrigger[] {
+  const list = (db.settings.keywordTriggers || []).filter((t) => t.id !== id);
+  updateSettings({ keywordTriggers: list });
+  return list;
+}
+
+function matchKeywordTrigger(text: string): KeywordTrigger | null {
+  const settings = getSettings();
+  if (!settings.keywordAutoReplyEnabled) return null;
+  const list = settings.keywordTriggers || [];
+  if (list.length === 0 || !text) return null;
+
+  const cleanText = text.trim().toLowerCase();
+  if (!cleanText) return null;
+
+  for (const trigger of list) {
+    if (!trigger.enabled || !trigger.keyword || !trigger.reply) continue;
+    const aliases = trigger.keyword
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+
+    for (const kw of aliases) {
+      if (trigger.matchType === 'exact') {
+        if (cleanText === kw) return trigger;
+      } else {
+        if (cleanText.includes(kw)) return trigger;
+      }
+    }
+  }
+  return null;
+}
+
+function incrementKeywordHit(id: string) {
+  const list = (db.settings.keywordTriggers || []).map((t) =>
+    t.id === id ? { ...t, hitCount: (t.hitCount || 0) + 1 } : t
+  );
+  db.settings.keywordTriggers = list;
+  saveDatabase();
+}
+
+// -------------------------------------------------------------
+// MULTIMODAL MEDIA BUFFER HELPER (VOICE NOTES & IMAGES)
+// -------------------------------------------------------------
+async function downloadMediaBuffer(sock: WASocket, msg: proto.IWebMessageInfo): Promise<Buffer | null> {
+  try {
+    const buffer = (await downloadMediaMessage(
+      msg as any,
+      'buffer',
+      {},
+      {
+        logger: { level: 'silent', trace: () => {}, debug: () => {}, info: () => {}, warn: () => {}, error: () => {}, fatal: () => {}, child: () => ({} as any) } as any,
+        reuploadRequest: sock.updateMediaMessage,
+      }
+    )) as Buffer;
+    if (!buffer || buffer.length === 0) return null;
+    if (buffer.length > 8 * 1024 * 1024) {
+      console.warn('[Media Download Skipped] File larger than 8MB');
+      return null;
+    }
+    return buffer;
+  } catch (err: any) {
+    console.warn('[Media Download Error]:', err?.message || err);
+    return null;
+  }
+}
+
+// -------------------------------------------------------------
 // MAIN REAL-TIME MODERATION & AI PROCESSING PIPELINE
 // -------------------------------------------------------------
 export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMessageInfo) {
@@ -1602,19 +2152,85 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
   // 1. INDIVIDUAL PRIVATE INBOX CHAT SYSTEM (1-ON-1 WHATSAPP)
   // -------------------------------------------------------------
   if (isPrivate) {
+    const senderJid = remoteJid;
+    const cleanPhone = senderJid.split('@')[0].split(':')[0];
+    const userName = msg.pushName || 'Friend';
+    const memoryKey = `private:${normalizeJid(senderJid)}`;
+
+    // Keyword Auto-Reply works instantaneously with 0 AI cost
+    if (messageText) {
+      const kwHit = matchKeywordTrigger(messageText);
+      if (kwHit) {
+        incrementKeywordHit(kwHit.id);
+        await safeSendMessage(sock, remoteJid, { text: kwHit.reply }, { quoted: msg as any });
+        addActivityLog({
+          groupId: 'private',
+          groupName: `Private (${userName})`,
+          senderJid: remoteJid,
+          senderPhone: cleanPhone,
+          action: 'replied',
+          reason: `Keyword Auto-Reply ("${kwHit.keyword}")`,
+          details: kwHit.reply.slice(0, 60),
+        });
+        return;
+      }
+    }
+
     if (!settings.mayaAiEnabled || !settings.mayaPrivateReply) {
       return;
     }
 
-    if (!messageText || messageText.trim().length === 0) {
-      return; // Skip media without captions in private chats
+    const hasAudio = Boolean(realMsg.audioMessage);
+    const hasImage = Boolean(realMsg.imageMessage);
+
+    // Handle Private Voice Notes or Images via Multimodal Gemini
+    if ((hasAudio && settings.mayaVoiceEnabled) || (hasImage && settings.mayaVisionEnabled)) {
+      const mediaBuf = await downloadMediaBuffer(sock, msg);
+      if (mediaBuf) {
+        const mimeType = hasAudio
+          ? realMsg.audioMessage?.mimetype || 'audio/ogg; codecs=opus'
+          : realMsg.imageMessage?.mimetype || 'image/jpeg';
+        const aiResult = await getMayaMultimodalResponse(
+          mediaBuf,
+          mimeType,
+          messageText || '',
+          hasAudio ? 'audio' : 'image',
+          cleanPhone,
+          userName,
+          'Private Chat',
+          memoryKey,
+          {
+            romantic: settings.mayaRomantic,
+            funny: settings.mayaFunny,
+            language: settings.mayaLanguage,
+            memoryLimit: settings.mayaMemoryLimit,
+            aiProvider: 'gemini',
+            geminiModel: settings.geminiModel,
+            geminiApiKey: settings.geminiApiKey,
+            isPrivate: true,
+          }
+        );
+        if (aiResult.reply && aiResult.provider !== 'none') {
+          const sent = await safeSendMessage(sock, remoteJid, { text: aiResult.reply }, { quoted: msg as any });
+          if (sent) {
+            addActivityLog({
+              groupId: 'private',
+              groupName: `Private (${userName})`,
+              senderJid: remoteJid,
+              senderPhone: cleanPhone,
+              action: 'replied',
+              reason: hasAudio ? 'Private Voice Note Reply [GEMINI]' : 'Private Image Vision Reply [GEMINI]',
+              details: aiResult.reply.slice(0, 60),
+            });
+          }
+          return;
+        }
+      }
     }
 
-    const senderJid = remoteJid;
-    const cleanPhone = senderJid.split('@')[0].split(':')[0];
-    const userName = msg.pushName || 'Friend';
-    // Strictly isolate private conversation history per user
-    const memoryKey = `private:${normalizeJid(senderJid)}`;
+    if (!messageText || messageText.trim().length === 0) {
+      return; // Skip unsupported media without captions in private chats
+    }
 
     console.log(`[Maya AI Private Inbox] Incoming message from @${cleanPhone} (${userName}): "${messageText}"`);
 
@@ -1687,6 +2303,9 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
     senderAltJid
   );
   const canonicalSender = matchedSenderId || normalizeJid(senderJid);
+
+  // Track active member message counts for Rank & Ghost Detector
+  recordMemberActivity(remoteJid, groupSubject, canonicalSender, cleanPhone, msg.pushName);
 
   // -------------------------------------------------------------
   // FEATURE 0: ACTIVE INDIVIDUAL RESTRICTION (MESSAGE INTERCEPTION & AUTO-DELETE)
@@ -1831,6 +2450,32 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
         if (aiCheck.isBad) {
           violationType = 'AI-Anti-Badword';
           violationDetails = aiCheck.reason;
+        }
+      }
+    }
+    // Feature 4b: AI ANTI-NSFW IMAGE SCANNING (when antiImage is OFF and antiNsfwImage is ON)
+    if (!violationType && isImage && !isViewOnce && settings.antiNsfwImage) {
+      const imgBuf = await downloadMediaBuffer(sock, msg);
+      if (imgBuf) {
+        const nsfwCheck = await inspectImageSafetyWithAi(
+          imgBuf,
+          realMsg.imageMessage?.mimetype || 'image/jpeg',
+          cleanPhone,
+          msg.pushName || 'User',
+          groupSubject,
+          {
+            romantic: false,
+            funny: false,
+            language: settings.mayaLanguage,
+            memoryLimit: 0,
+            aiProvider: 'gemini',
+            geminiModel: settings.geminiModel,
+            geminiApiKey: settings.geminiApiKey,
+          }
+        );
+        if (nsfwCheck.isUnsafe) {
+          violationType = 'AI-Anti-NSFW';
+          violationDetails = nsfwCheck.reason;
         }
       }
     }
@@ -1981,10 +2626,56 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
   }
 
   // -------------------------------------------------------------
-  // MAYA AI PERSONALITY & GROUP AUTO-REPLY ENGINE
+  // GROUP COMMAND: .top / !top / .rank (TOP ACTIVE LEADERBOARD)
   // -------------------------------------------------------------
-  if (settings.botReply && settings.mayaAiEnabled && settings.mayaGroupReply && messageText) {
-    const lower = messageText.toLowerCase();
+  const trimmedCmd = (messageText || '').trim().toLowerCase();
+  if (settings.activityTrackingEnabled && (trimmedCmd === '.top' || trimmedCmd === '!top' || trimmedCmd === '.rank')) {
+    const report = getMemberActivityReport(remoteJid, 7);
+    const top10 = report.topActive.slice(0, 10);
+    if (top10.length > 0) {
+      const lines = top10.map((m, i) => `${i + 1}. @${m.senderPhone} — ${m.messageCount} মেসেজ`);
+      await safeSendMessage(
+        sock,
+        remoteJid,
+        {
+          text: `🏆 *${groupSubject} — টপ অ্যাক্টিভ মেম্বার র‍্যাংকিং*\n\n${lines.join('\n')}\n\n📊 মোট পরীক্ষিত মেসেজ: ${report.totalMessages}`,
+          mentions: top10.map((m) => m.senderJid),
+        },
+        { quoted: msg as any }
+      );
+      return;
+    }
+  }
+
+  // -------------------------------------------------------------
+  // KEYWORD AUTO-RESPONDER IN GROUP (ZERO AI COST)
+  // -------------------------------------------------------------
+  if (messageText) {
+    const kwHit = matchKeywordTrigger(messageText);
+    if (kwHit) {
+      incrementKeywordHit(kwHit.id);
+      await safeSendMessage(sock, remoteJid, { text: kwHit.reply }, { quoted: msg as any });
+      addActivityLog({
+        groupId: remoteJid,
+        groupName: groupSubject,
+        senderJid,
+        senderPhone: cleanPhone,
+        action: 'replied',
+        reason: `Keyword Auto-Reply ("${kwHit.keyword}")`,
+        details: kwHit.reply.slice(0, 60),
+      });
+      return;
+    }
+  }
+
+  // -------------------------------------------------------------
+  // MAYA AI PERSONALITY & GROUP AUTO-REPLY ENGINE (TEXT + VOICE + IMAGE)
+  // -------------------------------------------------------------
+  const hasGroupAudio = Boolean(realMsg.audioMessage);
+  const hasGroupImage = Boolean(realMsg.imageMessage);
+
+  if (settings.botReply && settings.mayaAiEnabled && settings.mayaGroupReply && (messageText || hasGroupAudio || hasGroupImage)) {
+    const lower = (messageText || '').toLowerCase();
     const botJid = sock.user?.id || '';
     const botLid = sock.user?.lid || '';
     const cleanBot = botJid.split('@')[0].split(':')[0];
@@ -1992,9 +2683,9 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
 
     const contextInfo = (realMsg as any)?.extendedTextMessage?.contextInfo ||
                         (realMsg as any)?.imageMessage?.contextInfo ||
+                        (realMsg as any)?.audioMessage?.contextInfo ||
                         (realMsg as any)?.videoMessage?.contextInfo;
 
-    // Check if the user is quoting Maya's previous message
     const quotedParticipant = contextInfo?.participant || '';
     const isQuotingBot = quotedParticipant ? (
       quotedParticipant.includes(cleanBot) ||
@@ -2003,7 +2694,6 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
       quotedParticipant === botLid
     ) : false;
 
-    // Direct mention or name calling ("Maya", "মায়া", "এই মায়া", etc.)
     const isDirectMention =
       contextInfo?.mentionedJid?.includes(botJid) ||
       (botLid && contextInfo?.mentionedJid?.includes(botLid)) ||
@@ -2014,23 +2704,77 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
       lower.includes('waguard') ||
       isQuotingBot;
 
-    const isDirectCall = 
+    const isDirectCall =
       lower.includes('এই মায়া') ||
       lower.includes('এই মায়া') ||
       lower.includes('মায়া শুনছো') ||
       lower.includes('মায়া কোথায়') ||
       lower.includes('মায়া কেমন আছো') ||
-      lower.includes('মায়ান') || 
-      lower.includes('মায়ান') || 
-      lower.includes('বট') || 
+      lower.includes('মায়ান') ||
+      lower.includes('মায়ান') ||
+      lower.includes('বট') ||
       lower.includes('bot');
 
     const isSalamOrGreeting = isRespectfulSalamOrGreeting(messageText);
 
-    const shouldAttemptReply = 
-      isDirectMention || 
-      isDirectCall || 
-      isQuotingBot || 
+    // Handle group Voice/Image ONLY when Maya is explicitly invoked (mention/quote/caption calling Maya)
+    if (
+      (isDirectMention || isDirectCall || isQuotingBot) &&
+      ((hasGroupAudio && settings.mayaVoiceEnabled) || (hasGroupImage && settings.mayaVisionEnabled))
+    ) {
+      const mediaBuf = await downloadMediaBuffer(sock, msg);
+      if (mediaBuf) {
+        const mimeType = hasGroupAudio
+          ? realMsg.audioMessage?.mimetype || 'audio/ogg; codecs=opus'
+          : realMsg.imageMessage?.mimetype || 'image/jpeg';
+        const aiResult = await getMayaMultimodalResponse(
+          mediaBuf,
+          mimeType,
+          messageText || '',
+          hasGroupAudio ? 'audio' : 'image',
+          cleanPhone,
+          msg.pushName || 'User',
+          groupSubject,
+          `group:${remoteJid}`,
+          {
+            romantic: settings.mayaRomantic,
+            funny: settings.mayaFunny,
+            language: settings.mayaLanguage,
+            memoryLimit: settings.mayaMemoryLimit,
+            aiProvider: 'gemini',
+            geminiModel: settings.geminiModel,
+            geminiApiKey: settings.geminiApiKey,
+            isPrivate: false,
+          }
+        );
+        if (aiResult.reply && aiResult.provider !== 'none') {
+          lastAiReplyTime[remoteJid] = Date.now();
+          const targetJid = normalizeJid(senderJid);
+          const sent = await safeSendMessage(sock, targetJid, {
+            text: `🌸 [Maya AI Private Reply for ${groupSubject}]\n\n${aiResult.reply}`,
+          });
+          if (sent) {
+            addActivityLog({
+              groupId: remoteJid,
+              groupName: groupSubject,
+              senderJid,
+              senderPhone: cleanPhone,
+              action: 'replied',
+              reason: hasGroupAudio ? 'Group Voice Note -> DM Reply [GEMINI]' : 'Group Image Vision -> DM Reply [GEMINI]',
+              details: aiResult.reply.slice(0, 60),
+            });
+          }
+          return;
+        }
+      }
+    }
+
+    if (!messageText) return;
+
+    const shouldAttemptReply =
+      isDirectMention ||
+      isDirectCall ||
+      isQuotingBot ||
       isSalamOrGreeting ||
       (settings.mayaAutoParticipate && Math.random() * 100 < settings.mayaReplyFrequency);
 
@@ -2044,11 +2788,11 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
       }
 
       console.log(`[Maya AI Response Engine] Processing for ${groupSubject} (Sending to User DM)`);
-      
+
       try {
         const userName = msg.pushName || 'User';
         const memoryKey = `group:${remoteJid}`;
-        
+
         const aiResult = await getMayaResponse(
           messageText,
           cleanPhone,
@@ -2072,7 +2816,6 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
         if (aiResult.reply && aiResult.provider !== 'none') {
           lastAiReplyTime[remoteJid] = now;
 
-          // Always reply directly to user's private inbox JID as requested
           const targetJid = normalizeJid(senderJid);
 
           const sent = await safeSendMessage(

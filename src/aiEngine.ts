@@ -198,10 +198,10 @@ async function callGemini(
     httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
   });
 
-  const validModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+  const validModels = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
   let modelName = preferredModel;
   if (!modelName || !validModels.includes(modelName)) {
-    modelName = 'gemini-2.5-flash';
+    modelName = 'gemini-3.1-flash-lite';
   }
 
   let attempts = 0;
@@ -236,10 +236,10 @@ async function callGemini(
     } catch (err: any) {
       lastErr = err;
       const errStr = err?.message || String(err);
-      
+
       if (errStr.includes('404') || errStr.includes('not found')) {
-        if (modelName === 'gemini-3.8-flash') modelName = 'gemini-flash-latest';
-        else if (modelName === 'gemini-flash-latest') modelName = 'gemini-3.1-flash-lite';
+        if (modelName === 'gemini-4-hydrogen') modelName = 'gemini-3.1-flash-lite';
+        else if (modelName === 'gemini-3.1-flash-lite') modelName = 'gemini-2.5-flash';
         else break;
         continue;
       }
@@ -249,13 +249,96 @@ async function callGemini(
         await delay(1000 * attempts);
         continue;
       }
-      
+
       recordKeyUsage(key.id, false, errStr);
       throw err;
     }
   }
 
   throw lastErr || new Error('Gemini failed');
+}
+
+/**
+ * Gemini Multimodal Provider (Audio Voice Notes & Image Vision)
+ */
+async function callGeminiMultimodal(
+  systemPrompt: string,
+  mediaBase64: string,
+  mimeType: string,
+  promptText: string,
+  key: AiKey,
+  preferredModel?: string
+): Promise<string> {
+  if (!isValidGeminiKeyFormat(key.key)) {
+    const errStr = 'API key not valid (Invalid Gemini API Key format)';
+    recordKeyUsage(key.id, false, errStr);
+    throw new Error(errStr);
+  }
+
+  const ai = new GoogleGenAI({
+    apiKey: key.key,
+    httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+  });
+
+  const validModels = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
+  let modelName = preferredModel && validModels.includes(preferredModel) ? preferredModel : 'gemini-2.5-flash';
+
+  let attempts = 0;
+  const maxAttempts = 2;
+  let lastErr: any = null;
+
+  while (attempts < maxAttempts) {
+    attempts++;
+    try {
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                mimeType,
+                data: mediaBase64,
+              },
+            },
+            {
+              text: promptText,
+            },
+          ],
+        },
+        config: {
+          systemInstruction: systemPrompt,
+          maxOutputTokens: 300,
+        },
+      });
+
+      const text = response.text?.trim();
+      if (text) {
+        recordKeyUsage(key.id, true);
+        return text;
+      }
+    } catch (err: any) {
+      lastErr = err;
+      const errStr = err?.message || String(err);
+
+      if (errStr.includes('404') || errStr.includes('not found')) {
+        if (modelName === 'gemini-4-hydrogen') modelName = 'gemini-3.1-flash-lite';
+        else if (modelName === 'gemini-3.1-flash-lite') modelName = 'gemini-2.5-flash';
+        else break;
+        continue;
+      }
+
+      const is503 = errStr.includes('503') || errStr.includes('UNAVAILABLE') || errStr.includes('high demand');
+      if (is503 && attempts < maxAttempts) {
+        await delay(1000 * attempts);
+        continue;
+      }
+
+      recordKeyUsage(key.id, false, errStr);
+      throw err;
+    }
+  }
+
+  throw lastErr || new Error('Gemini multimodal call failed');
 }
 
 /**
@@ -335,7 +418,7 @@ async function callOpenRouter(
   messages.push({ role: 'user', content: userInput });
 
   const models = [
-    'google/gemini-2.0-flash-lite-001',
+    'google/gemini-2.5-flash',
     'meta-llama/llama-3.3-70b-instruct',
     'meta-llama/llama-3.1-8b-instruct',
     'deepseek/deepseek-chat',
@@ -521,4 +604,152 @@ export function clearConversationMemory(memoryKey?: string) {
   } else {
     Object.keys(conversationMemory).forEach(k => delete conversationMemory[k]);
   }
+}
+
+/**
+ * Multimodal Maya Response for WhatsApp Voice Notes (Audio) & Images via Gemini
+ */
+export async function getMayaMultimodalResponse(
+  mediaBuffer: Buffer,
+  mimeType: string,
+  captionOrPrompt: string,
+  mediaKind: 'audio' | 'image',
+  userPhone: string,
+  userName: string,
+  chatContext: string,
+  memoryKey: string,
+  options: MayaOptions
+): Promise<AiExecutionResult> {
+  const startTime = Date.now();
+  const settings = getSettings();
+  const systemPrompt = options.customSystemPrompt || buildMayaSystemPrompt(userName, userPhone, chatContext, options);
+  const pool = settings.aiKeys || [];
+  const now = Date.now();
+
+  let geminiKeys = pool
+    .map((k) => {
+      if ((k.status === 'cooldown' || k.status === 'exhausted') && k.cooldownUntil && now > k.cooldownUntil) {
+        return { ...k, status: 'active' as const };
+      }
+      return k;
+    })
+    .filter((k) => k.provider === 'gemini' && k.status === 'active')
+    .sort((a, b) => (a.lastUsed || 0) - (b.lastUsed || 0));
+
+  if (geminiKeys.length === 0) {
+    const legacyKey = options.geminiApiKey || process.env.GEMINI_API_KEY || '';
+    if (legacyKey && legacyKey.trim().length > 10 && !legacyKey.startsWith('AQ.')) {
+      geminiKeys.push({
+        id: 'legacy_gemini',
+        key: legacyKey.trim(),
+        provider: 'gemini',
+        label: 'Env/Legacy Gemini',
+        status: 'active',
+        cooldownUntil: 0,
+        lastUsed: 0,
+        totalRequests: 0,
+        failureCount: 0,
+      });
+    }
+  }
+
+  if (geminiKeys.length === 0) {
+    return {
+      reply: '',
+      provider: 'none',
+      latencyMs: Date.now() - startTime,
+      error: 'No active Gemini API key for multimodal voice/image processing.',
+    };
+  }
+
+  const base64Data = mediaBuffer.toString('base64');
+  const effectivePrompt =
+    mediaKind === 'audio'
+      ? `ইউজার একটি ভয়েস মেসেজ পাঠিয়েছে। অডিওটি মনোযোগ দিয়ে শুনে বোঝো এবং মায়ার স্বভাব অনুযায়ী সংক্ষেপে সুন্দর প্রাসঙ্গিক উত্তর দাও।${captionOrPrompt ? `\nক্যাপশন: ${captionOrPrompt}` : ''}`
+      : captionOrPrompt?.trim()
+        ? `ইউজার এই ছবিসহ লিখেছে: "${captionOrPrompt}"। ছবিটি দেখে এবং লেখা অনুযায়ী সংক্ষেপে সুন্দর উত্তর দাও।`
+        : 'ইউজার এই ছবিটি পাঠিয়েছে। ছবিটিতে কী দেখা যাচ্ছে তা সংক্ষেপে ও মিষ্টি বাংলায় বর্ণনা করো এবং প্রাসঙ্গিক মন্তব্য করো।';
+
+  const errors: string[] = [];
+  for (const key of geminiKeys) {
+    try {
+      const reply = await callGeminiMultimodal(
+        systemPrompt,
+        base64Data,
+        mimeType,
+        effectivePrompt,
+        key,
+        options.geminiModel
+      );
+      if (reply) {
+        if (!options.disableMemory && memoryKey) {
+          if (!conversationMemory[memoryKey]) conversationMemory[memoryKey] = [];
+          conversationMemory[memoryKey].push({
+            role: 'user',
+            text: `[${mediaKind.toUpperCase()}] ${captionOrPrompt || ''}`.trim(),
+            timestamp: now,
+          });
+          conversationMemory[memoryKey].push({ role: 'model', text: reply, timestamp: Date.now() });
+        }
+        return { reply, provider: 'gemini', latencyMs: Date.now() - startTime, keyLabel: key.label };
+      }
+    } catch (err: any) {
+      errors.push(`[gemini:${key.label}] ${err?.message || err}`);
+    }
+  }
+
+  return {
+    reply: '',
+    provider: 'none',
+    latencyMs: Date.now() - startTime,
+    error: errors.join('; '),
+  };
+}
+
+/**
+ * Gemini Vision NSFW / Abusive Image Safety Classifier
+ */
+export async function inspectImageSafetyWithAi(
+  imageBuffer: Buffer,
+  mimeType: string,
+  senderPhone: string,
+  userName: string,
+  groupSubject: string,
+  settings: MayaOptions
+): Promise<{ isUnsafe: boolean; reason: string }> {
+  const modPrompt = `You are a strict safety classifier for a WhatsApp community group ("${groupSubject}").
+Inspect the attached image from ${userName} (${senderPhone}).
+Check ONLY for: explicit nudity/NSFW/pornography, extreme graphic gore/violence, or severe obscene abuse.
+Normal selfies, food, memes, nature, screenshots, greetings, Islamic/cultural photos are SAFE.
+Output strictly ONE LINE:
+- If normal/appropriate: SAFE
+- If NSFW, nudity, graphic gore, or severe obscenity: VIOLATION: <1 short reason in Bengali>`;
+
+  try {
+    const res = await getMayaMultimodalResponse(
+      imageBuffer,
+      mimeType,
+      'Inspect this group image for NSFW or obscene content.',
+      'image',
+      senderPhone,
+      userName,
+      groupSubject,
+      '',
+      {
+        ...settings,
+        romantic: false,
+        funny: false,
+        disableMemory: true,
+        customSystemPrompt: modPrompt,
+      }
+    );
+    const reply = (res.reply || '').trim();
+    if (res.provider !== 'none' && /^\s*VIOLATION\b/i.test(reply)) {
+      const reason = reply.replace(/^\s*VIOLATION\s*:?\s*/i, '').trim() || 'আপত্তিকর বা NSFW ছবি শনাক্ত হয়েছে';
+      return { isUnsafe: true, reason };
+    }
+  } catch (err: any) {
+    console.warn('[Anti-NSFW Vision Error]:', err?.message || err);
+  }
+  return { isUnsafe: false, reason: '' };
 }

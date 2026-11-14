@@ -51,9 +51,33 @@ import {
   Info,
   Download,
   Upload,
+  ArrowLeft,
+  Moon,
+  PhoneOff,
+  ScanEye,
+  Trophy,
+  Hash,
 } from 'lucide-react';
 import { HELP_ITEMS } from './helpData.ts';
 import { HelpModal } from './components/HelpModal.tsx';
+import {
+  PageId,
+  KeywordTriggerItem,
+  CallLogViewItem,
+  MemberActivityViewItem,
+  NightModeStatusView,
+  AdminLockScreen,
+  HomeFeatureHub,
+  WarningsPage,
+  BlocksPage,
+  LogsPage,
+  NightModePage,
+  AntiCallPage,
+  AiVisionPage,
+  ActivityRankPage,
+  KeywordsPage,
+  PinLockPage,
+} from './components/FeaturePages.tsx';
 
 
 interface GroupItem {
@@ -115,6 +139,22 @@ interface ModerationSettings {
   aiKeys?: AiKey[];
   aiAutoRotate?: boolean;
   aiProviderPriority?: ('gemini' | 'groq' | 'openrouter')[];
+  // Feature #1-#6 Settings
+  dashboardPinEnabled?: boolean;
+  nightModeEnabled?: boolean;
+  nightLockStart?: string;
+  nightLockEnd?: string;
+  nightModeTimezone?: string;
+  nightModeNotify?: boolean;
+  antiCallEnabled?: boolean;
+  antiCallMessage?: string;
+  antiCallAutoBlockCount?: number;
+  mayaVoiceEnabled?: boolean;
+  mayaVisionEnabled?: boolean;
+  antiNsfwImage?: boolean;
+  activityTrackingEnabled?: boolean;
+  keywordAutoReplyEnabled?: boolean;
+  keywordTriggers?: KeywordTriggerItem[];
 }
 
 export interface AiKey {
@@ -166,7 +206,7 @@ interface ActiveGroupLockItem {
 }
 
 export default function App() {
-  const [activePage, setActivePage] = useState<'home' | 'security' | 'maya' | 'integrations' | 'pairing' | 'groups'>('home');
+  const [activePage, setActivePage] = useState<PageId>('home');
   const [isStaticHost] = useState(() => {
     const isCapacitor = !!(window as any).Capacitor?.isNativePlatform?.() || window.location.protocol === 'capacitor:';
     return isCapacitor || window.location.hostname.includes('github.io') || window.location.hostname.includes('pages.dev');
@@ -442,6 +482,21 @@ export default function App() {
     aiBadwordDetection: true,
     silentModeration: false,
     mayaReplyMode: 'group',
+    dashboardPinEnabled: false,
+    nightModeEnabled: false,
+    nightLockStart: '00:00',
+    nightLockEnd: '06:00',
+    nightModeTimezone: 'Asia/Dhaka',
+    nightModeNotify: true,
+    antiCallEnabled: false,
+    antiCallMessage: '📵 দুঃখিত! এটি একটি অটোমেটেড WhatsApp সিকিউরিটি বট। অনুগ্রহ করে কল না করে মেসেজ পাঠান।',
+    antiCallAutoBlockCount: 3,
+    mayaVoiceEnabled: true,
+    mayaVisionEnabled: true,
+    antiNsfwImage: false,
+    activityTrackingEnabled: true,
+    keywordAutoReplyEnabled: true,
+    keywordTriggers: [],
   });
   const [customBadwordsText, setCustomBadwordsText] = useState('');
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
@@ -450,6 +505,32 @@ export default function App() {
   const [groupLocks, setGroupLocks] = useState<ActiveGroupLockItem[]>([]);
   const [logFilter, setLogFilter] = useState<'all' | 'warned' | 'blocks' | 'deleted' | 'error'>('all');
   const [isLogsLoading, setIsLogsLoading] = useState(false);
+
+  // Feature #1-#6 States
+  const [isPinLocked, setIsPinLocked] = useState(false);
+  const [pinInput, setPinInput] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isVerifyingPin, setIsVerifyingPin] = useState(false);
+  const isPinLockedRef = useRef(false);
+
+  const [nightStatus, setNightStatus] = useState<NightModeStatusView | null>(null);
+  const [callLogs, setCallLogs] = useState<CallLogViewItem[]>([]);
+  const [keywords, setKeywords] = useState<KeywordTriggerItem[]>([]);
+  const [activityReport, setActivityReport] = useState<{
+    groups: Array<{ id: string; name: string; members: number; totalMessages: number }>;
+    topActive: MemberActivityViewItem[];
+    ghostMembers: MemberActivityViewItem[];
+    totalTracked: number;
+    totalMessages: number;
+  }>({
+    groups: [],
+    topActive: [],
+    ghostMembers: [],
+    totalTracked: 0,
+    totalMessages: 0,
+  });
+  const [activityGroupFilter, setActivityGroupFilter] = useState('all');
+  const [activityGhostDays, setActivityGhostDays] = useState(7);
 
   const warningsCardRef = useRef<HTMLDivElement | null>(null);
   const blocksCardRef = useRef<HTMLDivElement | null>(null);
@@ -572,23 +653,32 @@ export default function App() {
     toastTimerRef.current = setTimeout(() => setShowToast(false), 3200);
   };
 
+  useEffect(() => {
+    isPinLockedRef.current = isPinLocked;
+  }, [isPinLocked]);
+
   const callApi = async (path: string, method = 'GET', body?: any) => {
     let base = baileysUrl.trim();
     if (base && base.endsWith('/')) {
       base = base.slice(0, -1);
     }
-    
+
     const cleanPath = path.startsWith('/') ? path : `/${path}`;
     const url = base ? `${base}${cleanPath}` : cleanPath;
-    
+    const adminToken = localStorage.getItem('wg_admin_token') || '';
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(adminToken ? { 'x-admin-token': adminToken } : {}),
+    };
+
     try {
       const res = await fetch(url, {
         method,
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: body ? JSON.stringify(body) : undefined,
         credentials: 'include',
       });
-      
+
       const rawText = await res.text();
       let data: any = {};
       try {
@@ -603,6 +693,11 @@ export default function App() {
         return { success: false, raw: rawText };
       }
 
+      if (res.status === 401 && data?.pinRequired) {
+        setIsPinLocked(true);
+        throw new Error(data.error || 'PIN Required');
+      }
+
       if (!res.ok) {
         throw new Error(data.error || `HTTP ${res.status}`);
       }
@@ -612,7 +707,7 @@ export default function App() {
         console.warn(`Fetch to custom server ${base} failed (${err.message}). Falling back to local app server...`);
         const fallbackRes = await fetch(cleanPath, {
           method,
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: body ? JSON.stringify(body) : undefined,
           credentials: 'same-origin',
         });
@@ -622,6 +717,10 @@ export default function App() {
           fallbackData = fallbackText ? JSON.parse(fallbackText) : {};
         } catch {
           throw new Error(`HTTP ${fallbackRes.status}`);
+        }
+        if (fallbackRes.status === 401 && fallbackData?.pinRequired) {
+          setIsPinLocked(true);
+          throw new Error(fallbackData.error || 'PIN Required');
         }
         if (!fallbackRes.ok) {
           throw new Error(fallbackData.error || `HTTP ${fallbackRes.status}`);
@@ -715,6 +814,7 @@ export default function App() {
         const s = data.moderation.settings;
         setSettings(s);
         setCustomBadwordsText((s.customBadwords || []).join(', '));
+        if (s.keywordTriggers) setKeywords(s.keywordTriggers);
         if (s.geminiApiKey) setGeminiKey(s.geminiApiKey);
         if (s.groqApiKey) setGroqKey(s.groqApiKey);
         if (s.openrouterApiKey) setOpenrouterKey(s.openrouterApiKey);
@@ -724,10 +824,211 @@ export default function App() {
       if (locksRes?.groupLocks) setGroupLocks(locksRes.groupLocks);
       if (restrictedRes?.restrictedUsers) setRestrictedUsers(restrictedRes.restrictedUsers);
       if (logsRes?.logs) setActivityLogs(logsRes.logs);
-      await checkStatus();
+      await Promise.all([
+        checkStatus(),
+        loadNightMode().catch(() => {}),
+        loadCalls().catch(() => {}),
+        loadKeywords().catch(() => {}),
+      ]);
     } catch {
       // non-blocking
     }
+  };
+
+  const loadNightMode = async () => {
+    try {
+      const res = await callApi('/api/moderation/night-mode');
+      if (res?.status) setNightStatus(res.status);
+    } catch {}
+  };
+
+  const handleSaveNightSettings = async (patch: any) => {
+    try {
+      const res = await callApi('/api/moderation/settings', 'POST', patch);
+      if (res?.settings) setSettings(res.settings);
+      await loadNightMode();
+      showNotification(isBn ? 'নাইট মোড সময়সূচি সেভ হয়েছে!' : 'Night Mode schedule saved!');
+    } catch (err: any) {
+      showNotification((isBn ? 'সেভ ব্যর্থ: ' : 'Save failed: ') + err.message);
+    }
+  };
+
+  const handleToggleNightNow = async (lock: boolean) => {
+    try {
+      const res = await callApi('/api/moderation/night-mode/toggle-now', 'POST', { lock });
+      if (res?.status) setNightStatus(res.status);
+      showNotification(
+        res?.message ||
+          (lock
+            ? isBn
+              ? `${res?.affected || 0}টি গ্রুপ লক করা হয়েছে`
+              : `${res?.affected || 0} groups locked`
+            : isBn
+            ? `${res?.affected || 0}টি গ্রুপ আনলক করা হয়েছে`
+            : `${res?.affected || 0} groups unlocked`)
+      );
+    } catch (err: any) {
+      showNotification((isBn ? 'নাইট লক ব্যর্থ: ' : 'Night toggle failed: ') + err.message);
+    }
+  };
+
+  const loadCalls = async () => {
+    try {
+      const res = await callApi('/api/moderation/calls');
+      if (Array.isArray(res?.calls)) setCallLogs(res.calls);
+    } catch {}
+  };
+
+  const handleSaveAntiCall = async (patch: any) => {
+    try {
+      const res = await callApi('/api/moderation/settings', 'POST', patch);
+      if (res?.settings) setSettings(res.settings);
+      showNotification(isBn ? 'অ্যান্টি-কল সেটিংস সেভ হয়েছে!' : 'Anti-Call settings saved!');
+    } catch (err: any) {
+      showNotification((isBn ? 'সেভ ব্যর্থ: ' : 'Save failed: ') + err.message);
+    }
+  };
+
+  const handleClearCalls = async () => {
+    try {
+      await callApi('/api/moderation/calls/clear', 'POST');
+      setCallLogs([]);
+      showNotification(isBn ? 'কল লগ ক্লিয়ার হয়েছে!' : 'Call logs cleared!');
+    } catch (err: any) {
+      showNotification((isBn ? 'ক্লিয়ার ব্যর্থ: ' : 'Clear failed: ') + err.message);
+    }
+  };
+
+  const loadActivityRank = async (groupId = activityGroupFilter, ghostDays = activityGhostDays) => {
+    try {
+      const res = await callApi(
+        `/api/moderation/activity-rank?groupId=${encodeURIComponent(groupId)}&ghostDays=${ghostDays}`
+      );
+      if (res?.success) {
+        setActivityReport({
+          groups: res.groups || [],
+          topActive: res.topActive || [],
+          ghostMembers: res.ghostMembers || [],
+          totalTracked: res.totalTracked || 0,
+          totalMessages: res.totalMessages || 0,
+        });
+      }
+    } catch {}
+  };
+
+  const handleResetActivityRank = async () => {
+    try {
+      await callApi('/api/moderation/activity-rank/reset', 'POST', {
+        groupId: activityGroupFilter,
+      });
+      await loadActivityRank(activityGroupFilter, activityGhostDays);
+      showNotification(isBn ? 'অ্যাক্টিভিটি ডেটা রিসেট হয়েছে!' : 'Activity data reset!');
+    } catch (err: any) {
+      showNotification((isBn ? 'রিসেট ব্যর্থ: ' : 'Reset failed: ') + err.message);
+    }
+  };
+
+  const loadKeywords = async () => {
+    try {
+      const res = await callApi('/api/moderation/keywords');
+      const list = res?.keywords || res?.triggers;
+      if (Array.isArray(list)) setKeywords(list);
+    } catch {}
+  };
+
+  const handleAddKeyword = async (keyword: string, reply: string, matchType: 'exact' | 'contains') => {
+    try {
+      const res = await callApi('/api/moderation/keywords/add', 'POST', { keyword, reply, matchType });
+      const list = res?.keywords || res?.triggers;
+      if (Array.isArray(list)) setKeywords(list);
+      showNotification(isBn ? 'নতুন কীওয়ার্ড রুল সেভ হয়েছে!' : 'Keyword trigger saved!');
+    } catch (err: any) {
+      showNotification((isBn ? 'যোগ করতে ব্যর্থ: ' : 'Add failed: ') + err.message);
+    }
+  };
+
+  const handleToggleKeyword = async (id: string) => {
+    try {
+      const res = await callApi('/api/moderation/keywords/toggle', 'POST', { id });
+      const list = res?.keywords || res?.triggers;
+      if (Array.isArray(list)) setKeywords(list);
+    } catch (err: any) {
+      showNotification((isBn ? 'আপডেট ব্যর্থ: ' : 'Toggle failed: ') + err.message);
+    }
+  };
+
+  const handleRemoveKeyword = async (id: string) => {
+    try {
+      const res = await callApi('/api/moderation/keywords/remove', 'POST', { id });
+      const list = res?.keywords || res?.triggers;
+      if (Array.isArray(list)) setKeywords(list);
+      showNotification(isBn ? 'কীওয়ার্ড রুল ডিলিট হয়েছে!' : 'Keyword deleted!');
+    } catch (err: any) {
+      showNotification((isBn ? 'ডিলিট ব্যর্থ: ' : 'Delete failed: ') + err.message);
+    }
+  };
+
+  const handleVerifyPin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    setIsVerifyingPin(true);
+    try {
+      const res = await callApi('/api/auth/verify', 'POST', { pin: pinInput });
+      if (res?.token) {
+        localStorage.setItem('wg_admin_token', res.token);
+      }
+      setPinInput('');
+      setIsPinLocked(false);
+      await loadDashboard();
+    } catch (err: any) {
+      setAuthError(err.message || (isBn ? 'পিন সঠিক নয়' : 'Invalid PIN'));
+    } finally {
+      setIsVerifyingPin(false);
+    }
+  };
+
+  const handleUpdatePin = async (enabled: boolean, newPin: string) => {
+    try {
+      const res = await callApi('/api/auth/update-pin', 'POST', { enabled, newPin });
+      if (res?.token) {
+        localStorage.setItem('wg_admin_token', res.token);
+      } else if (!enabled) {
+        localStorage.removeItem('wg_admin_token');
+      }
+      setSettings((prev) => ({ ...prev, dashboardPinEnabled: Boolean(res?.pinEnabled) }));
+      showNotification(
+        enabled
+          ? isBn
+            ? 'অ্যাডমিন পিন লক চালু হয়েছে!'
+            : 'Admin PIN Lock enabled!'
+          : isBn
+          ? 'অ্যাডমিন পিন লক বন্ধ করা হয়েছে'
+          : 'Admin PIN Lock disabled'
+      );
+    } catch (err: any) {
+      showNotification((isBn ? 'পিন আপডেট ব্যর্থ: ' : 'PIN update failed: ') + err.message);
+    }
+  };
+
+  const handleLockNow = async () => {
+    try {
+      await callApi('/api/auth/lock', 'POST');
+    } catch {}
+    localStorage.removeItem('wg_admin_token');
+    setIsPinLocked(true);
+  };
+
+  const navigateToPage = (page: PageId) => {
+    setActivePage(page);
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (page === 'home') loadDashboard();
+    else if (page === 'security' || page === 'warnings' || page === 'blocks' || page === 'logs') loadModerationData();
+    else if (page === 'nightmode') loadNightMode();
+    else if (page === 'anticall') loadCalls();
+    else if (page === 'activity') loadActivityRank();
+    else if (page === 'keywords') loadKeywords();
+    else if (page === 'groups') loadGroups();
+    else if (page === 'maya') loadModerationData();
   };
 
   const loadModerationData = async () => {
@@ -744,6 +1045,7 @@ export default function App() {
         const s = settingsRes.settings;
         setSettings(s);
         setCustomBadwordsText((s.customBadwords || []).join(', '));
+        if (s.keywordTriggers) setKeywords(s.keywordTriggers);
         if (s.geminiApiKey) setGeminiKey(s.geminiApiKey);
         if (s.groqApiKey) setGroqKey(s.groqApiKey);
         if (s.openrouterApiKey) setOpenrouterKey(s.openrouterApiKey);
@@ -1355,10 +1657,20 @@ export default function App() {
     }
   };
 
-  // Setup controlled adaptive live status polling (pauses in background & prevents overlapping polls)
+  // Setup controlled adaptive live status polling (pauses in background & when PIN-locked)
   useEffect(() => {
     let mounted = true;
-    loadDashboard();
+    const init = async () => {
+      try {
+        const authStatus = await callApi('/api/auth/status');
+        if (authStatus?.pinEnabled && !authStatus?.authenticated) {
+          if (mounted) setIsPinLocked(true);
+          return;
+        }
+      } catch {}
+      if (mounted) await loadDashboard();
+    };
+    init();
 
     const scheduleNext = () => {
       if (!mounted) return;
@@ -1370,7 +1682,7 @@ export default function App() {
 
       pollIntervalRef.current = setTimeout(async () => {
         if (!mounted) return;
-        if (document.visibilityState !== 'hidden') {
+        if (document.visibilityState !== 'hidden' && !isPinLockedRef.current) {
           await checkStatus();
         }
         scheduleNext();
@@ -1380,7 +1692,7 @@ export default function App() {
     scheduleNext();
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && mounted) {
+      if (document.visibilityState === 'visible' && mounted && !isPinLockedRef.current) {
         checkStatus();
       }
     };
@@ -1392,6 +1704,19 @@ export default function App() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
+
+  if (isPinLocked) {
+    return (
+      <AdminLockScreen
+        isBn={isBn}
+        pinInput={pinInput}
+        setPinInput={setPinInput}
+        authError={authError}
+        isVerifying={isVerifyingPin}
+        onSubmit={handleVerifyPin}
+      />
+    );
+  }
 
   return (
     <div className="shell">
@@ -1444,12 +1769,7 @@ export default function App() {
 
           <button
             className="iconbutton"
-            onClick={() => {
-              if (activePage === 'home') loadDashboard();
-              else if (activePage === 'security') loadModerationData();
-              else if (activePage === 'groups') loadGroups();
-              else checkStatus();
-            }}
+            onClick={() => navigateToPage(activePage)}
             title={t.refresh}
           >
             <RefreshCw size={15} />
@@ -1463,49 +1783,53 @@ export default function App() {
         {/* Sidebar */}
         <aside className="sidebar">
           <div className="side-label">{t.mainMenu}</div>
-          <button
-            className={`nav ${activePage === 'home' ? 'active' : ''}`}
-            onClick={() => setActivePage('home')}
-          >
+          <button className={`nav ${activePage === 'home' ? 'active' : ''}`} onClick={() => navigateToPage('home')}>
             <LayoutDashboard size={16} /> {t.home}
           </button>
-          <button
-            className={`nav ${activePage === 'security' ? 'active' : ''}`}
-            onClick={() => {
-              setActivePage('security');
-              loadModerationData();
-            }}
-          >
+          <button className={`nav ${activePage === 'security' ? 'active' : ''}`} onClick={() => navigateToPage('security')}>
             <ShieldCheck size={16} /> {t.security}
           </button>
-          <button
-            className={`nav ${activePage === 'maya' ? 'active' : ''}`}
-            onClick={() => {
-              setActivePage('maya');
-              loadModerationData();
-            }}
-          >
+          <button className={`nav ${activePage === 'warnings' ? 'active' : ''}`} onClick={() => navigateToPage('warnings')}>
+            <AlertTriangle size={16} /> {isBn ? 'সতর্কবার্তা' : 'Warnings'}
+          </button>
+          <button className={`nav ${activePage === 'blocks' ? 'active' : ''}`} onClick={() => navigateToPage('blocks')}>
+            <Lock size={16} /> {isBn ? '১০ মি. ব্লক' : '10M Blocks'}
+          </button>
+          <button className={`nav ${activePage === 'logs' ? 'active' : ''}`} onClick={() => navigateToPage('logs')}>
+            <Activity size={16} /> {isBn ? 'লাইভ লগ' : 'Live Logs'}
+          </button>
+
+          <div className="side-label mt-3">{isBn ? 'স্মার্ট ফিচার' : 'SMART FEATURES'}</div>
+          <button className={`nav ${activePage === 'nightmode' ? 'active' : ''}`} onClick={() => navigateToPage('nightmode')}>
+            <Moon size={16} /> {isBn ? 'নাইট মোড' : 'Night Mode'}
+          </button>
+          <button className={`nav ${activePage === 'anticall' ? 'active' : ''}`} onClick={() => navigateToPage('anticall')}>
+            <PhoneOff size={16} /> {isBn ? 'অ্যান্টি-কল' : 'Anti-Call'}
+          </button>
+          <button className={`nav ${activePage === 'aivision' ? 'active' : ''}`} onClick={() => navigateToPage('aivision')}>
+            <ScanEye size={16} /> {isBn ? 'ভয়েস ও ছবি AI' : 'Voice & Vision'}
+          </button>
+          <button className={`nav ${activePage === 'activity' ? 'active' : ''}`} onClick={() => navigateToPage('activity')}>
+            <Trophy size={16} /> {isBn ? 'অ্যাক্টিভিটি র‍্যাংক' : 'Activity Rank'}
+          </button>
+          <button className={`nav ${activePage === 'keywords' ? 'active' : ''}`} onClick={() => navigateToPage('keywords')}>
+            <Hash size={16} /> {isBn ? 'কীওয়ার্ড উত্তর' : 'Keywords'}
+          </button>
+          <button className={`nav ${activePage === 'pinlock' ? 'active' : ''}`} onClick={() => navigateToPage('pinlock')}>
+            <KeyRound size={16} /> {isBn ? 'অ্যাডমিন পিন' : 'Admin PIN'}
+          </button>
+
+          <div className="side-label mt-3">{isBn ? 'সিস্টেম ও বট' : 'SYSTEM & BOT'}</div>
+          <button className={`nav ${activePage === 'maya' ? 'active' : ''}`} onClick={() => navigateToPage('maya')}>
             <Heart size={16} /> {t.maya}
           </button>
-          <button
-            className={`nav ${activePage === 'integrations' ? 'active' : ''}`}
-            onClick={() => setActivePage('integrations')}
-          >
+          <button className={`nav ${activePage === 'integrations' ? 'active' : ''}`} onClick={() => navigateToPage('integrations')}>
             <Plug size={16} /> {t.integrations}
           </button>
-          <button
-            className={`nav ${activePage === 'groups' ? 'active' : ''}`}
-            onClick={() => {
-              setActivePage('groups');
-              loadGroups();
-            }}
-          >
+          <button className={`nav ${activePage === 'groups' ? 'active' : ''}`} onClick={() => navigateToPage('groups')}>
             <Users size={16} /> {t.groups}
           </button>
-          <button
-            className={`nav ${activePage === 'pairing' ? 'active' : ''}`}
-            onClick={() => setActivePage('pairing')}
-          >
+          <button className={`nav ${activePage === 'pairing' ? 'active' : ''}`} onClick={() => navigateToPage('pairing')}>
             <Smartphone size={16} /> {t.connect}
           </button>
 
@@ -1691,85 +2015,148 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Separate Quick Action Button Cards on Home for Mobile */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-3">
-                <button
-                  type="button"
-                  onClick={() => jumpToSecuritySection('warnings', 'warned')}
-                  className="text-left p-3 bg-white border border-amber-200 rounded-xl shadow-2xs hover:border-amber-400 transition-colors cursor-pointer"
-                >
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 grid place-items-center">
-                      <AlertTriangle size={15} />
-                    </span>
-                    <span className="badge badge-amber">{activeWarnings.length}</span>
-                  </div>
-                  <div className="text-xs font-extrabold text-slate-900">
-                    {isBn ? 'সতর্কবার্তা (Warnings)' : 'Active Warnings'}
-                  </div>
-                  <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
-                    {isBn ? 'কার কয়টা ওয়ার্নিং দেখুন' : 'View member warnings'}
-                  </p>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => jumpToSecuritySection('blocks', 'blocks')}
-                  className="text-left p-3 bg-white border border-rose-200 rounded-xl shadow-2xs hover:border-rose-400 transition-colors cursor-pointer"
-                >
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="w-8 h-8 rounded-lg bg-rose-50 text-rose-600 grid place-items-center">
-                      <Lock size={15} />
-                    </span>
-                    <span className="badge badge-red">{restrictedUsers.length + groupLocks.length}</span>
-                  </div>
-                  <div className="text-xs font-extrabold text-slate-900">
-                    {isBn ? '১০ মি. ব্লক তথ্য' : '10-Min Block Info'}
-                  </div>
-                  <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
-                    {isBn ? 'ব্লক সদস্য ও গ্রুপ লক' : 'Active locks & timers'}
-                  </p>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => jumpToSecuritySection('logs', 'all')}
-                  className="text-left p-3 bg-white border border-blue-200 rounded-xl shadow-2xs hover:border-blue-400 transition-colors cursor-pointer"
-                >
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 grid place-items-center">
-                      <Activity size={15} />
-                    </span>
-                    <span className="badge badge-blue">{activityLogs.length}</span>
-                  </div>
-                  <div className="text-xs font-extrabold text-slate-900">
-                    {isBn ? 'লাইভ লগ দেখুন' : 'Live Logs'}
-                  </div>
-                  <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
-                    {isBn ? 'ডিলিট, কিক ও লক রেকর্ড' : 'Moderation activity'}
-                  </p>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={openSessionBackupSection}
-                  className="text-left p-3 bg-white border border-emerald-200 rounded-xl shadow-2xs hover:border-emerald-400 transition-colors cursor-pointer"
-                >
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 grid place-items-center">
-                      <Download size={15} />
-                    </span>
-                    <span className="badge badge-green">ZIP/JSON</span>
-                  </div>
-                  <div className="text-xs font-extrabold text-slate-900">
-                    {isBn ? 'সেশন ব্যাকআপ' : 'Session Backup'}
-                  </div>
-                  <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
-                    {isBn ? 'হোস্টিং ট্রান্সফার ফাইল' : 'Export / Restore bot'}
-                  </p>
-                </button>
-              </div>
+              {/* Every Feature Separate Button Cards Hub on Home Page */}
+              <HomeFeatureHub
+                isBn={isBn}
+                settings={settings}
+                activeWarningsCount={activeWarnings.length}
+                blocksCount={restrictedUsers.length + groupLocks.length}
+                logsCount={activityLogs.length}
+                groupsCount={overview.groups || groups.length}
+                callsCount={callLogs.length}
+                keywordsCount={keywords.length}
+                nightStatus={nightStatus}
+                isConnected={liveStatus.online}
+                onNavigate={navigateToPage}
+                onOpenSessionBackup={openSessionBackupSection}
+              />
             </section>
+          )}
+
+          {/* DEDICATED FEATURE PAGES */}
+          {activePage === 'warnings' && (
+            <WarningsPage
+              isBn={isBn}
+              activeWarnings={activeWarnings}
+              isLoading={isLogsLoading}
+              onBack={() => navigateToPage('home')}
+              onRefresh={loadModerationData}
+              onResetSingle={handleResetSingleWarning}
+              onResetAll={resetAllWarnings}
+              onGoToLogs={() => {
+                setLogFilter('warned');
+                navigateToPage('logs');
+              }}
+            />
+          )}
+
+          {activePage === 'blocks' && (
+            <BlocksPage
+              isBn={isBn}
+              groupLocks={groupLocks}
+              restrictedUsers={restrictedUsers}
+              activityLogs={activityLogs}
+              isLoading={isLogsLoading}
+              onBack={() => navigateToPage('home')}
+              onRefresh={loadModerationData}
+              onUnlockGroup={handleUnlockGroup}
+              onManualUnmute={handleManualUnmute}
+              onGoToLogs={() => {
+                setLogFilter('blocks');
+                navigateToPage('logs');
+              }}
+            />
+          )}
+
+          {activePage === 'logs' && (
+            <LogsPage
+              isBn={isBn}
+              activityLogs={activityLogs}
+              logFilter={logFilter}
+              setLogFilter={setLogFilter}
+              onBack={() => navigateToPage('home')}
+              onRefresh={loadModerationData}
+              onClearLogs={clearLogs}
+            />
+          )}
+
+          {activePage === 'nightmode' && (
+            <NightModePage
+              isBn={isBn}
+              settings={settings}
+              nightStatus={nightStatus}
+              onBack={() => navigateToPage('home')}
+              onRefresh={loadNightMode}
+              onSaveNightSettings={handleSaveNightSettings}
+              onToggleNow={handleToggleNightNow}
+            />
+          )}
+
+          {activePage === 'anticall' && (
+            <AntiCallPage
+              isBn={isBn}
+              settings={settings}
+              callLogs={callLogs}
+              onBack={() => navigateToPage('home')}
+              onRefresh={loadCalls}
+              onSaveAntiCall={handleSaveAntiCall}
+              onClearCalls={handleClearCalls}
+            />
+          )}
+
+          {activePage === 'aivision' && (
+            <AiVisionPage
+              isBn={isBn}
+              settings={settings}
+              onBack={() => navigateToPage('home')}
+              onToggle={(key, val) => updateSettingToggle(key as keyof ModerationSettings, val)}
+              onGoToKeys={() => navigateToPage('integrations')}
+            />
+          )}
+
+          {activePage === 'activity' && (
+            <ActivityRankPage
+              isBn={isBn}
+              settings={settings}
+              report={activityReport}
+              selectedGroup={activityGroupFilter}
+              setSelectedGroup={(g) => {
+                setActivityGroupFilter(g);
+                loadActivityRank(g, activityGhostDays);
+              }}
+              ghostDays={activityGhostDays}
+              setGhostDays={(d) => {
+                setActivityGhostDays(d);
+                loadActivityRank(activityGroupFilter, d);
+              }}
+              onBack={() => navigateToPage('home')}
+              onRefresh={() => loadActivityRank(activityGroupFilter, activityGhostDays)}
+              onResetActivity={handleResetActivityRank}
+              onToggleTracking={(v) => updateSettingToggle('activityTrackingEnabled', v)}
+            />
+          )}
+
+          {activePage === 'keywords' && (
+            <KeywordsPage
+              isBn={isBn}
+              settings={settings}
+              keywords={keywords}
+              onBack={() => navigateToPage('home')}
+              onToggleMaster={(v) => updateSettingToggle('keywordAutoReplyEnabled', v)}
+              onAddKeyword={handleAddKeyword}
+              onToggleKeyword={handleToggleKeyword}
+              onRemoveKeyword={handleRemoveKeyword}
+            />
+          )}
+
+          {activePage === 'pinlock' && (
+            <PinLockPage
+              isBn={isBn}
+              pinEnabled={Boolean(settings.dashboardPinEnabled)}
+              onBack={() => navigateToPage('home')}
+              onUpdatePin={handleUpdatePin}
+              onLockNow={handleLockNow}
+            />
           )}
 
           {/* SECURITY & MODERATION PAGE */}
@@ -1777,6 +2164,13 @@ export default function App() {
             <section className="page active" id="security">
               <div className="page-head">
                 <div>
+                  <button
+                    type="button"
+                    onClick={() => navigateToPage('home')}
+                    className="inline-flex items-center gap-1.5 mb-2 px-2.5 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-700 cursor-pointer"
+                  >
+                    <ArrowLeft size={13} className="text-emerald-700" /> {isBn ? 'হোম পেজ' : 'Home'}
+                  </button>
                   <h1>{t.securityTitle}</h1>
                   <p>{t.securitySub}</p>
                 </div>
@@ -2774,6 +3168,13 @@ export default function App() {
             <section className="page active" id="maya">
               <div className="page-head">
                 <div>
+                  <button
+                    type="button"
+                    onClick={() => navigateToPage('home')}
+                    className="inline-flex items-center gap-1.5 mb-2 px-2.5 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-700 cursor-pointer"
+                  >
+                    <ArrowLeft size={13} className="text-emerald-700" /> {isBn ? 'হোম পেজ' : 'Home'}
+                  </button>
                   <h1>{t.mayaTitle}</h1>
                   <p>{t.mayaSub}</p>
                 </div>
@@ -3036,6 +3437,13 @@ export default function App() {
             <section className="page active" id="pairing">
               <div className="page-head">
                 <div>
+                  <button
+                    type="button"
+                    onClick={() => navigateToPage('home')}
+                    className="inline-flex items-center gap-1.5 mb-2 px-2.5 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-700 cursor-pointer"
+                  >
+                    <ArrowLeft size={13} className="text-emerald-700" /> {isBn ? 'হোম পেজ' : 'Home'}
+                  </button>
                   <h1>{t.connectTitle}</h1>
                   <p>{t.connectSub}</p>
                 </div>
@@ -3364,6 +3772,13 @@ export default function App() {
             <section className="page active" id="groups">
               <div className="page-head">
                 <div>
+                  <button
+                    type="button"
+                    onClick={() => navigateToPage('home')}
+                    className="inline-flex items-center gap-1.5 mb-2 px-2.5 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-700 cursor-pointer"
+                  >
+                    <ArrowLeft size={13} className="text-emerald-700" /> {isBn ? 'হোম পেজ' : 'Home'}
+                  </button>
                   <h1>{t.groupsTitle}</h1>
                   <p>{t.groupsSub}</p>
                 </div>
@@ -3432,6 +3847,13 @@ export default function App() {
             <section className="page active" id="integrations">
               <div className="page-head">
                 <div>
+                  <button
+                    type="button"
+                    onClick={() => navigateToPage('home')}
+                    className="inline-flex items-center gap-1.5 mb-2 px-2.5 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-700 cursor-pointer"
+                  >
+                    <ArrowLeft size={13} className="text-emerald-700" /> {isBn ? 'হোম পেজ' : 'Home'}
+                  </button>
                   <h1>AI Control Center</h1>
                   <p>Manage API key rotation, provider failover, and system health.</p>
                 </div>
@@ -4064,48 +4486,33 @@ export default function App() {
       <nav className="mobile-nav">
         <button
           className={activePage === 'home' ? 'active' : ''}
-          onClick={() => setActivePage('home')}
+          onClick={() => navigateToPage('home')}
         >
           <LayoutDashboard size={16} /> {t.home}
         </button>
         <button
           className={activePage === 'security' ? 'active' : ''}
-          onClick={() => {
-            setActivePage('security');
-            loadModerationData();
-          }}
+          onClick={() => navigateToPage('security')}
         >
           <ShieldCheck size={16} /> {t.security}
         </button>
         <button
+          className={activePage === 'activity' ? 'active' : ''}
+          onClick={() => navigateToPage('activity')}
+        >
+          <Trophy size={16} /> {isBn ? 'র‍্যাংক' : 'Rank'}
+        </button>
+        <button
           className={activePage === 'maya' ? 'active' : ''}
-          onClick={() => {
-            setActivePage('maya');
-            loadModerationData();
-          }}
+          onClick={() => navigateToPage('maya')}
         >
           <Heart size={16} /> {t.maya}
         </button>
         <button
-          className={activePage === 'integrations' ? 'active' : ''}
-          onClick={() => setActivePage('integrations')}
-        >
-          <Plug size={16} /> {t.integrations}
-        </button>
-        <button
           className={activePage === 'pairing' ? 'active' : ''}
-          onClick={() => setActivePage('pairing')}
+          onClick={() => navigateToPage('pairing')}
         >
           <Smartphone size={16} /> {t.connect}
-        </button>
-        <button
-          className={activePage === 'groups' ? 'active' : ''}
-          onClick={() => {
-            setActivePage('groups');
-            loadGroups();
-          }}
-        >
-          <Users size={16} /> {t.groups}
         </button>
       </nav>
 
