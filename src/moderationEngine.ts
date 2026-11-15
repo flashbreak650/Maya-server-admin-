@@ -87,6 +87,7 @@ export interface ModerationSettings {
   individualMuteStickerLimit: number;
   individualMuteTimeWindow: number; // in seconds
   individualMuteDurationMinutes: number; // in minutes
+  manualBlockNotice?: string;
   // Maya AI Settings
   mayaAiEnabled: boolean;
   mayaPrivateReply: boolean; // Auto reply to individual private WhatsApp messages
@@ -162,6 +163,7 @@ export interface RestrictedUser {
   groupId: string;
   groupName: string;
   senderJid: string;
+  altJid?: string;
   senderPhone: string;
   restrictedAt: number;
   expiresAt: number;
@@ -226,6 +228,7 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   individualMuteStickerLimit: 3,
   individualMuteTimeWindow: 5,
   individualMuteDurationMinutes: 10,
+  manualBlockNotice: '',
   mayaAiEnabled: true,
   mayaPrivateReply: true,
   mayaGroupReply: true,
@@ -621,32 +624,83 @@ export function setSocketGetter(getter: () => WASocket | null) {
   globalSocketGetter = getter;
 }
 
+const contactNamesCache: Record<string, string> = {};
+
+export function updateContactNames(
+  contacts: Array<{ id?: string; lid?: string; phoneNumber?: string; name?: string; notify?: string; verifiedName?: string }>
+) {
+  if (!Array.isArray(contacts)) return;
+  for (const c of contacts) {
+    const display = (c.name || c.notify || c.verifiedName || '').trim();
+    if (!display) continue;
+    for (const jid of [c.id, c.lid, c.phoneNumber]) {
+      if (!jid) continue;
+      const clean = cleanJidUser(jid);
+      if (clean) contactNamesCache[clean] = display;
+      contactNamesCache[normalizeJid(jid)] = display;
+    }
+  }
+}
+
 export function getRestrictedUserKey(groupId: string, senderJid: string): string {
   return `${groupId}:${normalizeJid(senderJid)}`;
 }
 
+function findRestrictionEntry(
+  groupId: string,
+  senderJid: string,
+  extraJids: string[] = []
+): { key: string; restriction: RestrictedUser } | null {
+  if (!db.restrictedUsers) return null;
+  const candidates = [senderJid, ...extraJids].filter(Boolean);
+  const candidateKeys = new Set<string>();
+  const candidateUsers = new Set<string>();
+
+  for (const cand of candidates) {
+    candidateKeys.add(getRestrictedUserKey(groupId, cand));
+    candidateKeys.add(`${groupId}:${cand}`);
+    const cu = cleanJidUser(cand);
+    if (cu) candidateUsers.add(cu);
+  }
+
+  for (const ck of candidateKeys) {
+    if (db.restrictedUsers[ck]) {
+      return { key: ck, restriction: db.restrictedUsers[ck] };
+    }
+  }
+
+  // Fallback: match stored altJid or clean user digits in the same group
+  for (const [storedKey, entry] of Object.entries(db.restrictedUsers)) {
+    if (entry.groupId !== groupId) continue;
+    const entryUsers = [cleanJidUser(entry.senderJid), cleanJidUser(entry.altJid), cleanJidUser(entry.senderPhone)].filter(Boolean);
+    if (entryUsers.some((u) => candidateUsers.has(u))) {
+      return { key: storedKey, restriction: entry };
+    }
+  }
+
+  return null;
+}
+
 export function isUserRestricted(
   groupId: string,
-  senderJid: string
+  senderJid: string,
+  extraJids: string[] = []
 ): { restricted: boolean; remainingMs: number; restriction?: RestrictedUser } {
   if (!db.restrictedUsers) {
     db.restrictedUsers = {};
     return { restricted: false, remainingMs: 0 };
   }
 
-  const key = getRestrictedUserKey(groupId, senderJid);
-  const rawKey = `${groupId}:${senderJid}`;
-  let restriction = db.restrictedUsers[key] || db.restrictedUsers[rawKey];
-
-  if (!restriction) {
+  const found = findRestrictionEntry(groupId, senderJid, extraJids);
+  if (!found) {
     return { restricted: false, remainingMs: 0 };
   }
 
+  const { key, restriction } = found;
   const now = Date.now();
   if (now >= restriction.expiresAt) {
     // Restriction duration has elapsed! Automatically remove
     delete db.restrictedUsers[key];
-    delete db.restrictedUsers[rawKey];
     saveDatabase();
 
     addActivityLog({
@@ -662,7 +716,7 @@ export function isUserRestricted(
       const sock = globalSocketGetter();
       if (sock && sock.authState?.creds?.registered) {
         safeSendMessage(sock, groupId, {
-          text: `✅ WAGuard Security Update\n\n@${restriction.senderPhone}-এর ১০ মিনিটের Temporary Restriction শেষ হয়েছে। তিনি এখন আবার স্বাভাবিকভাবে গ্রুপে মেসেজ করতে পারবেন।`,
+          text: `🔔 *মেসেজিং বিরতি সমাপ্ত*\n\n👤 @${restriction.senderPhone}\n✅ আপনার সাময়িক নীরবতার সময় শেষ হয়েছে। এখন থেকে পুনরায় গ্রুপে মেসেজ পাঠাতে পারবেন।`,
           mentions: [restriction.senderJid],
         }).catch(() => {});
       }
@@ -684,7 +738,8 @@ export function restrictUser(
   senderJid: string,
   senderPhone: string,
   durationMinutes: number = 10,
-  reason: string = 'অতিরিক্ত স্টিকার স্প্যাম'
+  reason: string = 'অতিরিক্ত স্টিকার স্প্যাম',
+  altJid?: string
 ): RestrictedUser {
   if (!db.restrictedUsers) db.restrictedUsers = {};
 
@@ -698,6 +753,7 @@ export function restrictUser(
     groupId,
     groupName,
     senderJid: normalizeJid(senderJid),
+    altJid: altJid ? normalizeJid(altJid) : undefined,
     senderPhone,
     restrictedAt: now,
     expiresAt,
@@ -722,16 +778,13 @@ export function restrictUser(
   return restriction;
 }
 
-export function unrestrictUser(groupId: string, senderJid: string): boolean {
+export function unrestrictUser(groupId: string, senderJid: string, extraJids: string[] = []): boolean {
   if (!db.restrictedUsers) return false;
 
-  const key = getRestrictedUserKey(groupId, senderJid);
-  const rawKey = `${groupId}:${senderJid}`;
-
-  const restriction = db.restrictedUsers[key] || db.restrictedUsers[rawKey];
-  if (restriction) {
+  const found = findRestrictionEntry(groupId, senderJid, extraJids);
+  if (found) {
+    const { key, restriction } = found;
     delete db.restrictedUsers[key];
-    delete db.restrictedUsers[rawKey];
     saveDatabase();
 
     addActivityLog({
@@ -740,14 +793,14 @@ export function unrestrictUser(groupId: string, senderJid: string): boolean {
       senderJid: restriction.senderJid,
       senderPhone: restriction.senderPhone,
       action: 'unmuted',
-      reason: 'ম্যানুয়ালি রেস্ট্রিকশন তুলে দেওয়া হয়েছে (Manual Unmute)',
+      reason: 'সাময়িক মেসেজ ব্লক তুলে নেওয়া হয়েছে (Manual Unblock)',
     });
 
     if (globalSocketGetter) {
       const sock = globalSocketGetter();
       if (sock && sock.authState?.creds?.registered) {
         safeSendMessage(sock, groupId, {
-          text: `✅ WAGuard Security Update\n\n@${restriction.senderPhone}-এর ১০ মিনিটের Temporary Restriction শেষ হয়েছে। তিনি এখন আবার স্বাভাবিকভাবে গ্রুপে মেসেজ করতে পারবেন।`,
+          text: `✅ *মেসেজ ব্লক প্রত্যাহার*\n\n👤 @${restriction.senderPhone}\nএখন থেকে আপনি আবার স্বাভাবিকভাবে গ্রুপে মেসেজ পাঠাতে পারবেন।`,
           mentions: [restriction.senderJid],
         }).catch(() => {});
       }
@@ -2075,6 +2128,255 @@ function incrementKeywordHit(id: string) {
 }
 
 // -------------------------------------------------------------
+// GROUP MEMBER DIRECTORY & ANONYMOUS 10-MINUTE MEMBER BLOCK
+// -------------------------------------------------------------
+export const DEFAULT_MANUAL_MEMBER_BLOCK_NOTICE =
+  '🔕 *সাময়িক মেসেজিং বিরতি (Temporary Mute)*\n\n👤 @{{user}}\n⏳ সময়কাল: *{{minutes}} মিনিট*\n\n📌 গ্রুপের শৃঙ্খলা বজায় রাখার স্বার্থে আপনার মেসেজ পাঠানোর সুবিধা আগামী {{minutes}} মিনিটের জন্য স্থগিত করা হয়েছে। এই সময়ে পাঠানো আপনার কোনো মেসেজ গ্রুপে থাকবে না (স্বয়ংক্রিয়ভাবে মুছে দেওয়া হবে)।\n\n⏳ সময় শেষ হলে পুনরায় স্বাভাবিকভাবে মেসেজ করতে পারবেন।';
+
+export interface GroupMemberDirectoryItem {
+  jid: string;
+  altJid: string;
+  phone: string;
+  name: string;
+  role: 'superadmin' | 'admin' | 'member';
+  isSelf: boolean;
+  isBlocked: boolean;
+  remainingSeconds: number;
+  remainingText: string;
+}
+
+export async function getGroupMembersForBlockPage(
+  sock: WASocket | null,
+  requestedGroupId?: string
+): Promise<{
+  connected: boolean;
+  groups: Array<{ id: string; name: string; participants: number; isBotAdmin: boolean }>;
+  selectedGroupId: string;
+  selectedGroupName: string;
+  isBotAdmin: boolean;
+  members: GroupMemberDirectoryItem[];
+}> {
+  if (!sock || !sock.authState?.creds?.registered) {
+    return {
+      connected: false,
+      groups: [],
+      selectedGroupId: '',
+      selectedGroupName: '',
+      isBotAdmin: false,
+      members: [],
+    };
+  }
+
+  const allGroups = await sock.groupFetchAllParticipating().catch(() => ({} as Record<string, any>));
+  primeGroupMetaCache(allGroups);
+
+  const groups = Object.values(allGroups)
+    .map((g: any) => ({
+      id: g.id,
+      name: g.subject || 'WhatsApp Group',
+      participants: Array.isArray(g.participants) ? g.participants.length : 0,
+      isBotAdmin: isBotGroupAdminFromMeta(sock, g),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  if (groups.length === 0) {
+    return {
+      connected: true,
+      groups: [],
+      selectedGroupId: '',
+      selectedGroupName: '',
+      isBotAdmin: false,
+      members: [],
+    };
+  }
+
+  const selectedGroupId =
+    requestedGroupId && allGroups[requestedGroupId] ? requestedGroupId : groups[0].id;
+  const meta = (await getGroupMeta(sock, selectedGroupId, true)) || allGroups[selectedGroupId];
+  const selectedGroupName = meta?.subject || 'WhatsApp Group';
+  const isBotAdmin = isBotGroupAdminFromMeta(sock, meta);
+
+  const botIds = new Set(
+    [sock.user?.id, sock.user?.lid, sock.authState?.creds?.me?.id, sock.authState?.creds?.me?.lid]
+      .filter(Boolean)
+      .map((j) => cleanJidUser(String(j)))
+  );
+
+  // Build lookup of known activity names/phones inside this group
+  const activityByClean: Record<string, MemberActivityItem> = {};
+  for (const act of Object.values(db.memberActivity || {})) {
+    if (act.groupId !== selectedGroupId) continue;
+    const u1 = cleanJidUser(act.senderJid);
+    const u2 = cleanJidUser(act.senderPhone);
+    if (u1) activityByClean[u1] = act;
+    if (u2) activityByClean[u2] = act;
+  }
+
+  const activeRestrictions = getActiveRestrictedUsers().filter((r) => r.groupId === selectedGroupId);
+
+  const members: GroupMemberDirectoryItem[] = (meta?.participants || []).map((p: any) => {
+    const jid = normalizeJid(p.id || p.jid || p.lid || '');
+    const altJid = p.phoneNumber ? normalizeJid(p.phoneNumber) : p.lid ? normalizeJid(p.lid) : '';
+    const cleanId = cleanJidUser(jid);
+    const cleanAlt = cleanJidUser(altJid);
+    const act = activityByClean[cleanId] || (cleanAlt ? activityByClean[cleanAlt] : undefined);
+
+    let phone = cleanAlt || cleanId;
+    if (jid.endsWith('@s.whatsapp.net')) {
+      phone = cleanId;
+    } else if (p.phoneNumber) {
+      phone = cleanJidUser(p.phoneNumber) || phone;
+    } else if (act?.senderPhone && /^\d+$/.test(act.senderPhone)) {
+      phone = act.senderPhone;
+    }
+
+    const resolvedName = (
+      p.notify ||
+      p.name ||
+      contactNamesCache[jid] ||
+      contactNamesCache[cleanId] ||
+      (altJid ? contactNamesCache[altJid] : '') ||
+      (cleanAlt ? contactNamesCache[cleanAlt] : '') ||
+      act?.name ||
+      ''
+    ).trim();
+
+    const role: 'superadmin' | 'admin' | 'member' =
+      p.admin === 'superadmin' || p.isSuperAdmin
+        ? 'superadmin'
+        : p.admin === 'admin' || p.isAdmin
+        ? 'admin'
+        : 'member';
+
+    const isSelf = botIds.has(cleanId) || (cleanAlt ? botIds.has(cleanAlt) : false);
+
+    const matchedRestriction = activeRestrictions.find((r) => {
+      const rUsers = [cleanJidUser(r.senderJid), cleanJidUser(r.altJid), cleanJidUser(r.senderPhone)].filter(Boolean);
+      return rUsers.includes(cleanId) || (cleanAlt && rUsers.includes(cleanAlt)) || rUsers.includes(phone);
+    });
+
+    return {
+      jid,
+      altJid,
+      phone,
+      name: resolvedName || (phone ? `সদস্য (${phone.slice(-4)})` : 'সদস্য'),
+      role,
+      isSelf,
+      isBlocked: Boolean(matchedRestriction),
+      remainingSeconds: matchedRestriction?.remainingSeconds || 0,
+      remainingText: matchedRestriction?.remainingText || '',
+    };
+  });
+
+  // Sort: Blocked first, then members alphabetically, then admins last
+  members.sort((a, b) => {
+    if (a.isBlocked !== b.isBlocked) return a.isBlocked ? -1 : 1;
+    if ((a.role === 'member') !== (b.role === 'member')) return a.role === 'member' ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  return {
+    connected: true,
+    groups,
+    selectedGroupId,
+    selectedGroupName,
+    isBotAdmin,
+    members,
+  };
+}
+
+export async function manualBlockMember(
+  sock: WASocket | null,
+  params: {
+    groupId: string;
+    memberJid: string;
+    altJid?: string;
+    memberPhone?: string;
+    durationMinutes?: number;
+    customNotice?: string;
+  }
+): Promise<{
+  success: boolean;
+  error?: string;
+  noticeSent: boolean;
+  restriction?: RestrictedUser;
+}> {
+  const { groupId, memberJid, altJid, memberPhone } = params;
+  const durationMinutes = Math.max(1, Math.min(180, Number(params.durationMinutes || 10)));
+
+  if (!groupId || !memberJid) {
+    return { success: false, error: 'গ্রুপ এবং মেম্বার নির্বাচন করুন।', noticeSent: false };
+  }
+
+  let groupName = 'WhatsApp Group';
+  let isTargetAdmin = false;
+  if (sock && sock.authState?.creds?.registered) {
+    const meta = await getGroupMeta(sock, groupId, false);
+    if (meta?.subject) groupName = meta.subject;
+    const targetCleans = new Set([cleanJidUser(memberJid), cleanJidUser(altJid), cleanJidUser(memberPhone)].filter(Boolean));
+    for (const p of meta?.participants || []) {
+      const pAny = p as any;
+      const pCleans = [p.id, pAny.lid, pAny.phoneNumber].filter(Boolean).map((j) => cleanJidUser(String(j)));
+      if (pCleans.some((c) => targetCleans.has(c))) {
+        if (p.admin === 'admin' || p.admin === 'superadmin' || pAny.isAdmin || pAny.isSuperAdmin) {
+          isTargetAdmin = true;
+        }
+        break;
+      }
+    }
+  }
+
+  const settings = getSettings();
+  if (isTargetAdmin && settings.adminShield) {
+    return {
+      success: false,
+      error: 'Admin Security Shield চালু থাকায় গ্রুপ অ্যাডমিনকে ব্লক করা যাবে না।',
+      noticeSent: false,
+    };
+  }
+
+  const cleanPhone =
+    (memberPhone || '').replace(/[^\d]/g, '') ||
+    cleanJidUser(altJid) ||
+    cleanJidUser(memberJid) ||
+    'member';
+
+  const restriction = restrictUser(
+    groupId,
+    groupName,
+    memberJid,
+    cleanPhone,
+    durationMinutes,
+    'সাময়িক নীরবতা (১০ মিনিট ডিসিপ্লিনারি ব্লক)',
+    altJid
+  );
+
+  let noticeSent = false;
+  if (sock && sock.authState?.creds?.registered) {
+    const rawTemplate = (params.customNotice ?? settings.manualBlockNotice ?? '').trim();
+    const template = rawTemplate || DEFAULT_MANUAL_MEMBER_BLOCK_NOTICE;
+    // Strip any accidental {admin} placeholder so no admin name can ever appear in the notice
+    const noticeText = template
+      .replace(/\{\{?admin\}?\}/gi, '')
+      .replace(/\{\{?user\}?\}/gi, cleanPhone)
+      .replace(/\{\{?minutes\}?\}/gi, String(durationMinutes));
+
+    const mentionJid = normalizeJid(memberJid);
+    const sent = await safeSendMessage(sock, groupId, {
+      text: noticeText,
+      mentions: [mentionJid],
+    });
+    noticeSent = Boolean(sent);
+  }
+
+  return {
+    success: true,
+    noticeSent,
+    restriction,
+  };
+}
+
+// -------------------------------------------------------------
 // MULTIMODAL MEDIA BUFFER HELPER (VOICE NOTES & IMAGES)
 // -------------------------------------------------------------
 async function downloadMediaBuffer(sock: WASocket, msg: proto.IWebMessageInfo): Promise<Buffer | null> {
@@ -2304,33 +2606,42 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
   );
   const canonicalSender = matchedSenderId || normalizeJid(senderJid);
 
+  if (msg.pushName && senderJid) {
+    const cu1 = cleanJidUser(senderJid);
+    const cu2 = cleanJidUser(senderAltJid);
+    if (cu1) contactNamesCache[cu1] = msg.pushName;
+    if (cu2) contactNamesCache[cu2] = msg.pushName;
+  }
+
   // Track active member message counts for Rank & Ghost Detector
   recordMemberActivity(remoteJid, groupSubject, canonicalSender, cleanPhone, msg.pushName);
 
   // -------------------------------------------------------------
   // FEATURE 0: ACTIVE INDIVIDUAL RESTRICTION (MESSAGE INTERCEPTION & AUTO-DELETE)
   // -------------------------------------------------------------
-  if (settings.individualMuteEnabled || settings.antiStickerSpam) {
-    const restrictionCheck = isUserRestricted(remoteJid, canonicalSender);
-    if (restrictionCheck.restricted) {
-      // Group Admins are never restricted if Admin Shield is active
-      if (isSenderAdmin && settings.adminShield) {
-        console.log(`[Individual Mute] @${cleanPhone} is an Admin with Admin Shield active. Lifting restriction.`);
-        unrestrictUser(remoteJid, canonicalSender);
-      } else {
-        const remainingSec = Math.round(restrictionCheck.remainingMs / 1000);
-        console.log(`[Individual Mute ACTIVE] Intercepted message from restricted user @${cleanPhone} in "${groupSubject}". Auto-deleting message (${remainingSec}s remaining)...`);
+  const restrictionCheck = isUserRestricted(
+    remoteJid,
+    canonicalSender,
+    [senderJid, senderAltJid, cleanPhone].filter(Boolean)
+  );
+  if (restrictionCheck.restricted) {
+    // Group Admins are never restricted if Admin Shield is active
+    if (isSenderAdmin && settings.adminShield) {
+      console.log(`[Individual Mute] @${cleanPhone} is an Admin with Admin Shield active. Lifting restriction.`);
+      unrestrictUser(remoteJid, canonicalSender, [senderJid, senderAltJid]);
+    } else {
+      const remainingSec = Math.round(restrictionCheck.remainingMs / 1000);
+      console.log(`[Individual Mute ACTIVE] Intercepted message from restricted user @${cleanPhone} in "${groupSubject}". Auto-deleting message (${remainingSec}s remaining)...`);
 
-        const deleted = await deleteMessageSafely(sock, remoteJid, msg, matchedSenderId);
-        if (deleted) {
-          db.stats.deletedMessages++;
-          db.stats.restrictedMessagesBlocked = (db.stats.restrictedMessagesBlocked || 0) + 1;
-          saveDatabase();
-        }
-
-        // Halts all processing! Message deleted instantly, other members chat freely.
-        return;
+      const deleted = await deleteMessageSafely(sock, remoteJid, msg, matchedSenderId);
+      if (deleted) {
+        db.stats.deletedMessages++;
+        db.stats.restrictedMessagesBlocked = (db.stats.restrictedMessagesBlocked || 0) + 1;
+        saveDatabase();
       }
+
+      // Halts all processing! Message deleted instantly, other members chat freely.
+      return;
     }
   }
 

@@ -66,10 +66,12 @@ import {
   CallLogViewItem,
   MemberActivityViewItem,
   NightModeStatusView,
+  GroupMemberDirectoryViewItem,
   AdminLockScreen,
   HomeFeatureHub,
   WarningsPage,
   BlocksPage,
+  MemberBlockPage,
   LogsPage,
   NightModePage,
   AntiCallPage,
@@ -155,6 +157,7 @@ interface ModerationSettings {
   activityTrackingEnabled?: boolean;
   keywordAutoReplyEnabled?: boolean;
   keywordTriggers?: KeywordTriggerItem[];
+  manualBlockNotice?: string;
 }
 
 export interface AiKey {
@@ -497,6 +500,7 @@ export default function App() {
     activityTrackingEnabled: true,
     keywordAutoReplyEnabled: true,
     keywordTriggers: [],
+    manualBlockNotice: '',
   });
   const [customBadwordsText, setCustomBadwordsText] = useState('');
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
@@ -531,6 +535,17 @@ export default function App() {
   });
   const [activityGroupFilter, setActivityGroupFilter] = useState('all');
   const [activityGhostDays, setActivityGhostDays] = useState(7);
+
+  // Group Members 10-Min Block Directory State
+  const [memberDirLoading, setMemberDirLoading] = useState(false);
+  const [memberDirGroups, setMemberDirGroups] = useState<
+    Array<{ id: string; name: string; participants: number; isBotAdmin: boolean }>
+  >([]);
+  const [memberDirGroupId, setMemberDirGroupId] = useState('');
+  const [memberDirIsBotAdmin, setMemberDirIsBotAdmin] = useState(false);
+  const [memberDirMembers, setMemberDirMembers] = useState<GroupMemberDirectoryViewItem[]>([]);
+  const [defaultManualBlockNotice, setDefaultManualBlockNotice] = useState('');
+  const [blockingMemberJid, setBlockingMemberJid] = useState<string | null>(null);
 
   const warningsCardRef = useRef<HTMLDivElement | null>(null);
   const blocksCardRef = useRef<HTMLDivElement | null>(null);
@@ -581,6 +596,20 @@ export default function App() {
             const remainingText = mins > 0 ? `${mins} মি. ${secs} সে.` : `${secs} সেকেন্ড`;
             return { ...g, remainingSeconds: remainingSec, remainingText };
           });
+      });
+      setMemberDirMembers((prev) => {
+        if (!prev || prev.length === 0 || !prev.some((m) => m.isBlocked)) return prev;
+        return prev.map((m) => {
+          if (!m.isBlocked) return m;
+          const nextSec = Math.max(0, (m.remainingSeconds || 0) - 1);
+          if (nextSec <= 0) {
+            return { ...m, isBlocked: false, remainingSeconds: 0, remainingText: '' };
+          }
+          const mins = Math.floor(nextSec / 60);
+          const secs = nextSec % 60;
+          const remainingText = mins > 0 ? `${mins} মি. ${secs} সে.` : `${secs} সেকেন্ড`;
+          return { ...m, remainingSeconds: nextSec, remainingText };
+        });
       });
     }, 1000);
     return () => clearInterval(timer);
@@ -1018,11 +1047,111 @@ export default function App() {
     setIsPinLocked(true);
   };
 
+  const loadGroupMembers = async (requestedGroupId?: string) => {
+    setMemberDirLoading(true);
+    try {
+      const gid = requestedGroupId !== undefined ? requestedGroupId : memberDirGroupId;
+      const qs = gid ? `?groupId=${encodeURIComponent(gid)}` : '';
+      const res = await callApi(`/api/moderation/group-members${qs}`);
+      if (res?.success) {
+        setMemberDirGroups(res.groups || []);
+        setMemberDirGroupId(res.selectedGroupId || '');
+        setMemberDirIsBotAdmin(Boolean(res.isBotAdmin));
+        setMemberDirMembers(res.members || []);
+        if (res.defaultNotice) setDefaultManualBlockNotice(res.defaultNotice);
+      }
+    } catch (err: any) {
+      showNotification((isBn ? 'মেম্বার লোড ব্যর্থ: ' : 'Failed to load members: ') + err.message);
+    } finally {
+      setMemberDirLoading(false);
+    }
+  };
+
+  const handleBlockMemberFromList = async (
+    member: GroupMemberDirectoryViewItem,
+    durationMinutes: number,
+    customNotice: string
+  ) => {
+    if (!memberDirGroupId) return;
+    setBlockingMemberJid(member.jid);
+    try {
+      const res = await callApi('/api/moderation/member-block', 'POST', {
+        groupId: memberDirGroupId,
+        memberJid: member.jid,
+        altJid: member.altJid,
+        memberPhone: member.phone,
+        durationMinutes,
+        customNotice,
+      });
+      if (res?.success) {
+        if (Array.isArray(res.restrictedUsers)) {
+          setRestrictedUsers(res.restrictedUsers);
+        }
+        const totalSec = Math.max(60, durationMinutes * 60);
+        setMemberDirMembers((prev) =>
+          prev.map((m) =>
+            m.jid === member.jid
+              ? {
+                  ...m,
+                  isBlocked: true,
+                  remainingSeconds: totalSec,
+                  remainingText: `${durationMinutes} মি. 0 সে.`,
+                }
+              : m
+          )
+        );
+        showNotification(
+          res.message ||
+            (isBn
+              ? `${member.name}-কে ${durationMinutes} মিনিটের জন্য ব্লক করা হয়েছে এবং ভিন্ন নোটিশ পাঠানো হয়েছে!`
+              : `Blocked ${member.name} for ${durationMinutes}m!`)
+        );
+      }
+    } catch (err: any) {
+      showNotification((isBn ? 'ব্লক ব্যর্থ: ' : 'Block failed: ') + err.message);
+    } finally {
+      setBlockingMemberJid(null);
+    }
+  };
+
+  const handleUnblockMemberFromList = async (groupId: string, memberJid: string) => {
+    setBlockingMemberJid(memberJid);
+    try {
+      const res = await callApi('/api/moderation/unmute', 'POST', { groupId, senderJid: memberJid });
+      if (res?.success) {
+        if (Array.isArray(res.restrictedUsers)) {
+          setRestrictedUsers(res.restrictedUsers);
+        }
+        setMemberDirMembers((prev) =>
+          prev.map((m) =>
+            m.jid === memberJid ? { ...m, isBlocked: false, remainingSeconds: 0, remainingText: '' } : m
+          )
+        );
+        showNotification(isBn ? 'মেম্বারের ১০ মিনিটের ব্লক তুলে নেওয়া হয়েছে!' : 'Member unblocked!');
+      }
+    } catch (err: any) {
+      showNotification((isBn ? 'আনব্লক ব্যর্থ: ' : 'Unblock failed: ') + err.message);
+    } finally {
+      setBlockingMemberJid(null);
+    }
+  };
+
+  const handleSaveManualBlockNotice = async (notice: string) => {
+    try {
+      const res = await callApi('/api/moderation/settings', 'POST', { manualBlockNotice: notice });
+      if (res?.settings) setSettings(res.settings);
+      showNotification(isBn ? 'ভিন্ন নোটিশ টেমপ্লেট সেভ হয়েছে!' : 'Distinct notice template saved!');
+    } catch (err: any) {
+      showNotification((isBn ? 'সেভ ব্যর্থ: ' : 'Save failed: ') + err.message);
+    }
+  };
+
   const navigateToPage = (page: PageId) => {
     setActivePage(page);
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
     if (page === 'home') loadDashboard();
     else if (page === 'security' || page === 'warnings' || page === 'blocks' || page === 'logs') loadModerationData();
+    else if (page === 'memberblock') loadGroupMembers();
     else if (page === 'nightmode') loadNightMode();
     else if (page === 'anticall') loadCalls();
     else if (page === 'activity') loadActivityRank();
@@ -1795,6 +1924,9 @@ export default function App() {
           <button className={`nav ${activePage === 'blocks' ? 'active' : ''}`} onClick={() => navigateToPage('blocks')}>
             <Lock size={16} /> {isBn ? '১০ মি. ব্লক' : '10M Blocks'}
           </button>
+          <button className={`nav ${activePage === 'memberblock' ? 'active' : ''}`} onClick={() => navigateToPage('memberblock')}>
+            <UserX size={16} /> {isBn ? 'মেম্বার লিস্ট ব্লক' : 'Member Block'}
+          </button>
           <button className={`nav ${activePage === 'logs' ? 'active' : ''}`} onClick={() => navigateToPage('logs')}>
             <Activity size={16} /> {isBn ? 'লাইভ লগ' : 'Live Logs'}
           </button>
@@ -2065,6 +2197,32 @@ export default function App() {
                 setLogFilter('blocks');
                 navigateToPage('logs');
               }}
+            />
+          )}
+
+          {activePage === 'memberblock' && (
+            <MemberBlockPage
+              isBn={isBn}
+              isConnected={liveStatus.online}
+              isLoading={memberDirLoading}
+              groups={memberDirGroups}
+              selectedGroupId={memberDirGroupId}
+              isBotAdmin={memberDirIsBotAdmin}
+              members={memberDirMembers}
+              adminShieldEnabled={settings.adminShield}
+              noticeTemplate={settings.manualBlockNotice || ''}
+              defaultNotice={defaultManualBlockNotice}
+              blockingJid={blockingMemberJid}
+              onSelectGroup={(gid) => {
+                setMemberDirGroupId(gid);
+                loadGroupMembers(gid);
+              }}
+              onRefresh={() => loadGroupMembers(memberDirGroupId)}
+              onBlockMember={handleBlockMemberFromList}
+              onUnblockMember={handleUnblockMemberFromList}
+              onSaveNoticeTemplate={handleSaveManualBlockNotice}
+              onGoConnect={() => navigateToPage('pairing')}
+              onBack={() => navigateToPage('home')}
             />
           )}
 

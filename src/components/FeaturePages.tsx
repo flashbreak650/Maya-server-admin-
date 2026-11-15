@@ -27,6 +27,7 @@ import {
   RotateCcw,
   Save,
   ScanEye,
+  Search,
   ShieldAlert,
   ShieldCheck,
   Smartphone,
@@ -36,6 +37,7 @@ import {
   Unlock,
   UserX,
   Users,
+  VolumeX,
 } from 'lucide-react';
 
 export type PageId =
@@ -43,6 +45,7 @@ export type PageId =
   | 'security'
   | 'warnings'
   | 'blocks'
+  | 'memberblock'
   | 'logs'
   | 'nightmode'
   | 'anticall'
@@ -97,6 +100,18 @@ export interface NightModeStatusView {
   isNightWindowNow: boolean;
   lockedCount: number;
   lockedGroups: Array<{ groupId: string; groupName: string; lockedAt: number }>;
+}
+
+export interface GroupMemberDirectoryViewItem {
+  jid: string;
+  altJid: string;
+  phone: string;
+  name: string;
+  role: 'superadmin' | 'admin' | 'member';
+  isSelf: boolean;
+  isBlocked: boolean;
+  remainingSeconds: number;
+  remainingText: string;
 }
 
 interface SubPageHeaderProps {
@@ -285,6 +300,17 @@ export function HomeFeatureHub({
       iconText: 'text-rose-700',
       icon: <Lock size={18} />,
       onClick: () => onNavigate('blocks'),
+    },
+    {
+      id: 'memberblock',
+      title: isBn ? 'মেম্বার লিস্ট ও ১০ মি. ব্লক' : 'Members 10-Min Mute',
+      desc: isBn ? 'নাম-নাম্বার দেখে ১ ক্লিকে ১০ মি. ব্লক ও ভিন্ন নোটিশ' : 'Member directory & 1-click 10m mute',
+      statusText: isBn ? `${groupsCount}টি গ্রুপ রেডি` : `${groupsCount} groups`,
+      isOn: isConnected,
+      iconBg: 'bg-rose-50',
+      iconText: 'text-rose-700',
+      icon: <UserX size={18} />,
+      onClick: () => onNavigate('memberblock'),
     },
     {
       id: 'logs',
@@ -1831,6 +1857,350 @@ export function PinLockPage({
           )}
         </div>
       </div>
+    </section>
+  );
+}
+
+/* ============================================================================
+ * GROUP MEMBER DIRECTORY & 1-CLICK 10-MIN BLOCK PAGE (ADMIN-ANONYMOUS NOTICE)
+ * ========================================================================== */
+export function MemberBlockPage({
+  isBn,
+  isConnected,
+  isLoading,
+  groups,
+  selectedGroupId,
+  isBotAdmin,
+  members,
+  adminShieldEnabled,
+  noticeTemplate,
+  defaultNotice,
+  blockingJid,
+  onSelectGroup,
+  onRefresh,
+  onBlockMember,
+  onUnblockMember,
+  onSaveNoticeTemplate,
+  onGoConnect,
+  onBack,
+}: {
+  isBn: boolean;
+  isConnected: boolean;
+  isLoading: boolean;
+  groups: Array<{ id: string; name: string; participants: number; isBotAdmin: boolean }>;
+  selectedGroupId: string;
+  isBotAdmin: boolean;
+  members: GroupMemberDirectoryViewItem[];
+  adminShieldEnabled: boolean;
+  noticeTemplate: string;
+  defaultNotice: string;
+  blockingJid: string | null;
+  onSelectGroup: (groupId: string) => void;
+  onRefresh: () => void;
+  onBlockMember: (member: GroupMemberDirectoryViewItem, durationMinutes: number, customNotice: string) => Promise<void>;
+  onUnblockMember: (groupId: string, memberJid: string) => Promise<void>;
+  onSaveNoticeTemplate: (notice: string) => Promise<void>;
+  onGoConnect: () => void;
+  onBack: () => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [filterMode, setFilterMode] = useState<'members' | 'all' | 'blocked'>('members');
+  const [durationMinutes, setDurationMinutes] = useState<number>(10);
+  const [showNoticeEditor, setShowNoticeEditor] = useState(false);
+  const [draftNotice, setDraftNotice] = useState(noticeTemplate || defaultNotice);
+
+  React.useEffect(() => {
+    setDraftNotice(noticeTemplate || defaultNotice);
+  }, [noticeTemplate, defaultNotice]);
+
+  const blockedCount = members.filter((m) => m.isBlocked).length;
+  const nonAdminCount = members.filter((m) => m.role === 'member' && !m.isSelf).length;
+
+  const visibleMembers = members.filter((m) => {
+    if (m.isSelf) return false;
+    if (filterMode === 'members' && m.role !== 'member') return false;
+    if (filterMode === 'blocked' && !m.isBlocked) return false;
+    if (!search.trim()) return true;
+    const q = search.trim().toLowerCase();
+    return m.name.toLowerCase().includes(q) || m.phone.toLowerCase().includes(q);
+  });
+
+  return (
+    <section className="page active">
+      <SubPageHeader
+        title={isBn ? 'গ্রুপ মেম্বার ও ১০ মিনিট ব্লক' : 'Group Members & 10-Min Block'}
+        subtitle={
+          isBn
+            ? 'গ্রুপের সব সদস্যের নাম ও নাম্বার লিস্ট। ক্লিক করলেই ১০ মিনিট মেসেজ ব্লক হবে এবং অ্যাডমিনের নাম ছাড়াই ভিন্ন ডিসিপ্লিনারি নোটিশ যাবে।'
+            : 'Click any member to mute their messages for 10 minutes with a distinct notice without showing any admin name.'
+        }
+        isBn={isBn}
+        onBack={onBack}
+        rightAction={
+          <button type="button" className="btn outline" onClick={onRefresh} disabled={isLoading}>
+            <RefreshCw size={12} className={isLoading ? 'animate-spin' : ''} /> {isBn ? 'রিফ্রেশ' : 'Refresh'}
+          </button>
+        }
+      />
+
+      {!isConnected ? (
+        <div className="p-6 rounded-2xl bg-white border border-slate-200 text-center space-y-3">
+          <Users size={30} className="mx-auto text-slate-400" />
+          <p className="text-xs font-bold text-slate-700">
+            {isBn
+              ? 'গ্রুপ মেম্বার লিস্ট দেখতে প্রথমে WhatsApp বট কানেক্ট করুন।'
+              : 'Connect your WhatsApp session to load group members.'}
+          </p>
+          <button type="button" onClick={onGoConnect} className="btn primary">
+            <Smartphone size={13} /> {isBn ? 'WhatsApp কানেক্ট করুন' : 'Connect WhatsApp'}
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-3.5">
+          {/* Controls Card */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                  {isBn ? 'গ্রুপ সিলেক্ট করুন' : 'Select Group'}
+                </label>
+                <select
+                  className="field"
+                  value={selectedGroupId}
+                  onChange={(e) => onSelectGroup(e.target.value)}
+                  disabled={isLoading || groups.length === 0}
+                >
+                  {groups.length === 0 && (
+                    <option value="">{isBn ? 'কোনো গ্রুপ পাওয়া যায়নি' : 'No groups found'}</option>
+                  )}
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name} ({g.participants} {isBn ? 'জন' : 'members'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                  {isBn ? 'নাম বা নাম্বার দিয়ে খুঁজুন' : 'Search by Name or Number'}
+                </label>
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder={isBn ? 'নাম বা 017... লিখুন' : 'Search name or phone...'}
+                    className="field pl-8"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {selectedGroupId && !isBotAdmin && (
+              <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-bold flex items-center gap-2">
+                <ShieldAlert size={15} className="shrink-0 text-amber-600" />
+                <span>
+                  {isBn
+                    ? 'সতর্কতা: এই গ্রুপে বট অ্যাডমিন নয়—অন্যের মেসেজ অটো ডিলিট করতে বটকে আগে গ্রুপ অ্যাডমিন করুন।'
+                    : 'Note: Bot is not a Group Admin in this group yet, so it needs Admin role to delete muted members’ messages.'}
+                </span>
+              </div>
+            )}
+
+            {/* Duration & Filter Row */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] font-bold text-slate-500 mr-1">
+                  {isBn ? 'সময়:' : 'Duration:'}
+                </span>
+                {[5, 10, 15, 30].map((mins) => (
+                  <button
+                    key={mins}
+                    type="button"
+                    onClick={() => setDurationMinutes(mins)}
+                    className={`min-h-[32px] px-2.5 rounded-lg text-[11px] font-extrabold cursor-pointer tabular-nums ${
+                      durationMinutes === mins
+                        ? 'bg-rose-600 text-white'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    {isBn ? `${mins} মি.` : `${mins}m`}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setFilterMode('members')}
+                  className={`min-h-[32px] px-2.5 rounded-lg text-[11px] font-bold cursor-pointer ${
+                    filterMode === 'members' ? 'bg-[#087f55] text-white' : 'bg-slate-100 text-slate-700'
+                  }`}
+                >
+                  {isBn ? `মেম্বার (${nonAdminCount})` : `Members (${nonAdminCount})`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterMode('blocked')}
+                  className={`min-h-[32px] px-2.5 rounded-lg text-[11px] font-bold cursor-pointer ${
+                    filterMode === 'blocked' ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-700'
+                  }`}
+                >
+                  {isBn ? `ব্লক করা (${blockedCount})` : `Blocked (${blockedCount})`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterMode('all')}
+                  className={`min-h-[32px] px-2.5 rounded-lg text-[11px] font-bold cursor-pointer ${
+                    filterMode === 'all' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
+                  }`}
+                >
+                  {isBn ? `সবাই (${members.length})` : `All (${members.length})`}
+                </button>
+              </div>
+            </div>
+
+            {/* Distinct Admin-Anonymous Notice Template Editor */}
+            <div className="pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowNoticeEditor((p) => !p)}
+                className="text-[11px] font-extrabold text-emerald-700 flex items-center gap-1.5 cursor-pointer"
+              >
+                <VolumeX size={13} />
+                <span>
+                  {showNoticeEditor
+                    ? isBn
+                      ? '▲ নোটিশ মেসেজ এডিটর লুকান'
+                      : '▲ Hide Notice Template'
+                    : isBn
+                    ? '▼ গ্রুপ নোটিশ মেসেজ দেখুন / কাস্টমাইজ করুন (অ্যাডমিনের নাম ছাড়াই)'
+                    : '▼ Customize Distinct Group Notice (No Admin Name)'}
+                </span>
+              </button>
+
+              {showNoticeEditor && (
+                <div className="mt-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                  <p className="text-[10.5px] text-slate-600 leading-relaxed">
+                    {isBn
+                      ? 'এই নোটিশটি অ্যান্টি-স্প্যাম নোটিশ থেকে সম্পূর্ণ আলাদা এবং এখানে কোনো অ্যাডমিনের নাম উঠবে না। মেম্বার ট্যাগ করতে {{user}} এবং মিনিট দেখাতে {{minutes}} ব্যবহার করুন।'
+                      : 'This notice is completely separate from spam alerts and never includes any admin name. Use {{user}} and {{minutes}}.'}
+                  </p>
+                  <textarea
+                    rows={5}
+                    value={draftNotice}
+                    onChange={(e) => setDraftNotice(e.target.value)}
+                    className="w-full p-2.5 rounded-xl border border-slate-300 bg-white text-xs outline-none focus:border-emerald-600"
+                  />
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setDraftNotice(defaultNotice)}
+                      className="btn outline"
+                    >
+                      <RotateCcw size={12} /> {isBn ? 'ডিফল্ট ফিরিয়ে আনুন' : 'Reset Default'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onSaveNoticeTemplate(draftNotice)}
+                      className="btn primary"
+                    >
+                      <Save size={12} /> {isBn ? 'নোটিশ সেভ করুন' : 'Save Notice'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Members List */}
+          {isLoading ? (
+            <div className="p-8 rounded-2xl bg-white border border-slate-200 text-center text-xs text-slate-500">
+              <RefreshCw size={20} className="mx-auto mb-2 animate-spin text-emerald-600" />
+              {isBn ? 'গ্রুপের সকল মেম্বার লোড হচ্ছে...' : 'Loading group members...'}
+            </div>
+          ) : visibleMembers.length === 0 ? (
+            <div className="p-8 rounded-2xl bg-white border border-slate-200 text-center text-xs text-slate-500">
+              {isBn ? 'কোনো মেম্বার পাওয়া যায়নি।' : 'No matching members found.'}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+              {visibleMembers.map((m) => {
+                const isProtectedAdmin = m.role !== 'member' && adminShieldEnabled;
+                const isBusy = blockingJid === m.jid;
+                return (
+                  <div
+                    key={m.jid}
+                    className={`p-3.5 rounded-2xl border bg-white flex items-center justify-between gap-3 transition-colors ${
+                      m.isBlocked ? 'border-rose-300 bg-rose-50/30' : 'border-slate-200'
+                    }`}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-xs sm:text-[13px] font-extrabold text-slate-900 truncate">
+                          {m.name}
+                        </span>
+                        {m.role !== 'member' && (
+                          <span className="text-[10px] font-bold text-emerald-700">
+                            · Admin
+                          </span>
+                        )}
+                      </div>
+                      <div className="font-mono text-[11px] font-bold text-slate-600 mt-0.5 tabular-nums break-all">
+                        +{m.phone}
+                      </div>
+                      {m.isBlocked && (
+                        <div className="mt-1 inline-flex items-center gap-1 text-[10.5px] font-extrabold text-rose-600 tabular-nums">
+                          <Clock size={11} />
+                          <span>
+                            {isBn
+                              ? `ব্লক সক্রিয় (${m.remainingText || '১০ মি.'})`
+                              : `Muted (${m.remainingText})`}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="shrink-0">
+                      {m.isBlocked ? (
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => onUnblockMember(selectedGroupId, m.jid)}
+                          className="min-h-[40px] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <CheckCircle2 size={13} />
+                          <span>{isBn ? 'ব্লক তুলুন' : 'Unblock'}</span>
+                        </button>
+                      ) : isProtectedAdmin ? (
+                        <span className="text-[10.5px] font-bold text-slate-400 px-2">
+                          {isBn ? 'সুরক্ষিত' : 'Protected'}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => onBlockMember(m, durationMinutes, draftNotice)}
+                          className="min-h-[40px] px-3 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer"
+                        >
+                          {isBusy ? (
+                            <RefreshCw size={13} className="animate-spin" />
+                          ) : (
+                            <VolumeX size={13} />
+                          )}
+                          <span>{isBn ? `${durationMinutes} মি. ব্লক` : `Block ${durationMinutes}m`}</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

@@ -48,6 +48,10 @@ import {
   addKeywordTrigger,
   toggleKeywordTrigger,
   removeKeywordTrigger,
+  updateContactNames,
+  getGroupMembersForBlockPage,
+  manualBlockMember,
+  DEFAULT_MANUAL_MEMBER_BLOCK_NOTICE,
 } from './src/moderationEngine.ts';
 
 startRestrictedUsersMonitor(() => currentSock);
@@ -314,6 +318,9 @@ function destroyCurrentSocket() {
       oldSock.ev.removeAllListeners('messages.upsert');
       oldSock.ev.removeAllListeners('group-participants.update');
       oldSock.ev.removeAllListeners('call');
+      oldSock.ev.removeAllListeners('contacts.upsert');
+      oldSock.ev.removeAllListeners('contacts.update');
+      oldSock.ev.removeAllListeners('messaging-history.set');
       oldSock.end(undefined);
     } catch {
       // ignore cleanup error
@@ -508,6 +515,21 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
     } catch (err: any) {
       console.error('Error in group-participants.update handler:', err?.message || err);
     }
+  });
+
+  sock.ev.on('contacts.upsert', (contacts) => {
+    if (socketToken !== activeSocketToken || sock !== currentSock) return;
+    updateContactNames(contacts as any[]);
+  });
+
+  sock.ev.on('contacts.update', (contacts) => {
+    if (socketToken !== activeSocketToken || sock !== currentSock) return;
+    updateContactNames(contacts as any[]);
+  });
+
+  sock.ev.on('messaging-history.set', (data: any) => {
+    if (socketToken !== activeSocketToken || sock !== currentSock) return;
+    if (Array.isArray(data?.contacts)) updateContactNames(data.contacts);
   });
 
   sock.ev.on('call', async (calls) => {
@@ -987,6 +1009,49 @@ app.post('/api/moderation/unmute', (req: Request, res: Response) => {
       unmuted,
       message: unmuted ? 'সদস্যের রেস্ট্রিকশন তুলে দেওয়া হয়েছে (Unmuted successfully)' : 'সদস্য রেস্ট্রিকশন তালিকায় পাওয়া যায়নি বা ইতিমধ্যে মেয়াদ শেষ হয়েছে',
       restrictedUsers: getActiveRestrictedUsers(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Group Member Directory & Anonymous 10-Min Manual Block Endpoints
+app.get('/api/moderation/group-members', async (req: Request, res: Response) => {
+  try {
+    const groupId = req.query.groupId ? String(req.query.groupId) : undefined;
+    const data = await getGroupMembersForBlockPage(currentSock, groupId);
+    res.json({
+      success: true,
+      defaultNotice: DEFAULT_MANUAL_MEMBER_BLOCK_NOTICE,
+      ...data,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/moderation/member-block', async (req: Request, res: Response) => {
+  try {
+    const { groupId, memberJid, altJid, memberPhone, durationMinutes, customNotice } = req.body || {};
+    const result = await manualBlockMember(currentSock, {
+      groupId: String(groupId || ''),
+      memberJid: String(memberJid || ''),
+      altJid: altJid ? String(altJid) : undefined,
+      memberPhone: memberPhone ? String(memberPhone) : undefined,
+      durationMinutes: Number(durationMinutes || 10),
+      customNotice: typeof customNotice === 'string' ? customNotice : undefined,
+    });
+    if (!result.success) {
+      return res.status(400).json({ success: false, error: result.error || 'ব্লক করা যায়নি।' });
+    }
+    res.json({
+      success: true,
+      noticeSent: result.noticeSent,
+      restriction: result.restriction,
+      restrictedUsers: getActiveRestrictedUsers(),
+      message: result.noticeSent
+        ? 'সদস্যকে ১০ মিনিটের জন্য ব্লক করা হয়েছে এবং আলাদা নোটিশ পাঠানো হয়েছে!'
+        : 'সদস্যকে ১০ মিনিটের জন্য ব্লক করা হয়েছে!',
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
