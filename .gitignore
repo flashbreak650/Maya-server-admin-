@@ -3,6 +3,7 @@ build/
 dist/
 coverage/
 .sessions/
+.sessions_companion/
 data/*.tmp
 data/moderation_db.json
 public/assets/aistudio/

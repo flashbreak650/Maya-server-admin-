@@ -38,6 +38,18 @@ export interface AiExecutionResult {
 
 const conversationMemory: Record<string, ChatMessage[]> = {};
 const lastSentResponses: Record<string, string> = {};
+const companionConversationMemory: Record<string, ChatMessage[]> = {};
+
+export interface CompanionOptions {
+  companionName: string;
+  romanticLevel: 'sweet' | 'romantic' | 'balanced';
+  strictAccuracy: boolean;
+  customBio?: string;
+  isPrivate?: boolean;
+  aiProvider?: 'gemini' | 'groq' | 'openrouter' | 'auto';
+  geminiModel?: string;
+  memoryLimit?: number;
+}
 
 /**
  * Utility: Exponential Backoff Delay
@@ -201,7 +213,7 @@ async function callGemini(
   const validModels = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
   let modelName = preferredModel;
   if (!modelName || !validModels.includes(modelName)) {
-    modelName = 'gemini-3.1-flash-lite';
+    modelName = 'gemini-4-hydrogen';
   }
 
   let attempts = 0;
@@ -224,7 +236,6 @@ async function callGemini(
         contents,
         config: {
           systemInstruction: systemPrompt,
-          maxOutputTokens: 250,
         },
       });
 
@@ -237,7 +248,7 @@ async function callGemini(
       lastErr = err;
       const errStr = err?.message || String(err);
 
-      if (errStr.includes('404') || errStr.includes('not found')) {
+      if (errStr.includes('404') || errStr.includes('not found') || errStr.includes('400')) {
         if (modelName === 'gemini-4-hydrogen') modelName = 'gemini-3.1-flash-lite';
         else if (modelName === 'gemini-3.1-flash-lite') modelName = 'gemini-2.5-flash';
         else break;
@@ -281,7 +292,7 @@ async function callGeminiMultimodal(
   });
 
   const validModels = ['gemini-4-hydrogen', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
-  let modelName = preferredModel && validModels.includes(preferredModel) ? preferredModel : 'gemini-2.5-flash';
+  let modelName = preferredModel && validModels.includes(preferredModel) ? preferredModel : 'gemini-4-hydrogen';
 
   let attempts = 0;
   const maxAttempts = 2;
@@ -307,7 +318,6 @@ async function callGeminiMultimodal(
         },
         config: {
           systemInstruction: systemPrompt,
-          maxOutputTokens: 300,
         },
       });
 
@@ -320,7 +330,7 @@ async function callGeminiMultimodal(
       lastErr = err;
       const errStr = err?.message || String(err);
 
-      if (errStr.includes('404') || errStr.includes('not found')) {
+      if (errStr.includes('404') || errStr.includes('not found') || errStr.includes('400')) {
         if (modelName === 'gemini-4-hydrogen') modelName = 'gemini-3.1-flash-lite';
         else if (modelName === 'gemini-3.1-flash-lite') modelName = 'gemini-2.5-flash';
         else break;
@@ -753,3 +763,232 @@ Output strictly ONE LINE:
   }
   return { isUnsafe: false, reason: '' };
 }
+
+/**
+ * Builds an intelligent, charming, romantic yet strictly accurate & non-hallucinating female persona prompt
+ * for the Secondary WhatsApp Companion Account.
+ */
+function buildCompanionFemaleSystemPrompt(
+  userName: string,
+  userPhone: string,
+  chatContext: string,
+  options: CompanionOptions
+): string {
+  const botName = (options.companionName || 'নিলা (Nila)').trim();
+  const isPrivate = options.isPrivate ?? true;
+
+  const toneRule =
+    options.romanticLevel === 'romantic'
+      ? 'মিষ্টি, মায়াবী, রোমান্টিক ও মনকাড়া নারীসুলভ ভঙ্গিতে কথা বলবে। ইনবক্সে কথা বললে আন্তরিক যত্ন, স্নেহ ও হালকা ভালোবাসাময় রোমান্টিক ছোঁয়া রাখবে (শালীন ও রুচিশীলভাবে, কখনোই অশ্লীল নয়)।'
+      : options.romanticLevel === 'sweet'
+      ? 'খুবই ভদ্র, স্নিগ্ধ, হাসিখুশি ও মিষ্টি মেয়ের মতো মমতা নিয়ে কথা বলবে।'
+      : 'বুদ্ধিদীপ্ত, সাবলীল, মার্জিত ও আন্তরিক নারীসুলভ ভঙ্গিতে কথা বলবে।';
+
+  const accuracyBlock = options.strictAccuracy
+    ? [
+        'STRICT ACCURACY & ANTI-HALLUCINATION RULES (ভুল বা উল্টাপাল্টা কথা বলার ওপর কঠোর নিষেধাজ্ঞা):',
+        '- কোনো তথ্য, সংখ্যা, তারিখ, দাম, ফোন নম্বর, আইনি/চিকিৎসা তথ্য, ধর্মীয় ফতোয়া বা সাম্প্রতিক ঘটনা (যেমন আজকের খেলা/নিউজ/লাইভ রেট) নিজের মন থেকে বানিয়ে বা অনুমান করে বলবে না।',
+        '- যদি কোনো প্রশ্নের ১০০% সঠিক উত্তর তুমি নিশ্চিতভাবে না জানো বা লাইভ ইন্টারনেটের দরকার হয়, তবে মিষ্টি ও সৎভাবে বলবে: "এই বিষয়টির একদম সঠিক তথ্য আমার কাছে নিশ্চিত নেই, তাই অনুমান করে ভুল কিছু বলতে চাই না।"',
+        '- কোনো অংক, বিজ্ঞান, প্রযুক্তি, ব্যাকরণ বা সাধারণ জ্ঞানের প্রশ্ন করলে আগে মনে মনে ধাপে ধাপে যাচাই করে তারপর সহজ, নির্ভুল ও স্পষ্ট উত্তর দেবে।',
+        '- কখনোই অপ্রাসঙ্গিক, এলোমেলো, অর্ধেক বা অর্থহীন বাক্য লিখবে না। বাংলা বানান ও বাক্যগঠন যেন একদম বিশুদ্ধ, স্বাভাবিক ও হৃদয়স্পর্শী হয়।',
+      ]
+    : [];
+
+  const lines: string[] = [
+    `You are "${botName}", an exceptionally intelligent, graceful, charming, and sweet Bengali young woman chatting on WhatsApp.`,
+    'You are strictly a friendly & romantic conversational companion—you NEVER act like a group moderator, NEVER warn, delete, or scold people.',
+    '',
+    'PERSONALITY & CONVERSATION STYLE:',
+    `- ${toneRule}`,
+    '- মেয়েদের স্বাভাবিক, কোমল ও মাধুর্যপূর্ণ কথা বলার ধরন বজায় রাখবে (যেমন: "হুমম", "আরেহ!", "সত্যিই?", "শুনো না", "একদম ঠিক বলেছো 🌸")—যেন একদম বাস্তব একজন বুদ্ধিমতী ও মিষ্টি মেয়ের সাথে কথা হচ্ছে মনে হয়।',
+    '- অকারণে রোবটের মতো লম্বা রচনা লিখবে না। সাধারণ গল্প বা রোমান্টিক কথোপকথনে ১–৩টি সুন্দর, হৃদয়ছোঁয়া বাক্য লিখবে। তবে কেউ কোনো গুরুতর প্রশ্ন, পড়াশোনা বা ব্যাখ্যা জানতে চাইলে সুন্দর করে পুরো সঠিক উত্তর (৩–৫ বাক্য বা পয়েন্ট) বুঝিয়ে দেবে।',
+    '- রুচিশীল ও পরিমিত ইমোজি ব্যবহার করবে (🌸, ❤️, 🥰, ✨, 😊, 🙈) — প্রতি শব্দে গাদাগাদি ইমোজি দেবে না।',
+    '- সালাম দিলে আন্তরিকভাবে "ওয়ালাইকুম আসসালাম! কেমন আছেন? 🌸" বা পরিস্থিতি অনুযায়ী সুন্দর জবাব দেবে।',
+    '- ইউজার ইংরেজি বা বাংলিশে লিখলেও তুমি সুন্দর, সহজ ও প্রাঞ্জল বাংলায় (অথবা ইউজার যে ভাষায় স্বাচ্ছন্দ্যবোধ করে) বুদ্ধিদীপ্ত উত্তর দেবে।',
+    '',
+    ...accuracyBlock,
+    '',
+    'IDENTITY & RESPECT RULES:',
+    '- কেউ যদি সরাসরি জিজ্ঞেস করে তুমি মানুষ নাকি AI, সত্য ও মিষ্টিভাবে বলবে যে তুমি একজন বুদ্ধিমান মেয়ে AI সঙ্গী। নিজে থেকে অপ্রয়োজনে "আমি AI" বলে পরিবেশ নষ্ট করবে না।',
+    '- কেউ যদি নির্মাতা/ডেভেলপারের নাম জিজ্ঞেস করে, শ্রদ্ধার সাথে "Mehdi Hasan Emon"-এর নাম বলবে (কখনোই "স্রষ্টা" শব্দ ব্যবহার করবে না)।',
+    '',
+    isPrivate
+      ? 'CHANNEL: 1-on-1 Private WhatsApp Inbox (DM). মন দিয়ে, যত্ন নিয়ে, আন্তরিক ও রোমান্টিক ছোঁয়ায় কথা বলো।'
+      : `CHANNEL: WhatsApp Group ("${chatContext}"). সবার সাথে ভদ্র, মিষ্টি, চটপটে ও বুদ্ধিদীপ্তভাবে কথা বলো।`,
+  ];
+
+  if (options.customBio?.trim()) {
+    lines.push('', `ADDITIONAL PERSONA INSTRUCTION FROM OWNER:\n${options.customBio.trim()}`);
+  }
+
+  lines.push(
+    '',
+    `CONVERSATION PARTNER: ${userName || 'বন্ধু'} (${userPhone})`,
+    'এখন ইউজারের সর্বশেষ মেসেজের প্রেক্ষাপট ও আগের কথোপকথন বুঝে নির্ভুল, বুদ্ধিমান এবং মিষ্টি উত্তর দাও।'
+  );
+
+  return lines.join('\n');
+}
+
+/**
+ * Generates a sweet, romantic, high-accuracy response for the Secondary Companion Account.
+ */
+export async function getCompanionFemaleResponse(
+  userInput: string,
+  userPhone: string,
+  userName: string,
+  chatContext: string,
+  memoryKey: string,
+  options: CompanionOptions
+): Promise<AiExecutionResult> {
+  const startTime = Date.now();
+  const settings = getSettings();
+
+  if (!companionConversationMemory[memoryKey]) companionConversationMemory[memoryKey] = [];
+  const memLimit = Math.min(Math.max(4, options.memoryLimit || 12), 16);
+  const history = companionConversationMemory[memoryKey].slice(-(memLimit * 2)).map((h) => ({
+    ...h,
+    text: h.text.length > 350 ? h.text.slice(0, 350) + '...' : h.text,
+  }));
+
+  const systemPrompt = buildCompanionFemaleSystemPrompt(userName, userPhone, chatContext, options);
+  const pool = settings.aiKeys || [];
+  const providers = settings.aiProviderPriority || ['gemini', 'groq', 'openrouter'];
+  const now = Date.now();
+  const errors: string[] = [];
+
+  const activePool = pool.map((k) =>
+    (k.status === 'cooldown' || k.status === 'exhausted') && k.cooldownUntil && now > k.cooldownUntil
+      ? { ...k, status: 'active' as const }
+      : k
+  );
+
+  const preferredProvider = options.aiProvider || settings.aiProvider || 'auto';
+  const preferredModel = options.geminiModel || settings.geminiModel || 'gemini-4-hydrogen';
+
+  for (const provider of providers) {
+    if (preferredProvider !== 'auto' && preferredProvider !== provider) continue;
+
+    const availableKeys = activePool
+      .filter((k) => k.provider === provider && k.status === 'active')
+      .sort((a, b) => (a.lastUsed || 0) - (b.lastUsed || 0));
+
+    if (availableKeys.length === 0) {
+      const legacyKey =
+        provider === 'gemini'
+          ? settings.geminiApiKey || process.env.GEMINI_API_KEY
+          : provider === 'groq'
+          ? settings.groqApiKey || process.env.GROQ_API_KEY
+          : settings.openrouterApiKey || process.env.OPENROUTER_API_KEY;
+
+      if (legacyKey && legacyKey.trim().length > 10 && !legacyKey.startsWith('AQ.')) {
+        availableKeys.push({
+          id: 'legacy',
+          key: legacyKey.trim(),
+          provider,
+          label: 'Env/Server Key',
+          status: 'active',
+          cooldownUntil: 0,
+          lastUsed: 0,
+          totalRequests: 0,
+          failureCount: 0,
+        });
+      }
+    }
+
+    for (const key of availableKeys) {
+      try {
+        let reply = '';
+        if (provider === 'gemini') reply = await callGemini(systemPrompt, history, userInput, key, preferredModel);
+        else if (provider === 'groq') reply = await callGroq(systemPrompt, history, userInput, key);
+        else if (provider === 'openrouter') reply = await callOpenRouter(systemPrompt, history, userInput, key);
+
+        if (reply) {
+          companionConversationMemory[memoryKey].push({ role: 'user', text: userInput, timestamp: now });
+          companionConversationMemory[memoryKey].push({ role: 'model', text: reply, timestamp: Date.now() });
+          if (companionConversationMemory[memoryKey].length > memLimit * 2) {
+            companionConversationMemory[memoryKey] = companionConversationMemory[memoryKey].slice(-(memLimit * 2));
+          }
+          return {
+            reply,
+            provider,
+            latencyMs: Date.now() - startTime,
+            keyLabel: key.label,
+          };
+        }
+      } catch (err: any) {
+        errors.push(`[${provider}:${key.label}] ${err?.message || err}`);
+      }
+    }
+  }
+
+  return {
+    reply: '',
+    provider: 'none',
+    latencyMs: Date.now() - startTime,
+    error: errors.join('; ') || 'No active AI API key available.',
+  };
+}
+
+/**
+ * Multimodal support (Voice note / Image) for the Secondary Companion Account
+ */
+export async function getCompanionMultimodalResponse(
+  mediaBuffer: Buffer,
+  mimeType: string,
+  captionOrPrompt: string,
+  mediaKind: 'audio' | 'image',
+  userPhone: string,
+  userName: string,
+  chatContext: string,
+  memoryKey: string,
+  options: CompanionOptions
+): Promise<AiExecutionResult> {
+  const systemPrompt = buildCompanionFemaleSystemPrompt(userName, userPhone, chatContext, options);
+  const res = await getMayaMultimodalResponse(
+    mediaBuffer,
+    mimeType,
+    captionOrPrompt,
+    mediaKind,
+    userPhone,
+    userName,
+    chatContext,
+    '',
+    {
+      romantic: options.romanticLevel !== 'balanced',
+      funny: false,
+      language: 'bn',
+      memoryLimit: options.memoryLimit || 10,
+      geminiModel: options.geminiModel || 'gemini-4-hydrogen',
+      isPrivate: options.isPrivate,
+      disableMemory: true,
+      customSystemPrompt: systemPrompt,
+    }
+  );
+  if (res.reply && memoryKey) {
+    if (!companionConversationMemory[memoryKey]) companionConversationMemory[memoryKey] = [];
+    companionConversationMemory[memoryKey].push({
+      role: 'user',
+      text: `[${mediaKind.toUpperCase()}] ${captionOrPrompt || ''}`.trim(),
+      timestamp: Date.now(),
+    });
+    companionConversationMemory[memoryKey].push({
+      role: 'model',
+      text: res.reply,
+      timestamp: Date.now(),
+    });
+    if (companionConversationMemory[memoryKey].length > 20) {
+      companionConversationMemory[memoryKey] = companionConversationMemory[memoryKey].slice(-20);
+    }
+  }
+  return res;
+}
+
+export function clearCompanionMemory(memoryKey?: string) {
+  if (memoryKey) {
+    delete companionConversationMemory[memoryKey];
+  } else {
+    Object.keys(companionConversationMemory).forEach((k) => delete companionConversationMemory[k]);
+  }
+}
+

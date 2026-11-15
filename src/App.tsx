@@ -67,6 +67,7 @@ import {
   MemberActivityViewItem,
   NightModeStatusView,
   GroupMemberDirectoryViewItem,
+  CompanionStatusView,
   AdminLockScreen,
   HomeFeatureHub,
   WarningsPage,
@@ -79,6 +80,7 @@ import {
   ActivityRankPage,
   KeywordsPage,
   PinLockPage,
+  CompanionBotPage,
 } from './components/FeaturePages.tsx';
 
 
@@ -158,6 +160,17 @@ interface ModerationSettings {
   keywordAutoReplyEnabled?: boolean;
   keywordTriggers?: KeywordTriggerItem[];
   manualBlockNotice?: string;
+  // Secondary Female AI Companion Account
+  companionEnabled?: boolean;
+  companionName?: string;
+  companionInboxReply?: boolean;
+  companionGroupReply?: boolean;
+  companionGroupMode?: 'smart_auto' | 'mention_or_reply' | 'all';
+  companionRomanticLevel?: 'sweet' | 'romantic' | 'balanced';
+  companionStrictAccuracy?: boolean;
+  companionCooldownSec?: number;
+  companionAllowedGroups?: string[];
+  companionCustomBio?: string;
 }
 
 export interface AiKey {
@@ -547,6 +560,24 @@ export default function App() {
   const [defaultManualBlockNotice, setDefaultManualBlockNotice] = useState('');
   const [blockingMemberJid, setBlockingMemberJid] = useState<string | null>(null);
 
+  // Secondary Female AI Companion Account State
+  const [companionStatus, setCompanionStatus] = useState<CompanionStatusView>({
+    status: 'disconnected',
+    step: 'idle',
+    stepMessage: isBn ? 'দ্বিতীয় AI অ্যাকাউন্ট সংযোগের জন্য প্রস্তুত' : 'Ready to connect 2nd account',
+    online: false,
+    remainingSeconds: 0,
+    repliesSent: 0,
+    inboxReplies: 0,
+    groupReplies: 0,
+    groups: [],
+    recentChats: [],
+  });
+  const [isCompanionPairing, setIsCompanionPairing] = useState(false);
+  const [companionPairingError, setCompanionPairingError] = useState<string | null>(null);
+  const companionStatusRef = useRef(companionStatus);
+  companionStatusRef.current = companionStatus;
+
   const warningsCardRef = useRef<HTMLDivElement | null>(null);
   const blocksCardRef = useRef<HTMLDivElement | null>(null);
   const logsCardRef = useRef<HTMLDivElement | null>(null);
@@ -855,6 +886,7 @@ export default function App() {
       if (logsRes?.logs) setActivityLogs(logsRes.logs);
       await Promise.all([
         checkStatus(),
+        loadCompanionStatus().catch(() => {}),
         loadNightMode().catch(() => {}),
         loadCalls().catch(() => {}),
         loadKeywords().catch(() => {}),
@@ -1146,6 +1178,85 @@ export default function App() {
     }
   };
 
+  const loadCompanionStatus = async () => {
+    try {
+      const res = await callApi('/api/companion/status');
+      if (res?.success) {
+        setCompanionStatus(res);
+      }
+    } catch {}
+  };
+
+  const handlePairCompanion = async (phone: string) => {
+    setIsCompanionPairing(true);
+    setCompanionPairingError(null);
+    try {
+      const res = await callApi('/api/companion/pair', 'POST', { phoneNumber: phone });
+      if (res?.status) setCompanionStatus(res.status);
+      else await loadCompanionStatus();
+      showNotification(
+        res?.alreadyConnected
+          ? isBn
+            ? '২য় AI অ্যাকাউন্ট ইতিমধ্যেই কানেক্টেড!'
+            : '2nd account already connected!'
+          : isBn
+          ? '২য় অ্যাকাউন্টের ৮-ডিজিট কোড তৈরি হয়েছে!'
+          : '2nd account pairing code ready!'
+      );
+    } catch (err: any) {
+      setCompanionPairingError(err?.message || 'Pairing failed');
+      showNotification((isBn ? 'পেয়ারিং ব্যর্থ: ' : 'Pairing failed: ') + err.message);
+    } finally {
+      setIsCompanionPairing(false);
+    }
+  };
+
+  const handleDisconnectCompanion = async () => {
+    try {
+      const res = await callApi('/api/companion/disconnect', 'POST');
+      if (res?.status) setCompanionStatus(res.status);
+      showNotification(res?.message || (isBn ? '২য় অ্যাকাউন্ট ডিসকানেক্ট হয়েছে' : '2nd account disconnected'));
+    } catch (err: any) {
+      showNotification((isBn ? 'ডিসকানেক্ট ব্যর্থ: ' : 'Disconnect failed: ') + err.message);
+    }
+  };
+
+  const handleSaveCompanionSettings = async (patch: Record<string, any>) => {
+    try {
+      const res = await callApi('/api/companion/settings', 'POST', patch);
+      if (res?.settings) setSettings(res.settings);
+      showNotification(res?.message || (isBn ? '২য় AI সেটিংস সেভ হয়েছে!' : '2nd AI settings saved!'));
+    } catch (err: any) {
+      showNotification((isBn ? 'সেভ ব্যর্থ: ' : 'Save failed: ') + err.message);
+    }
+  };
+
+  const handleTestCompanionChat = async (
+    text: string,
+    channel: 'inbox' | 'group',
+    draft: Record<string, any>
+  ) => {
+    const res = await callApi('/api/companion/test', 'POST', {
+      text,
+      settings: { ...draft, channel },
+    });
+    return {
+      reply: res.reply,
+      provider: res.provider,
+      latencyMs: res.latencyMs,
+    };
+  };
+
+  const handleClearCompanionMemory = async () => {
+    try {
+      const res = await callApi('/api/companion/clear-memory', 'POST');
+      if (res?.status) setCompanionStatus(res.status);
+      showNotification(isBn ? '২য় অ্যাকাউন্টের মেমোরি ও লগ ক্লিয়ার হয়েছে' : 'Memory cleared');
+    } catch (err: any) {
+      showNotification(err.message);
+    }
+  };
+
   const navigateToPage = (page: PageId) => {
     setActivePage(page);
     if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1158,6 +1269,10 @@ export default function App() {
     else if (page === 'keywords') loadKeywords();
     else if (page === 'groups') loadGroups();
     else if (page === 'maya') loadModerationData();
+    else if (page === 'companion') {
+      loadCompanionStatus();
+      loadModerationData();
+    }
   };
 
   const loadModerationData = async () => {
@@ -1806,13 +1921,23 @@ export default function App() {
       const isActivelyPairing =
         liveStatusRef.current.status === 'pairing' ||
         liveStatusRef.current.status === 'connecting' ||
-        activePageRef.current === 'pairing';
+        companionStatusRef.current.status === 'pairing' ||
+        companionStatusRef.current.status === 'connecting' ||
+        activePageRef.current === 'pairing' ||
+        activePageRef.current === 'companion';
       const delay = isActivelyPairing ? 3000 : 15000;
 
       pollIntervalRef.current = setTimeout(async () => {
         if (!mounted) return;
         if (document.visibilityState !== 'hidden' && !isPinLockedRef.current) {
           await checkStatus();
+          if (
+            activePageRef.current === 'companion' ||
+            companionStatusRef.current.status === 'pairing' ||
+            companionStatusRef.current.status === 'connecting'
+          ) {
+            await loadCompanionStatus();
+          }
         }
         scheduleNext();
       }, delay);
@@ -1954,6 +2079,9 @@ export default function App() {
           <div className="side-label mt-3">{isBn ? 'সিস্টেম ও বট' : 'SYSTEM & BOT'}</div>
           <button className={`nav ${activePage === 'maya' ? 'active' : ''}`} onClick={() => navigateToPage('maya')}>
             <Heart size={16} /> {t.maya}
+          </button>
+          <button className={`nav ${activePage === 'companion' ? 'active' : ''}`} onClick={() => navigateToPage('companion')}>
+            <Sparkles size={16} /> {isBn ? '২য় AI অ্যাকাউন্ট' : '2nd Female AI'}
           </button>
           <button className={`nav ${activePage === 'integrations' ? 'active' : ''}`} onClick={() => navigateToPage('integrations')}>
             <Plug size={16} /> {t.integrations}
@@ -2159,6 +2287,7 @@ export default function App() {
                 keywordsCount={keywords.length}
                 nightStatus={nightStatus}
                 isConnected={liveStatus.online}
+                companionOnline={companionStatus.online}
                 onNavigate={navigateToPage}
                 onOpenSessionBackup={openSessionBackupSection}
               />
@@ -2314,6 +2443,23 @@ export default function App() {
               onBack={() => navigateToPage('home')}
               onUpdatePin={handleUpdatePin}
               onLockNow={handleLockNow}
+            />
+          )}
+
+          {activePage === 'companion' && (
+            <CompanionBotPage
+              isBn={isBn}
+              status={companionStatus}
+              settings={settings}
+              isPairing={isCompanionPairing}
+              pairingError={companionPairingError}
+              onPair={handlePairCompanion}
+              onDisconnect={handleDisconnectCompanion}
+              onRefresh={loadCompanionStatus}
+              onSaveSettings={handleSaveCompanionSettings}
+              onTestChat={handleTestCompanionChat}
+              onClearMemory={handleClearCompanionMemory}
+              onBack={() => navigateToPage('home')}
             />
           )}
 

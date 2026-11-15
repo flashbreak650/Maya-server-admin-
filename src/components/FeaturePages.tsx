@@ -10,6 +10,7 @@ import {
   Check,
   CheckCircle2,
   Clock,
+  Copy,
   Download,
   Eye,
   EyeOff,
@@ -18,6 +19,8 @@ import {
   Heart,
   KeyRound,
   Lock,
+  LogOut,
+  MessageCircle,
   Moon,
   PhoneOff,
   Plug,
@@ -28,9 +31,11 @@ import {
   Save,
   ScanEye,
   Search,
+  Send,
   ShieldAlert,
   ShieldCheck,
   Smartphone,
+  Sparkles,
   Sun,
   Trash2,
   Trophy,
@@ -54,9 +59,41 @@ export type PageId =
   | 'keywords'
   | 'pinlock'
   | 'maya'
+  | 'companion'
   | 'integrations'
   | 'pairing'
   | 'groups';
+
+export interface CompanionRecentChatItem {
+  id: string;
+  chatJid: string;
+  chatName: string;
+  senderName: string;
+  isGroup: boolean;
+  userText: string;
+  botReply: string;
+  provider: string;
+  timestamp: number;
+}
+
+export interface CompanionStatusView {
+  status: 'disconnected' | 'connecting' | 'pairing' | 'connected';
+  step: 'idle' | 'initializing' | 'waiting_for_phone' | 'connected' | 'error';
+  stepMessage: string;
+  lastConnectionStatus?: string;
+  online: boolean;
+  phoneNumber?: string;
+  pairingCode?: string;
+  qrCode?: string;
+  remainingSeconds: number;
+  user?: any;
+  repliesSent: number;
+  inboxReplies: number;
+  groupReplies: number;
+  groups: Array<{ id: string; name: string; participants: number }>;
+  recentChats: CompanionRecentChatItem[];
+  lastError?: string | null;
+}
 
 export interface KeywordTriggerItem {
   id: string;
@@ -241,6 +278,7 @@ export function HomeFeatureHub({
   keywordsCount,
   nightStatus,
   isConnected,
+  companionOnline,
   onNavigate,
   onOpenSessionBackup,
 }: {
@@ -254,6 +292,7 @@ export function HomeFeatureHub({
   keywordsCount: number;
   nightStatus: NightModeStatusView | null;
   isConnected: boolean;
+  companionOnline?: boolean;
   onNavigate: (page: PageId) => void;
   onOpenSessionBackup: () => void;
 }) {
@@ -422,6 +461,25 @@ export function HomeFeatureHub({
       iconText: 'text-pink-700',
       icon: <Heart size={18} />,
       onClick: () => onNavigate('maya'),
+    },
+    {
+      id: 'companion',
+      title: isBn ? '২য় AI অ্যাকাউন্ট (গার্ল বট)' : '2nd Female AI Account',
+      desc: isBn ? 'আলাদা নম্বরে ইনবক্স ও গ্রুপে মিষ্টি, রোমান্টিক ও নির্ভুল রিপ্লাই' : 'Dedicated 2nd account for smart romantic chat',
+      statusText: companionOnline
+        ? isBn
+          ? 'কানেক্টেড ও সক্রিয়'
+          : 'Connected'
+        : settings.companionEnabled !== false
+        ? isBn
+          ? 'সংযোগ দিন'
+          : 'Ready to link'
+        : 'OFF',
+      isOn: Boolean(companionOnline),
+      iconBg: 'bg-pink-50',
+      iconText: 'text-rose-600',
+      icon: <Sparkles size={18} />,
+      onClick: () => onNavigate('companion'),
     },
     {
       id: 'integrations',
@@ -2204,3 +2262,623 @@ export function MemberBlockPage({
     </section>
   );
 }
+
+/* ============================================================================
+ * FEATURE #17: 2ND INDEPENDENT FEMALE AI COMPANION ACCOUNT (ZERO MODERATION)
+ * ========================================================================== */
+export function CompanionBotPage({
+  isBn,
+  status,
+  settings,
+  isPairing,
+  pairingError,
+  onPair,
+  onDisconnect,
+  onRefresh,
+  onSaveSettings,
+  onTestChat,
+  onClearMemory,
+  onBack,
+}: {
+  isBn: boolean;
+  status: CompanionStatusView;
+  settings: any;
+  isPairing: boolean;
+  pairingError: string | null;
+  onPair: (phone: string) => Promise<void>;
+  onDisconnect: () => Promise<void>;
+  onRefresh: () => void;
+  onSaveSettings: (patch: Record<string, any>) => Promise<void>;
+  onTestChat: (text: string, channel: 'inbox' | 'group', draft: Record<string, any>) => Promise<{ reply: string; provider?: string; latencyMs?: number }>;
+  onClearMemory: () => Promise<void>;
+  onBack: () => void;
+}) {
+  const [phoneInput, setPhoneInput] = useState(status.phoneNumber || '');
+  const [modeTab, setModeTab] = useState<'code' | 'qr'>('code');
+  const [copiedCode, setCopiedCode] = useState(false);
+
+  const [companionEnabled, setCompanionEnabled] = useState<boolean>(settings.companionEnabled !== false);
+  const [companionName, setCompanionName] = useState<string>(settings.companionName || 'নিলা (Nila)');
+  const [companionInboxReply, setCompanionInboxReply] = useState<boolean>(settings.companionInboxReply !== false);
+  const [companionGroupReply, setCompanionGroupReply] = useState<boolean>(settings.companionGroupReply !== false);
+  const [companionGroupMode, setCompanionGroupMode] = useState<'smart_auto' | 'mention_or_reply' | 'all'>(
+    settings.companionGroupMode || 'smart_auto'
+  );
+  const [companionRomanticLevel, setCompanionRomanticLevel] = useState<'sweet' | 'romantic' | 'balanced'>(
+    settings.companionRomanticLevel || 'romantic'
+  );
+  const [companionStrictAccuracy, setCompanionStrictAccuracy] = useState<boolean>(
+    settings.companionStrictAccuracy !== false
+  );
+  const [companionCooldownSec, setCompanionCooldownSec] = useState<number>(Number(settings.companionCooldownSec ?? 6));
+  const [companionAllowedGroups, setCompanionAllowedGroups] = useState<string[]>(
+    Array.isArray(settings.companionAllowedGroups) ? settings.companionAllowedGroups : []
+  );
+  const [companionCustomBio, setCompanionCustomBio] = useState<string>(settings.companionCustomBio || '');
+  const [isSaving, setIsSaving] = useState(false);
+
+  const [testText, setTestText] = useState('');
+  const [testChannel, setTestChannel] = useState<'inbox' | 'group'>('inbox');
+  const [isTesting, setIsTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ reply: string; provider?: string; latencyMs?: number } | null>(null);
+
+  React.useEffect(() => {
+    setCompanionEnabled(settings.companionEnabled !== false);
+    setCompanionName(settings.companionName || 'নিলা (Nila)');
+    setCompanionInboxReply(settings.companionInboxReply !== false);
+    setCompanionGroupReply(settings.companionGroupReply !== false);
+    setCompanionGroupMode(settings.companionGroupMode || 'smart_auto');
+    setCompanionRomanticLevel(settings.companionRomanticLevel || 'romantic');
+    setCompanionStrictAccuracy(settings.companionStrictAccuracy !== false);
+    setCompanionCooldownSec(Number(settings.companionCooldownSec ?? 6));
+    setCompanionAllowedGroups(Array.isArray(settings.companionAllowedGroups) ? settings.companionAllowedGroups : []);
+    setCompanionCustomBio(settings.companionCustomBio || '');
+  }, [settings]);
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await onSaveSettings({
+        companionEnabled,
+        companionName: companionName.trim() || 'নিলা (Nila)',
+        companionInboxReply,
+        companionGroupReply,
+        companionGroupMode,
+        companionRomanticLevel,
+        companionStrictAccuracy,
+        companionCooldownSec,
+        companionAllowedGroups,
+        companionCustomBio,
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleToggleGroup = (gid: string) => {
+    setCompanionAllowedGroups((prev) =>
+      prev.includes(gid) ? prev.filter((id) => id !== gid) : [...prev, gid]
+    );
+  };
+
+  const handleRunTest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!testText.trim() || isTesting) return;
+    setIsTesting(true);
+    try {
+      const res = await onTestChat(testText.trim(), testChannel, {
+        companionName: companionName.trim() || 'নিলা (Nila)',
+        companionRomanticLevel,
+        companionStrictAccuracy,
+        companionCustomBio,
+      });
+      setTestResult(res);
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  const copyPairingCode = async () => {
+    if (!status.pairingCode) return;
+    try {
+      await navigator.clipboard.writeText(status.pairingCode.replace(/-/g, ''));
+      setCopiedCode(true);
+      setTimeout(() => setCopiedCode(false), 2000);
+    } catch {}
+  };
+
+  return (
+    <section className="page active">
+      <SubPageHeader
+        title={isBn ? 'দ্বিতীয় AI অ্যাকাউন্ট (গার্ল কম্প্যানিয়ন বট)' : '2nd Female AI Account'}
+        subtitle={
+          isBn
+            ? 'আপনার মূল সিকিউরিটি বটের পাশাপাশি আরেকটি আলাদা WhatsApp নম্বর যুক্ত করুন—যেটি শুধু ইনবক্স ও গ্রুপে মিষ্টি, রোমান্টিক ও নির্ভুল কথা বলবে।'
+            : 'Link a separate second WhatsApp number exclusively for sweet, romantic, high-accuracy chats in Inbox & Groups.'
+        }
+        isBn={isBn}
+        onBack={onBack}
+        rightAction={
+          <button type="button" onClick={onRefresh} className="btn outline">
+            <RefreshCw size={13} />
+            <span>{isBn ? 'রিফ্রেশ' : 'Refresh'}</span>
+          </button>
+        }
+      />
+
+      {/* Architecture Separation Notice */}
+      <div className="mb-4 p-3.5 rounded-2xl bg-emerald-50/80 border border-emerald-200 flex items-start gap-2.5">
+        <ShieldCheck size={17} className="text-emerald-700 shrink-0 mt-0.5" />
+        <div className="text-[11.5px] text-emerald-950 leading-relaxed">
+          <strong>{isBn ? 'ডুয়াল-বট সিস্টেম (আলাদা কাজ): ' : 'Dual-Account Separation: '}</strong>
+          {isBn
+            ? '১ম অ্যাকাউন্ট আগের মতোই গ্রুপ সিকিউরিটি (ডিলিট, ওয়ার্নিং, কিক, ১০ মি. ব্লক) সামলাবে। আর এই ২য় অ্যাকাউন্টটি কোনো মেসেজ ডিলিট বা মডারেশন করবে না—শুধু একজন বুদ্ধিমতী ও রোমান্টিক মেয়ের মতো ইনবক্স ও গ্রুপে সঠিক উত্তর দেবে।'
+            : 'Account #1 stays dedicated to Group Moderation. Account #2 never deletes, warns, or kicks—she strictly chats sweetly and accurately in Inbox & Groups.'}
+        </div>
+      </div>
+
+      {/* 1. Connection Card for 2nd Account */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
+          <div>
+            <h2 className="text-sm sm:text-base font-extrabold text-slate-900">
+              {isBn ? '১. ২য় WhatsApp অ্যাকাউন্ট সংযোগ' : '1. Connect 2nd WhatsApp Number'}
+            </h2>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              {status.stepMessage}
+            </p>
+          </div>
+          <span
+            className={`text-[11px] font-extrabold ${
+              status.online ? 'text-emerald-700' : status.status === 'pairing' ? 'text-amber-700' : 'text-slate-500'
+            }`}
+          >
+            {status.online
+              ? isBn
+                ? '● অনলাইন ও কানেক্টেড'
+                : '● Online & Connected'
+              : status.status === 'pairing'
+              ? isBn
+                ? '● কোড অ্যাক্টিভ'
+                : '● Code Active'
+              : isBn
+              ? '○ ডিসকানেক্টেড'
+              : '○ Disconnected'}
+          </span>
+        </div>
+
+        {status.online ? (
+          <div className="pt-4 space-y-3.5">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+              <div className="p-3 rounded-xl bg-emerald-50/70 border border-emerald-200 sm:col-span-2">
+                <div className="text-[10.5px] font-bold text-emerald-700">
+                  {isBn ? 'সংযুক্ত ২য় অ্যাকাউন্ট' : 'Linked 2nd Account'}
+                </div>
+                <div className="text-sm font-extrabold text-slate-900 mt-0.5 truncate">
+                  {status.user?.name || companionName}
+                </div>
+                <div className="font-mono text-xs font-bold text-emerald-800 mt-0.5 tabular-nums">
+                  +{status.phoneNumber || 'Connected'}
+                </div>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <div className="text-[10.5px] font-bold text-slate-500">{isBn ? 'ইনবক্স রিপ্লাই' : 'Inbox Replies'}</div>
+                <div className="text-lg font-extrabold text-slate-900 tabular-nums mt-0.5">{status.inboxReplies}</div>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <div className="text-[10.5px] font-bold text-slate-500">{isBn ? 'গ্রুপ রিপ্লাই' : 'Group Replies'}</div>
+                <div className="text-lg font-extrabold text-slate-900 tabular-nums mt-0.5">{status.groupReplies}</div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" onClick={onRefresh} className="btn outline">
+                <RefreshCw size={13} /> {isBn ? 'স্ট্যাটাস সিঙ্ক' : 'Sync Status'}
+              </button>
+              <button type="button" onClick={onDisconnect} className="btn danger">
+                <LogOut size={13} /> {isBn ? '২য় অ্যাকাউন্ট ডিসকানেক্ট' : 'Disconnect 2nd Account'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="pt-4 space-y-3">
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setModeTab('code')}
+                className={`min-h-[36px] px-3 rounded-lg text-xs font-extrabold cursor-pointer ${
+                  modeTab === 'code' ? 'bg-[#087f55] text-white' : 'bg-slate-100 text-slate-700'
+                }`}
+              >
+                {isBn ? '৮-ডিজিট কোড' : '8-Digit Code'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setModeTab('qr')}
+                className={`min-h-[36px] px-3 rounded-lg text-xs font-extrabold cursor-pointer ${
+                  modeTab === 'qr' ? 'bg-[#087f55] text-white' : 'bg-slate-100 text-slate-700'
+                }`}
+              >
+                {isBn ? 'QR কোড' : 'QR Code'}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+              <input
+                type="tel"
+                value={phoneInput}
+                onChange={(e) => setPhoneInput(e.target.value)}
+                placeholder={isBn ? '২য় অ্যাকাউন্ট নম্বর (যেমন: 017XXXXXXXX)' : '2nd phone number (e.g. 88017...)'}
+                className="field font-mono"
+              />
+              <button
+                type="button"
+                disabled={isPairing || !phoneInput.trim()}
+                onClick={() => onPair(phoneInput)}
+                className="btn primary min-h-[44px]"
+              >
+                {isPairing ? <RefreshCw size={14} className="animate-spin" /> : <Smartphone size={14} />}
+                <span>{isPairing ? (isBn ? 'কোড তৈরি হচ্ছে...' : 'Generating...') : isBn ? '৮-ডিজিট কোড নিন' : 'Get Pairing Code'}</span>
+              </button>
+            </div>
+
+            {pairingError && (
+              <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold">
+                {pairingError}
+              </div>
+            )}
+
+            {modeTab === 'code' && status.pairingCode && (
+              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-center space-y-2">
+                <div className="text-[11px] font-bold text-emerald-800">
+                  {isBn
+                    ? `আপনার ২য় ফোনের WhatsApp > Linked Devices > Link with phone number-এ নিচের কোডটি লিখুন (${status.remainingSeconds} সে.)`
+                    : `Enter this code in WhatsApp > Linked Devices (${status.remainingSeconds}s)`}
+                </div>
+                <div className="font-mono text-2xl sm:text-3xl font-black tracking-[0.22em] text-emerald-900 select-all">
+                  {status.pairingCode}
+                </div>
+                <button type="button" onClick={copyPairingCode} className="btn outline">
+                  {copiedCode ? <Check size={13} className="text-emerald-700" /> : <Copy size={13} />}
+                  <span>{copiedCode ? (isBn ? 'কপি হয়েছে!' : 'Copied!') : isBn ? 'কোড কপি করুন' : 'Copy Code'}</span>
+                </button>
+              </div>
+            )}
+
+            {modeTab === 'qr' && status.qrCode && (
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-col items-center gap-2">
+                <img
+                  src={status.qrCode}
+                  alt="Companion WhatsApp QR"
+                  className="w-48 h-48 rounded-lg border border-slate-200 bg-white p-1"
+                />
+                <span className="text-[11px] text-slate-500">
+                  {isBn ? '২য় WhatsApp থেকে QR স্ক্যান করুন' : 'Scan QR from your 2nd WhatsApp'}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* 2. Channel, Personality & Anti-Hallucination Settings */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 mb-4 space-y-4">
+        <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-100">
+          <div>
+            <h2 className="text-sm sm:text-base font-extrabold text-slate-900">
+              {isBn ? '২. গার্ল পারসোনালিটি, রোমান্টিক ও নির্ভুলতা সেটিংস' : '2. Personality, Romantic Tone & Accuracy'}
+            </h2>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              {isBn
+                ? 'কথা বলার ধরন, ইনবক্স/গ্রুপ কন্ট্রোল ও ভুল উত্তর রোধের নিয়ম সেট করুন'
+                : 'Configure voice tone, chat channels & zero-hallucination guardrails'}
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={isSaving}
+            onClick={handleSave}
+            className="btn primary"
+          >
+            {isSaving ? <RefreshCw size={13} className="animate-spin" /> : <Save size={13} />}
+            <span>{isBn ? 'সেটিংস সেভ' : 'Save Settings'}</span>
+          </button>
+        </div>
+
+        {/* Quick Toggles */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+          <div className="p-3 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-extrabold text-slate-900">
+                {isBn ? '২য় অ্যাকাউন্ট রিপ্লাই চালু' : 'Enable 2nd Bot Replies'}
+              </div>
+              <div className="text-[10.5px] text-slate-500">
+                {isBn ? 'বন্ধ থাকলে কারো মেসেজে উত্তর দেবে না' : 'Master reply switch for 2nd account'}
+              </div>
+            </div>
+            <label className="switch shrink-0">
+              <input type="checkbox" checked={companionEnabled} onChange={(e) => setCompanionEnabled(e.target.checked)} />
+              <span className="slider" />
+            </label>
+          </div>
+
+          <div className="p-3 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-extrabold text-slate-900">
+                {isBn ? 'কঠোর নির্ভুলতা (কোনো ভুল উত্তর নয়)' : 'Strict Zero-Hallucination Accuracy'}
+              </div>
+              <div className="text-[10.5px] text-slate-500">
+                {isBn ? 'না জানা থাকলে মনগড়া উল্টাপাল্টা কিছু বানাবে না' : 'Prevents guessing or fake facts'}
+              </div>
+            </div>
+            <label className="switch shrink-0">
+              <input
+                type="checkbox"
+                checked={companionStrictAccuracy}
+                onChange={(e) => setCompanionStrictAccuracy(e.target.checked)}
+              />
+              <span className="slider" />
+            </label>
+          </div>
+
+          <div className="p-3 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-extrabold text-slate-900">
+                {isBn ? 'ইনবক্স (Private DM) রিপ্লাই' : 'Private Inbox Auto-Reply'}
+              </div>
+              <div className="text-[10.5px] text-slate-500">
+                {isBn ? 'ব্যক্তিগত ইনবক্সে কেউ মেসেজ দিলে মিষ্টি ও রোমান্টিক উত্তর' : 'Sweet 1-on-1 DM replies'}
+              </div>
+            </div>
+            <label className="switch shrink-0">
+              <input
+                type="checkbox"
+                checked={companionInboxReply}
+                onChange={(e) => setCompanionInboxReply(e.target.checked)}
+              />
+              <span className="slider" />
+            </label>
+          </div>
+
+          <div className="p-3 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-extrabold text-slate-900">
+                {isBn ? 'গ্রুপ চ্যাট রিপ্লাই' : 'Group Chat Auto-Reply'}
+              </div>
+              <div className="text-[10.5px] text-slate-500">
+                {isBn ? 'গ্রুপে শুধু কথা ও প্রশ্নের উত্তর দেবে (কোনো কিক/ডিলিট নয়)' : 'Chats in groups without moderating'}
+              </div>
+            </div>
+            <label className="switch shrink-0">
+              <input
+                type="checkbox"
+                checked={companionGroupReply}
+                onChange={(e) => setCompanionGroupReply(e.target.checked)}
+              />
+              <span className="slider" />
+            </label>
+          </div>
+        </div>
+
+        {/* Name, Romantic Mode, Cooldown, Group Trigger */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+          <div>
+            <label className="block text-[11px] font-bold text-slate-600 mb-1">
+              {isBn ? 'মেয়ে বটের নাম (ডাকনাম)' : 'Female Bot Persona Name'}
+            </label>
+            <input
+              type="text"
+              value={companionName}
+              onChange={(e) => setCompanionName(e.target.value)}
+              placeholder="নিলা (Nila)"
+              className="field"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-bold text-slate-600 mb-1">
+              {isBn ? 'কথা বলার স্টাইল ও রোমান্টিকতা' : 'Conversation & Romantic Tone'}
+            </label>
+            <select
+              className="field"
+              value={companionRomanticLevel}
+              onChange={(e) => setCompanionRomanticLevel(e.target.value as any)}
+            >
+              <option value="romantic">{isBn ? 'রোমান্টিক, মায়াবী ও মিষ্টি মেয়ে ❤️' : 'Romantic & Affectionate'}</option>
+              <option value="sweet">{isBn ? 'খুবই ভদ্র, স্নিগ্ধ ও হাসিখুশি 🌸' : 'Sweet & Friendly'}</option>
+              <option value="balanced">{isBn ? 'বুদ্ধিমতী, স্মার্ট ও সাবলীল ✨' : 'Smart & Balanced'}</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-bold text-slate-600 mb-1">
+              {isBn ? 'গ্রুপে কখন উত্তর দেবে?' : 'When to Reply in Groups'}
+            </label>
+            <select
+              className="field"
+              value={companionGroupMode}
+              onChange={(e) => setCompanionGroupMode(e.target.value as any)}
+            >
+              <option value="smart_auto">{isBn ? 'স্মার্ট অটো (নাম ডাকলে, প্রশ্ন বা গল্পে)' : 'Smart Auto (Questions/Mentions)'}</option>
+              <option value="mention_or_reply">{isBn ? 'শুধু @মেনশন, রিপ্লাই বা নাম ডাকলে' : 'Mention, Reply or Name Only'}</option>
+              <option value="all">{isBn ? 'গ্রুপের প্রায় সব মেসেজে' : 'Reply to All Group Messages'}</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[11px] font-bold text-slate-600 mb-1">
+              {isBn ? 'রিপ্লাই বিরতি / কুলডাউন (সেকেন্ড)' : 'Reply Cooldown (Seconds)'}
+            </label>
+            <select
+              className="field tabular-nums"
+              value={companionCooldownSec}
+              onChange={(e) => setCompanionCooldownSec(Number(e.target.value))}
+            >
+              <option value={3}>3 {isBn ? 'সেকেন্ড' : 'sec'}</option>
+              <option value={6}>6 {isBn ? 'সেকেন্ড (প্রস্তাবিত)' : 'sec (Recommended)'}</option>
+              <option value={10}>10 {isBn ? 'সেকেন্ড' : 'sec'}</option>
+              <option value={20}>20 {isBn ? 'সেকেন্ড' : 'sec'}</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Specific Group Filter */}
+        {status.groups && status.groups.length > 0 && (
+          <div className="pt-2 border-t border-slate-100">
+            <div className="text-[11px] font-bold text-slate-700 mb-1.5">
+              {isBn
+                ? 'কোন কোন গ্রুপে ২য় অ্যাকাউন্ট রিপ্লাই দেবে? (কিছু সিলেক্ট না করলে সব গ্রুপে বলবে)'
+                : 'Allowed Groups (Leave unchecked for all groups)'}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {status.groups.map((g) => {
+                const checked = companionAllowedGroups.includes(g.id);
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() => handleToggleGroup(g.id)}
+                    className={`min-h-[34px] px-3 rounded-xl text-[11px] font-bold border cursor-pointer transition-colors ${
+                      checked
+                        ? 'bg-emerald-600 text-white border-emerald-600'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-emerald-300'
+                    }`}
+                  >
+                    {checked ? '✓ ' : ''}
+                    {g.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        <div>
+          <label className="block text-[11px] font-bold text-slate-600 mb-1">
+            {isBn ? 'অতিরিক্ত নির্দেশনা / নিজের পছন্দ (ঐচ্ছিক)' : 'Extra Custom Personality Note (Optional)'}
+          </label>
+          <textarea
+            rows={2}
+            value={companionCustomBio}
+            onChange={(e) => setCompanionCustomBio(e.target.value)}
+            placeholder={
+              isBn
+                ? 'যেমন: আমাকে আপনি করে বা তুমি করে বলবে, ইসলামী ভদ্রতা বজায় রাখবে ইত্যাদি...'
+                : 'E.g. Use polite তুমি/আপনি style, keep replies extra warm...'
+            }
+            className="w-full p-2.5 rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:border-emerald-600 text-xs outline-none"
+          />
+        </div>
+      </div>
+
+      {/* 3. Live Test Chat & Recent Replies */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-extrabold text-slate-900">
+                {isBn ? '৩. কথা বলে টেস্ট করুন (লাইভ প্রিভিউ)' : '3. Test Live Reply'}
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                {isBn ? 'কানেক্ট করার আগেই ওর কথা ও বুদ্ধিমত্তা পরীক্ষা করুন' : 'Preview her accuracy & romantic style'}
+              </p>
+            </div>
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
+              <button
+                type="button"
+                onClick={() => setTestChannel('inbox')}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-bold cursor-pointer ${
+                  testChannel === 'inbox' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
+                }`}
+              >
+                {isBn ? 'ইনবক্স' : 'Inbox'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setTestChannel('group')}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-bold cursor-pointer ${
+                  testChannel === 'group' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
+                }`}
+              >
+                {isBn ? 'গ্রুপ' : 'Group'}
+              </button>
+            </div>
+          </div>
+
+          <form onSubmit={handleRunTest} className="flex gap-2">
+            <input
+              type="text"
+              value={testText}
+              onChange={(e) => setTestText(e.target.value)}
+              placeholder={isBn ? 'কিছু লিখুন (যেমন: হাই জান, বা কোনো প্রশ্ন)...' : 'Ask something...'}
+              className="field flex-1"
+            />
+            <button type="submit" disabled={isTesting || !testText.trim()} className="btn primary shrink-0">
+              {isTesting ? <RefreshCw size={13} className="animate-spin" /> : <Send size={13} />}
+              <span>{isBn ? 'পাঠান' : 'Send'}</span>
+            </button>
+          </form>
+
+          {testResult && (
+            <div className="p-3 rounded-xl bg-rose-50/50 border border-rose-200 space-y-1">
+              <div className="flex items-center justify-between text-[10.5px] font-bold text-rose-700">
+                <span>{companionName}</span>
+                <span className="font-mono text-slate-500 tabular-nums">
+                  {testResult.provider?.toUpperCase()} · {testResult.latencyMs || 0}ms
+                </span>
+              </div>
+              <p className="text-xs text-slate-900 leading-relaxed whitespace-pre-wrap">{testResult.reply}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-extrabold text-slate-900">
+                {isBn ? 'সাম্প্রতিক চ্যাট মনিটর' : 'Recent Chat Replies'}
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                {isBn ? 'ইনবক্স ও গ্রুপে ২য় অ্যাকাউন্টের সর্বশেষ উত্তরগুলো' : 'Latest replies sent by 2nd account'}
+              </p>
+            </div>
+            <button type="button" onClick={onClearMemory} className="btn outline">
+              <Trash2 size={12} />
+              <span>{isBn ? 'মেমোরি ক্লিয়ার' : 'Clear Memory'}</span>
+            </button>
+          </div>
+
+          {!status.recentChats || status.recentChats.length === 0 ? (
+            <div className="p-6 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl">
+              {isBn
+                ? 'এখনো ২য় অ্যাকাউন্ট থেকে কোনো লাইভ রিপ্লাই পাঠানো হয়নি।'
+                : 'No live replies sent yet.'}
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+              {status.recentChats.map((c) => (
+                <div key={c.id} className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+                  <div className="flex items-center justify-between gap-2 text-[10.5px] text-slate-500">
+                    <span className="font-bold text-slate-700 truncate">
+                      {c.isGroup ? `গ্রুপ: ${c.chatName}` : `ইনবক্স: ${c.senderName}`}
+                    </span>
+                    <span className="tabular-nums shrink-0">
+                      {new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-600 truncate">
+                    <b>{c.senderName}:</b> {c.userText}
+                  </div>
+                  <div className="text-[11.5px] text-emerald-900 leading-snug">
+                    <b>{companionName}:</b> {c.botReply}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+

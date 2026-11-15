@@ -53,6 +53,15 @@ import {
   manualBlockMember,
   DEFAULT_MANUAL_MEMBER_BLOCK_NOTICE,
 } from './src/moderationEngine.ts';
+import {
+  initCompanionBot,
+  getCompanionStatus,
+  startCompanionPairing,
+  disconnectCompanionBot,
+  refreshCompanionGroups,
+  clearCompanionChatLogsAndMemory,
+} from './src/companionBot.ts';
+import { getCompanionFemaleResponse } from './src/aiEngine.ts';
 
 startRestrictedUsersMonitor(() => currentSock);
 startGroupLockMonitor(() => currentSock);
@@ -627,8 +636,9 @@ async function initializeExistingSession() {
   }
 }
 
-// Start existing session if credentials already exist
+// Start existing sessions if credentials already exist
 initializeExistingSession();
+initCompanionBot(() => currentSock?.user?.id);
 
 /**
  * Format and validate international phone number
@@ -1545,6 +1555,113 @@ app.post('/api/maya/test', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Secondary Female AI Companion Account Endpoints (Pure Chat: Inbox & Groups, Zero Moderation)
+app.get('/api/companion/status', (_req: Request, res: Response) => {
+  res.json({ success: true, ...getCompanionStatus() });
+});
+
+app.post('/api/companion/pair', async (req: Request, res: Response) => {
+  try {
+    const phone = String(req.body?.phoneNumber || '').trim();
+    const result = await startCompanionPairing(phone);
+    res.json({
+      success: true,
+      phoneNumber: result.phoneNumber,
+      pairingCode: result.pairingCode,
+      qrCode: result.qrCode,
+      alreadyConnected: !result.pairingCode && getCompanionStatus().online,
+      status: getCompanionStatus(),
+    });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err?.message || 'Pairing failed' });
+  }
+});
+
+app.post('/api/companion/disconnect', async (_req: Request, res: Response) => {
+  try {
+    await disconnectCompanionBot();
+    res.json({ success: true, status: getCompanionStatus(), message: 'দ্বিতীয় AI অ্যাকাউন্ট ডিসকানেক্ট করা হয়েছে।' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Disconnect failed' });
+  }
+});
+
+app.get('/api/companion/groups', async (_req: Request, res: Response) => {
+  const groups = await refreshCompanionGroups();
+  res.json({ success: true, groups });
+});
+
+app.post('/api/companion/settings', (req: Request, res: Response) => {
+  try {
+    const allowedKeys = [
+      'companionEnabled',
+      'companionName',
+      'companionInboxReply',
+      'companionGroupReply',
+      'companionGroupMode',
+      'companionRomanticLevel',
+      'companionStrictAccuracy',
+      'companionCooldownSec',
+      'companionAllowedGroups',
+      'companionCustomBio',
+    ];
+    const patch: Record<string, any> = {};
+    for (const key of allowedKeys) {
+      if (req.body && key in req.body) {
+        patch[key] = req.body[key];
+      }
+    }
+    const updated = updateModerationSettings(patch);
+    res.json({ success: true, settings: updated, message: '২য় AI অ্যাকাউন্টের সেটিংস সেভ হয়েছে!' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Save failed' });
+  }
+});
+
+app.post('/api/companion/clear-memory', (_req: Request, res: Response) => {
+  clearCompanionChatLogsAndMemory();
+  res.json({ success: true, status: getCompanionStatus(), message: 'চ্যাট মেমোরি ও রিসেন্ট লগ ক্লিয়ার হয়েছে।' });
+});
+
+app.post('/api/companion/test', async (req: Request, res: Response) => {
+  try {
+    const text = String(req.body?.text || '').trim();
+    if (!text) return res.status(400).json({ success: false, error: 'মেসেজ লিখুন।' });
+
+    const s = getModerationSettings();
+    const override = req.body?.settings || {};
+    const result = await getCompanionFemaleResponse(
+      text,
+      'ADMIN_TEST',
+      'জানু / অ্যাডমিন',
+      override.channel === 'group' ? 'Test WhatsApp Group' : 'Private DM',
+      'COMPANION:TEST_SANDBOX',
+      {
+        companionName: override.companionName ?? s.companionName ?? 'নিলা (Nila)',
+        romanticLevel: override.companionRomanticLevel ?? s.companionRomanticLevel ?? 'romantic',
+        strictAccuracy: override.companionStrictAccuracy ?? s.companionStrictAccuracy ?? true,
+        customBio: override.companionCustomBio ?? s.companionCustomBio ?? '',
+        isPrivate: override.channel !== 'group',
+        aiProvider: s.aiProvider || 'auto',
+        geminiModel: 'gemini-4-hydrogen',
+        memoryLimit: 12,
+      }
+    );
+
+    res.json({
+      success: true,
+      reply:
+        result.reply ||
+        'আমার AI চাবি সক্রিয় নেই। দয়া করে ড্যাশবোর্ডের API Keys পেজ থেকে একটি Gemini বা Groq Key যুক্ত করুন 🌸',
+      provider: result.provider,
+      latencyMs: result.latencyMs,
+      error: result.error,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Test failed' });
   }
 });
 

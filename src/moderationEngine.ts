@@ -112,6 +112,17 @@ export interface ModerationSettings {
   aiKeys: AiKey[];
   aiAutoRotate: boolean;
   aiProviderPriority: ('gemini' | 'groq' | 'openrouter')[];
+  // Secondary Independent Female AI Companion Account (Zero Moderation, Pure Chat)
+  companionEnabled?: boolean;
+  companionName?: string;
+  companionInboxReply?: boolean;
+  companionGroupReply?: boolean;
+  companionGroupMode?: 'smart_auto' | 'mention_or_reply' | 'all';
+  companionRomanticLevel?: 'sweet' | 'romantic' | 'balanced';
+  companionStrictAccuracy?: boolean;
+  companionCooldownSec?: number;
+  companionAllowedGroups?: string[];
+  companionCustomBio?: string;
 }
 
 export interface AiKey {
@@ -250,6 +261,16 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   aiKeys: [],
   aiAutoRotate: true,
   aiProviderPriority: ['gemini', 'groq', 'openrouter'],
+  companionEnabled: true,
+  companionName: 'নিলা (Nila)',
+  companionInboxReply: true,
+  companionGroupReply: true,
+  companionGroupMode: 'smart_auto',
+  companionRomanticLevel: 'romantic',
+  companionStrictAccuracy: true,
+  companionCooldownSec: 6,
+  companionAllowedGroups: [],
+  companionCustomBio: '',
 };
 
 // In-memory runtime database
