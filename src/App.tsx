@@ -159,6 +159,12 @@ interface ModerationSettings {
   activityTrackingEnabled?: boolean;
   keywordAutoReplyEnabled?: boolean;
   keywordTriggers?: KeywordTriggerItem[];
+  individualMuteEnabled?: boolean;
+  individualMuteStickerLimit?: number;
+  individualMuteTimeWindow?: number;
+  individualMuteDurationMinutes?: number;
+  stickerDeleteMaxRetries?: number;
+  stickerQueueConcurrency?: number;
   manualBlockNotice?: string;
   // Secondary Female AI Companion Account
   companionEnabled?: boolean;
@@ -321,10 +327,10 @@ export default function App() {
     sec2Title: isBn ? '২. মিডিয়া ফিল্টার ও অ্যান্টি-স্প্যাম লক' : '2. Media Restrictions & Anti-Spam Lock',
     sec2Sub: isBn ? 'স্টিকার স্প্যাম, জিআইএফ, ভিডিও, ছবি ও ভিউ ওয়ান্স মডারেশন' : 'Sticker spam, GIF, video, photo & view-once moderation',
     
-    antiStickerSpamTitle: isBn ? 'Anti-Sticker Spam (১০ মিনিট গ্রুপ লক)' : 'Anti-Sticker Spam (Auto 10m Group Lock)',
-    antiStickerSpamDesc: isBn ? '৫ সেকেন্ডে ৩টি বা বেশি Sticker পাঠালে মেসেজ ডিলিট ও পুরো গ্রুপ ১০ মিনিটের জন্য লক হবে।' : '3+ stickers in 5 seconds locks group for 10 minutes.',
+    antiStickerSpamTitle: isBn ? 'Anti-Sticker Spam (দ্রুত স্প্যাম সুরক্ষা)' : 'Anti-Sticker Spam (High-Priority Queue)',
+    antiStickerSpamDesc: isBn ? 'নির্ধারিত সময়ের মধ্যে অতিরিক্ত Sticker পাঠালে High-Priority Queue-তে সঙ্গে সঙ্গে ডিলিট ও স্প্যামারকে সাময়িক ব্লক করবে।' : 'Rapid sticker bursts are queued immediately, deleted in parallel, and restrict only the spammer.',
     antiStickerTitle: isBn ? 'Anti-Sticker (সকল স্টিকার নিষিদ্ধ)' : 'Anti-Sticker (All Stickers)',
-    antiStickerDesc: isBn ? 'গ্রুপে যেকোনো WhatsApp Sticker সঙ্গে সঙ্গে ডিলিট ও সতর্ক করবে।' : 'Deletes all stickers sent in groups immediately.',
+    antiStickerDesc: isBn ? 'গ্রুপে যেকোনো WhatsApp Sticker সঙ্গে সঙ্গে Queue হয়ে ডিলিট ও সতর্ক করবে।' : 'Deletes all stickers sent in groups via high-priority queue.',
     antiGifTitle: isBn ? 'Anti-GIF (জিআইএফ ডিলিট)' : 'Anti-GIF (Animated GIF & Video GIFs)',
     antiGifDesc: isBn ? 'যেকোনো GIF এবং Animated GIF Video ডিলিট করবে।' : 'Deletes all GIFs and animated media.',
     antiVideoTitle: isBn ? 'Anti-Video (ভিডিও ডিলিট)' : 'Anti-Video',
@@ -513,6 +519,12 @@ export default function App() {
     activityTrackingEnabled: true,
     keywordAutoReplyEnabled: true,
     keywordTriggers: [],
+    individualMuteEnabled: true,
+    individualMuteStickerLimit: 3,
+    individualMuteTimeWindow: 5,
+    individualMuteDurationMinutes: 10,
+    stickerDeleteMaxRetries: 4,
+    stickerQueueConcurrency: 5,
     manualBlockNotice: '',
   });
   const [customBadwordsText, setCustomBadwordsText] = useState('');
@@ -520,6 +532,25 @@ export default function App() {
   const [restrictedUsers, setRestrictedUsers] = useState<any[]>([]);
   const [activeWarnings, setActiveWarnings] = useState<ActiveWarningItem[]>([]);
   const [groupLocks, setGroupLocks] = useState<ActiveGroupLockItem[]>([]);
+  const [stickerQueue, setStickerQueue] = useState<{
+    pendingCount: number;
+    processingCount: number;
+    inFlightWorkers: number;
+    isRateLimited: boolean;
+    rateLimitRemainingSec: number;
+    stats: {
+      totalEnqueued: number;
+      totalVerifiedDeleted: number;
+      totalRetried: number;
+      totalFailed: number;
+      totalFailedNoPermission: number;
+      totalDuplicatePrevented: number;
+      totalRecoveredOnRestart: number;
+    };
+    permissionDeniedGroups: Array<{ groupId: string; groupName: string; detectedAt: number; blockedStickerCount: number }>;
+    pendingItems: Array<any>;
+    recentHistory: Array<any>;
+  } | null>(null);
   const [logFilter, setLogFilter] = useState<'all' | 'warned' | 'blocks' | 'deleted' | 'error'>('all');
   const [isLogsLoading, setIsLogsLoading] = useState(false);
 
@@ -860,12 +891,13 @@ export default function App() {
   const loadDashboard = async () => {
     if (isStaticHost && !baileysUrlRef.current.trim()) return;
     try {
-      const [data, warningsRes, locksRes, restrictedRes, logsRes] = await Promise.all([
+      const [data, warningsRes, locksRes, restrictedRes, logsRes, queueRes] = await Promise.all([
         callApi('/api/dashboard'),
         callApi('/api/moderation/warnings').catch(() => null),
         callApi('/api/moderation/group-locks').catch(() => null),
         callApi('/api/moderation/restricted-users').catch(() => null),
         callApi('/api/moderation/logs?limit=50').catch(() => null),
+        callApi('/api/moderation/sticker-queue').catch(() => null),
       ]);
       if (data.overview) {
         setOverview(data.overview);
@@ -884,6 +916,7 @@ export default function App() {
       if (locksRes?.groupLocks) setGroupLocks(locksRes.groupLocks);
       if (restrictedRes?.restrictedUsers) setRestrictedUsers(restrictedRes.restrictedUsers);
       if (logsRes?.logs) setActivityLogs(logsRes.logs);
+      if (queueRes?.success) setStickerQueue(queueRes);
       await Promise.all([
         checkStatus(),
         loadCompanionStatus().catch(() => {}),
@@ -1278,12 +1311,13 @@ export default function App() {
   const loadModerationData = async () => {
     setIsLogsLoading(true);
     try {
-      const [settingsRes, logsRes, restrictedRes, warningsRes, locksRes] = await Promise.all([
+      const [settingsRes, logsRes, restrictedRes, warningsRes, locksRes, queueRes] = await Promise.all([
         callApi('/api/moderation/settings'),
         callApi('/api/moderation/logs?limit=50'),
         callApi('/api/moderation/restricted-users'),
         callApi('/api/moderation/warnings').catch(() => null),
         callApi('/api/moderation/group-locks').catch(() => null),
+        callApi('/api/moderation/sticker-queue').catch(() => null),
       ]);
       if (settingsRes.settings) {
         const s = settingsRes.settings;
@@ -1307,11 +1341,59 @@ export default function App() {
       if (locksRes && locksRes.groupLocks) {
         setGroupLocks(locksRes.groupLocks);
       }
-      showNotification(isBn ? 'সেটিংস, ওয়ার্নিং ও ব্লক তথ্য আপডেট হয়েছে' : 'Settings & Logs Synced');
+      if (queueRes?.success) {
+        setStickerQueue(queueRes);
+      }
+      showNotification(isBn ? 'সেটিংস, ওয়ার্নিং ও স্টিকার কিউ আপডেট হয়েছে' : 'Settings, Logs & Queue Synced');
     } catch (err: any) {
       showNotification((isBn ? 'ডাটা লোড ত্রুটি: ' : 'Failed to load data: ') + err.message);
     } finally {
       setIsLogsLoading(false);
+    }
+  };
+
+  const handleRefreshStickerQueue = async () => {
+    try {
+      const res = await callApi('/api/moderation/sticker-queue');
+      if (res?.success) setStickerQueue(res);
+    } catch {}
+  };
+
+  const handleSaveStickerSpamConfig = async () => {
+    const patch = {
+      individualMuteTimeWindow: Math.max(1, Math.min(120, Number(settings.individualMuteTimeWindow ?? 5))),
+      individualMuteStickerLimit: Math.max(2, Math.min(100, Number(settings.individualMuteStickerLimit ?? 3))),
+      individualMuteDurationMinutes: Math.max(1, Math.min(180, Number(settings.individualMuteDurationMinutes ?? 10))),
+      stickerDeleteMaxRetries: Math.max(1, Math.min(10, Number(settings.stickerDeleteMaxRetries ?? 4))),
+      stickerQueueConcurrency: Math.max(1, Math.min(10, Number(settings.stickerQueueConcurrency ?? 5))),
+    };
+    try {
+      const res = await callApi('/api/moderation/settings', 'POST', patch);
+      if (res?.settings) setSettings(res.settings);
+      await handleRefreshStickerQueue();
+      showNotification(isBn ? 'স্টিকার স্প্যাম টাইম উইন্ডো ও কিউ সেটিংস সেভ হয়েছে!' : 'Sticker Anti-Spam config saved!');
+    } catch (err: any) {
+      showNotification((isBn ? 'সেভ ব্যর্থ: ' : 'Save failed: ') + err.message);
+    }
+  };
+
+  const handleRetryFailedStickers = async () => {
+    try {
+      const res = await callApi('/api/moderation/sticker-queue/retry-failed', 'POST');
+      if (res?.queue) setStickerQueue(res.queue);
+      showNotification(res?.message || (isBn ? 'পুনরায় কিউ করা হয়েছে' : 'Requeued failed items'));
+    } catch (err: any) {
+      showNotification((isBn ? 'রিস্টার্ট ব্যর্থ: ' : 'Retry failed: ') + err.message);
+    }
+  };
+
+  const handleClearStickerQueueHistory = async () => {
+    try {
+      const res = await callApi('/api/moderation/sticker-queue/clear-history', 'POST');
+      if (res?.queue) setStickerQueue(res.queue);
+      showNotification(isBn ? 'কিউ হিস্ট্রি পরিষ্কার হয়েছে' : 'Queue history cleared');
+    } catch (err: any) {
+      showNotification((isBn ? 'ক্লিয়ার ব্যর্থ: ' : 'Clear failed: ') + err.message);
     }
   };
 
@@ -2761,6 +2843,165 @@ export default function App() {
                     />
                     <span className="slider"></span>
                   </label>
+                </div>
+
+                {/* Configurable Sticker Spam Thresholds & High-Priority Queue Monitor */}
+                <div className="my-3 p-3 rounded-xl border border-emerald-200 bg-emerald-50/40 space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <h4 className="text-xs font-extrabold text-emerald-950 flex items-center gap-1.5 flex-wrap">
+                        <span>{isBn ? '⚡ হাই-প্রায়োরিটি স্টিকার স্প্যাম কনফিগ ও লাইভ কিউ' : '⚡ Sticker Spam Window & High-Priority Queue'}</span>
+                        <span className="badge badge-green">
+                          {isBn ? '০-বিলম্ব কিউ' : 'Zero-AI Queue'}
+                        </span>
+                      </h4>
+                      <p className="text-[10px] text-slate-600 mt-0.5">
+                        {isBn
+                          ? '৫× স্পিড বা একসঙ্গে ১০০+ স্টিকার এলেও প্রতিটি Unique Message ID কিউয়ে সংরক্ষণ ও প্যারালাল ডিলিট হবে।'
+                          : 'Captures bursts up to 100+ stickers synchronously, deduplicates Message IDs, and deletes in parallel.'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button type="button" className="btn outline" onClick={handleRefreshStickerQueue}>
+                        <RefreshCw size={11} /> {isBn ? 'কিউ সিংক' : 'Sync'}
+                      </button>
+                      <button type="button" className="btn primary" onClick={handleSaveStickerSpamConfig}>
+                        <Save size={11} /> {isBn ? 'সেভ করুন' : 'Save'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div className="bg-white p-2 rounded-lg border border-slate-200">
+                      <label className="block text-[9.5px] font-bold text-slate-500 mb-1">
+                        {isBn ? 'সময়সীমা (সেকেন্ড)' : 'Time Window (sec)'}
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={120}
+                        value={settings.individualMuteTimeWindow ?? 5}
+                        onChange={(e) =>
+                          setSettings((prev) => ({ ...prev, individualMuteTimeWindow: Number(e.target.value || 5) }))
+                        }
+                        className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-bold"
+                      />
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-slate-200">
+                      <label className="block text-[9.5px] font-bold text-slate-500 mb-1">
+                        {isBn ? 'স্টিকার লিমিট (সংখ্যা)' : 'Sticker Limit'}
+                      </label>
+                      <input
+                        type="number"
+                        min={2}
+                        max={100}
+                        value={settings.individualMuteStickerLimit ?? 3}
+                        onChange={(e) =>
+                          setSettings((prev) => ({ ...prev, individualMuteStickerLimit: Number(e.target.value || 3) }))
+                        }
+                        className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-bold"
+                      />
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-slate-200">
+                      <label className="block text-[9.5px] font-bold text-slate-500 mb-1">
+                        {isBn ? 'ব্লক সময় (মিনিট)' : 'Block Duration (min)'}
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={180}
+                        value={settings.individualMuteDurationMinutes ?? 10}
+                        onChange={(e) =>
+                          setSettings((prev) => ({ ...prev, individualMuteDurationMinutes: Number(e.target.value || 10) }))
+                        }
+                        className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-bold"
+                      />
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-slate-200">
+                      <label className="block text-[9.5px] font-bold text-slate-500 mb-1">
+                        {isBn ? 'প্যারালাল / রিট্রাই' : 'Parallel / Retries'}
+                      </label>
+                      <div className="flex gap-1">
+                        <input
+                          type="number"
+                          min={1}
+                          max={10}
+                          title="Parallel Workers"
+                          value={settings.stickerQueueConcurrency ?? 5}
+                          onChange={(e) =>
+                            setSettings((prev) => ({ ...prev, stickerQueueConcurrency: Number(e.target.value || 5) }))
+                          }
+                          className="w-1/2 px-1.5 py-1 border border-slate-300 rounded text-xs font-bold"
+                        />
+                        <input
+                          type="number"
+                          min={1}
+                          max={10}
+                          title="Max Retries"
+                          value={settings.stickerDeleteMaxRetries ?? 4}
+                          onChange={(e) =>
+                            setSettings((prev) => ({ ...prev, stickerDeleteMaxRetries: Number(e.target.value || 4) }))
+                          }
+                          className="w-1/2 px-1.5 py-1 border border-slate-300 rounded text-xs font-bold"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {stickerQueue && (
+                    <div className="space-y-2 pt-1">
+                      <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 text-center">
+                        <div className="bg-white px-2 py-1.5 rounded border border-slate-200">
+                          <div className="text-[9px] text-slate-500 font-semibold">{isBn ? 'পেন্ডিং কিউ' : 'Pending'}</div>
+                          <div className="text-xs font-black text-amber-600">{stickerQueue.pendingCount}</div>
+                        </div>
+                        <div className="bg-white px-2 py-1.5 rounded border border-slate-200">
+                          <div className="text-[9px] text-slate-500 font-semibold">{isBn ? 'ভেরিফায়েড ডিলিট' : 'Verified Del'}</div>
+                          <div className="text-xs font-black text-emerald-700">{stickerQueue.stats.totalVerifiedDeleted}</div>
+                        </div>
+                        <div className="bg-white px-2 py-1.5 rounded border border-slate-200">
+                          <div className="text-[9px] text-slate-500 font-semibold">{isBn ? 'রিট্রাই' : 'Retried'}</div>
+                          <div className="text-xs font-black text-blue-600">{stickerQueue.stats.totalRetried}</div>
+                        </div>
+                        <div className="bg-white px-2 py-1.5 rounded border border-slate-200">
+                          <div className="text-[9px] text-slate-500 font-semibold">{isBn ? 'ডুপ্লিকেট ব্লক' : 'Deduped'}</div>
+                          <div className="text-xs font-black text-slate-700">{stickerQueue.stats.totalDuplicatePrevented}</div>
+                        </div>
+                        <div className="bg-white px-2 py-1.5 rounded border border-slate-200">
+                          <div className="text-[9px] text-slate-500 font-semibold">{isBn ? 'পারমিশন নেই' : 'No Admin'}</div>
+                          <div className="text-xs font-black text-rose-600">{stickerQueue.stats.totalFailedNoPermission}</div>
+                        </div>
+                        <div className="bg-white px-2 py-1.5 rounded border border-slate-200">
+                          <div className="text-[9px] text-slate-500 font-semibold">{isBn ? 'ব্যর্থ' : 'Failed'}</div>
+                          <div className="text-xs font-black text-rose-700">{stickerQueue.stats.totalFailed}</div>
+                        </div>
+                      </div>
+
+                      {stickerQueue.permissionDeniedGroups && stickerQueue.permissionDeniedGroups.length > 0 && (
+                        <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-[10.5px] text-rose-800 space-y-1">
+                          <div className="font-extrabold">
+                            ⚠️ {isBn ? 'নিচের গ্রুপে বটের Sticker Delete Permission (Admin) নেই:' : 'Bot lacks Admin Delete Permission in:'}
+                          </div>
+                          {stickerQueue.permissionDeniedGroups.map((g) => (
+                            <div key={g.groupId} className="font-medium">
+                              • {g.groupName} ({g.blockedStickerCount}টি ডিলিট আটকে আছে — বটকে Admin বানান)
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {(stickerQueue.stats.totalFailed > 0 || stickerQueue.stats.totalFailedNoPermission > 0 || stickerQueue.recentHistory.length > 0) && (
+                        <div className="flex flex-wrap gap-1.5">
+                          <button type="button" className="btn soft" onClick={handleRetryFailedStickers}>
+                            <RotateCcw size={11} /> {isBn ? 'ব্যর্থ স্টিকার রিট্রাই করুন' : 'Retry Failed Stickers'}
+                          </button>
+                          <button type="button" className="btn outline" onClick={handleClearStickerQueueHistory}>
+                            <Trash2 size={11} /> {isBn ? 'হিস্ট্রি ক্লিয়ার' : 'Clear History'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Anti-GIF */}

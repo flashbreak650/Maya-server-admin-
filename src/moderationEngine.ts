@@ -87,6 +87,8 @@ export interface ModerationSettings {
   individualMuteStickerLimit: number;
   individualMuteTimeWindow: number; // in seconds
   individualMuteDurationMinutes: number; // in minutes
+  stickerDeleteMaxRetries?: number;
+  stickerQueueConcurrency?: number;
   manualBlockNotice?: string;
   // Maya AI Settings
   mayaAiEnabled: boolean;
@@ -239,6 +241,8 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   individualMuteStickerLimit: 3,
   individualMuteTimeWindow: 5,
   individualMuteDurationMinutes: 10,
+  stickerDeleteMaxRetries: 4,
+  stickerQueueConcurrency: 5,
   manualBlockNotice: '',
   mayaAiEnabled: true,
   mayaPrivateReply: true,
@@ -1414,6 +1418,54 @@ export function primeGroupMetaCache(groupsMap: Record<string, any>) {
   }
 }
 
+export function getCachedGroupMetadataSync(groupId: string): any | undefined {
+  return groupMetaCache[groupId]?.meta;
+}
+
+export function incrementMessagesChecked(count: number = 1) {
+  db.stats.messagesChecked += Math.max(0, count);
+  saveDatabase();
+}
+
+export function incrementVerifiedDeletedStat(isRestrictedInterception = false) {
+  db.stats.deletedMessages += 1;
+  if (isRestrictedInterception) {
+    db.stats.restrictedMessagesBlocked = (db.stats.restrictedMessagesBlocked || 0) + 1;
+  }
+  saveDatabase();
+}
+
+export function recordStickerContactAndActivity(
+  groupId: string,
+  groupName: string,
+  senderJid: string,
+  senderAltJid: string | undefined,
+  senderPhone: string,
+  pushName?: string | null
+) {
+  if (pushName) {
+    const cu1 = cleanJidUser(senderJid);
+    const cu2 = cleanJidUser(senderAltJid);
+    if (cu1) contactNamesCache[cu1] = pushName;
+    if (cu2) contactNamesCache[cu2] = pushName;
+  }
+  recordMemberActivity(groupId, groupName, normalizeJid(senderJid), senderPhone, pushName);
+}
+
+export function getGroupAdminJidsFromCachedMeta(groupId: string): string[] {
+  const meta = groupMetaCache[groupId]?.meta;
+  if (!meta?.participants) return [];
+  const admins: string[] = [];
+  for (const p of meta.participants) {
+    const pAny = p as any;
+    const isAdmin = p.admin === 'admin' || p.admin === 'superadmin' || Boolean(pAny.isAdmin) || Boolean(pAny.isSuperAdmin);
+    if (isAdmin && p.id) {
+      admins.push(normalizeJid(p.id));
+    }
+  }
+  return admins;
+}
+
 export async function handleGroupParticipantsUpdate(
   sock: WASocket,
   update: { id: string; participants: any[]; action: string }
@@ -1603,15 +1655,23 @@ export async function checkPermissions(
 
 /**
  * Bulletproof Baileys v7 Group Message Revoke (handles PN + LID addressing modes)
+ * Strict Permission Check: Never falsely returns true when bot lacks Admin delete permissions.
  */
 async function deleteMessageSafely(
   sock: WASocket,
   remoteJid: string,
   msg: proto.IWebMessageInfo,
-  matchedSenderId?: string
+  matchedSenderId?: string,
+  isBotAdmin?: boolean
 ): Promise<boolean> {
   const key = msg.key;
   if (!key?.id) return false;
+  if (isBotAdmin === false && !key.fromMe) {
+    return false;
+  }
+  if (!sock || !sock.user || !sock.authState?.creds?.registered) {
+    return false;
+  }
 
   const participantCandidates: string[] = [];
   const rawParticipant = key.participant || (msg as any).participant || '';
@@ -1654,6 +1714,120 @@ async function deleteMessageSafely(
 
   console.error('[Delete Message FAILED]:', lastErr?.message || lastErr);
   return false;
+}
+
+const lastAntiStickerNoticeAt = new Map<string, number>();
+
+/**
+ * Applies warning + 3-strike Auto-Kick ONLY after real verified delete succeeded
+ */
+export async function applyVerifiedAntiStickerViolation(
+  sock: WASocket,
+  params: {
+    groupId: string;
+    groupName: string;
+    senderJid: string;
+    canonicalSender: string;
+    senderAltJid?: string;
+    senderPhone: string;
+  }
+) {
+  const { groupId, groupName, senderJid, canonicalSender, senderAltJid, senderPhone } = params;
+  const settings = getSettings();
+  const warningKey = `${groupId}:${canonicalSender}`;
+  if (!db.warnings[warningKey]) {
+    db.warnings[warningKey] = {
+      count: 0,
+      lastViolation: Date.now(),
+      violations: [],
+      groupId,
+      groupName,
+      senderJid: canonicalSender,
+      senderPhone,
+    };
+  }
+
+  db.warnings[warningKey].groupId = groupId;
+  db.warnings[warningKey].groupName = groupName;
+  db.warnings[warningKey].senderJid = canonicalSender;
+  db.warnings[warningKey].senderPhone = senderPhone;
+  db.warnings[warningKey].count++;
+  db.warnings[warningKey].lastViolation = Date.now();
+  db.warnings[warningKey].violations.push({
+    timestamp: Date.now(),
+    reason: 'স্টিকার পাঠানো নিষিদ্ধ',
+  });
+  db.stats.warningsGiven++;
+  saveDatabase();
+
+  const warningCount = db.warnings[warningKey].count;
+  const now = Date.now();
+  const throttleKey = `${groupId}:${canonicalSender}`;
+  const lastNotice = lastAntiStickerNoticeAt.get(throttleKey) || 0;
+  const canSendNotice = now - lastNotice > 3500;
+
+  if (warningCount === 1 && !settings.silentModeration && canSendNotice) {
+    lastAntiStickerNoticeAt.set(throttleKey, now);
+    await safeSendMessage(sock, groupId, {
+      text: `⚠️ [সতর্কবার্তা ১/৩]\nসদস্য @${senderPhone}, গ্রুপে স্টিকার পাঠানো নিষিদ্ধ!\nআপনার স্টিকারটি মুছে দেওয়া হয়েছে। নিয়ম মেনে চলার অনুরোধ করা হচ্ছে।`,
+      mentions: [senderJid],
+    });
+  } else if (warningCount === 2 && !settings.silentModeration && canSendNotice) {
+    lastAntiStickerNoticeAt.set(throttleKey, now);
+    await safeSendMessage(sock, groupId, {
+      text: `⚠️ [সতর্কবার্তা ২/৩]\nসদস্য @${senderPhone}, এটি আপনার দ্বিতীয় সতর্কতা (স্টিকার পাঠানো নিষিদ্ধ)!\nপরবর্তী আরেকটি নিয়মলঙ্ঘনে আপনাকে স্বয়ংক্রিয়ভাবে গ্রুপ থেকে রিমুভ (Kick) করা হবে!`,
+      mentions: [senderJid],
+    });
+  } else if (warningCount >= 3 && settings.autoKick3Warnings) {
+    const freshPerms = await checkPermissions(sock, groupId, senderJid, true, senderAltJid);
+    if (!freshPerms.isSenderAdmin && freshPerms.isBotAdmin) {
+      const kickTargets: string[] = [];
+      for (const cand of [
+        freshPerms.matchedSenderId,
+        normalizeJid(senderJid),
+        senderAltJid ? normalizeJid(senderAltJid) : '',
+      ]) {
+        if (cand && !kickTargets.includes(cand)) kickTargets.push(cand);
+      }
+
+      if (!settings.silentModeration && canSendNotice) {
+        lastAntiStickerNoticeAt.set(throttleKey, now);
+        await safeSendMessage(sock, groupId, {
+          text: `🚨 [চূড়ান্ত অ্যাকশন - ৩য় সতর্কতা]\nসদস্য @${senderPhone} ৩ বার স্টিকার নিয়ম লঙ্ঘন করেছেন।\nনিরাপত্তার স্বার্থে তাকে গ্রুপ থেকে রিমুভ করা হচ্ছে!`,
+          mentions: [senderJid],
+        });
+      }
+
+      let kickedOk = false;
+      for (const targetJid of kickTargets) {
+        try {
+          const kickRes: any = await sock.groupParticipantsUpdate(groupId, [targetJid], 'remove');
+          const status = Array.isArray(kickRes) ? String(kickRes[0]?.status || '200') : '200';
+          if (status === '200' || status === '207') {
+            kickedOk = true;
+            break;
+          }
+        } catch {}
+      }
+      if (kickedOk) {
+        db.stats.kickedMembers++;
+        delete db.warnings[warningKey];
+        saveDatabase();
+      }
+    }
+  }
+
+  const actionMap: Record<number, string> = { 1: '১ম সতর্কতা', 2: '২য় সতর্কতা', 3: '৩য় সতর্কতা' };
+  addActivityLog({
+    groupId,
+    groupName,
+    senderJid,
+    senderPhone,
+    action: warningCount >= 3 && settings.autoKick3Warnings ? 'kicked' : 'warned',
+    reason: `Anti-Sticker (${actionMap[warningCount] || 'সতর্কতা'}) [Verified Deleted]`,
+    details: 'স্টিকার পাঠানো নিষিদ্ধ (High-Priority Queue দ্বারা ডিলিট)',
+    warningCount,
+  });
 }
 
 // -------------------------------------------------------------
@@ -2654,14 +2828,16 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
       const remainingSec = Math.round(restrictionCheck.remainingMs / 1000);
       console.log(`[Individual Mute ACTIVE] Intercepted message from restricted user @${cleanPhone} in "${groupSubject}". Auto-deleting message (${remainingSec}s remaining)...`);
 
-      const deleted = await deleteMessageSafely(sock, remoteJid, msg, matchedSenderId);
+      const deleted = await deleteMessageSafely(sock, remoteJid, msg, matchedSenderId, isBotAdmin);
       if (deleted) {
         db.stats.deletedMessages++;
         db.stats.restrictedMessagesBlocked = (db.stats.restrictedMessagesBlocked || 0) + 1;
         saveDatabase();
+      } else if (!isBotAdmin) {
+        console.warn(`[Individual Mute Warn] Bot lacks admin delete permission in "${groupSubject}".`);
       }
 
-      // Halts all processing! Message deleted instantly, other members chat freely.
+      // Halts all processing!
       return;
     }
   }
@@ -2819,8 +2995,8 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
   if (violationType) {
     console.log(`[Moderation Triggered] ${violationType} in ${groupSubject} by @${cleanPhone} (isBotAdmin=${isBotAdmin})`);
 
-    // Step 1: Real Message Delete Operation (PN + LID compatible)
-    const deleteSuccessful = await deleteMessageSafely(sock, remoteJid, msg, matchedSenderId);
+    // Step 1: Real Message Delete Operation (PN + LID compatible & Admin permission verified)
+    const deleteSuccessful = await deleteMessageSafely(sock, remoteJid, msg, matchedSenderId, isBotAdmin);
     if (deleteSuccessful) {
       db.stats.deletedMessages++;
     } else if (!isBotAdmin) {
@@ -2859,7 +3035,13 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
     // Feature 10: THREE WARNING AUTO KICK (Always enforce kick even if silentModeration is enabled)
     if (warningCount === 1 && !settings.silentModeration) {
       await safeSendMessage(sock, remoteJid, {
-        text: `⚠️ [সতর্কবার্তা ১/৩]\nসদস্য @${cleanPhone}, গ্রুপে ${violationDetails}!\nআপনার মেসেজটি মুছে দেওয়া হয়েছে। নিয়ম মেনে চলার অনুরোধ করা হচ্ছে।`,
+        text: `⚠️ [সতর্কবার্তা ১/৩]\nসদস্য @${cleanPhone}, গ্রুপে ${violationDetails}!\n${
+          deleteSuccessful
+            ? 'আপনার মেসেজটি মুছে দেওয়া হয়েছে।'
+            : !isBotAdmin
+              ? '⚠️ বটের মেসেজ ডিলিট পারমিশন (Admin) না থাকায় মেসেজটি মুছে ফেলা যায়নি।'
+              : 'মেসেজটি মুছে ফেলার চেষ্টা করা হয়েছে।'
+        } নিয়ম মেনে চলার অনুরোধ করা হচ্ছে।`,
         mentions: [senderJid],
       });
     } else if (warningCount === 2 && !settings.silentModeration) {

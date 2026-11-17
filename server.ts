@@ -53,7 +53,17 @@ import {
   getGroupMembersForBlockPage,
   manualBlockMember,
   DEFAULT_MANUAL_MEMBER_BLOCK_NOTICE,
+  getCachedGroupMetadataSync,
 } from './src/moderationEngine.ts';
+import {
+  initStickerQueue,
+  handleIncomingStickerFastPath,
+  notifyStickerQueueSocketReady,
+  getStickerQueueStatus,
+  retryFailedStickerQueue,
+  clearStickerQueueHistory,
+  flushStickerQueueSync,
+} from './src/stickerQueue.ts';
 import {
   initCompanionBot,
   getCompanionStatus,
@@ -67,6 +77,7 @@ import { getCompanionFemaleResponse } from './src/aiEngine.ts';
 startRestrictedUsersMonitor(() => currentSock);
 startGroupLockMonitor(() => currentSock);
 startNightModeScheduler(() => currentSock);
+initStickerQueue(() => currentSock);
 
 dotenv.config();
 
@@ -433,12 +444,14 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
       botState.qrCodeDataUrl = '';
       botState.pairingStartedAt = 0;
       console.log('WhatsApp connection opened successfully for user:', sock.user?.id);
+      notifyStickerQueueSocketReady();
 
       setTimeout(async () => {
         if (socketToken !== activeSocketToken || sock !== currentSock) return;
         try {
           const groups = await sock.groupFetchAllParticipating();
           primeGroupMetaCache(groups);
+          notifyStickerQueueSocketReady();
           const groupList = Object.values(groups).map((g) => ({
             id: g.id,
             name: g.subject,
@@ -606,13 +619,29 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
     }
     if (type === 'notify' && Array.isArray(messages)) {
       botState.messagesChecked += messages.length;
-      await Promise.allSettled(
-        messages.map((msg) =>
-          processIncomingMessage(sock, msg).catch((err: any) => {
-            console.error('Error processing group message in moderation engine:', err?.message || err);
-          })
-        )
-      );
+
+      // High-Priority Fast Path: synchronously detect & queue ALL group stickers in <1ms before any AI/media/DB wait
+      const nonStickerMessages: any[] = [];
+      for (const msg of messages) {
+        try {
+          if (handleIncomingStickerFastPath(sock, msg)) {
+            continue;
+          }
+        } catch (stickerErr: any) {
+          console.error('[Sticker Fast-Path Error]:', stickerErr?.message || stickerErr);
+        }
+        nonStickerMessages.push(msg);
+      }
+
+      if (nonStickerMessages.length > 0) {
+        await Promise.allSettled(
+          nonStickerMessages.map((msg) =>
+            processIncomingMessage(sock, msg).catch((err: any) => {
+              console.error('Error processing group message in moderation engine:', err?.message || err);
+            })
+          )
+        );
+      }
     }
   });
 }
@@ -665,6 +694,7 @@ async function initializeExistingSession() {
       defaultQueryTimeoutMs: 60000,
       retryRequestDelayMs: 2500,
       maxMsgRetryCount: 3,
+      cachedGroupMetadata: async (jid: string) => getCachedGroupMetadataSync(jid),
     });
 
     currentSock = sock;
@@ -779,6 +809,7 @@ async function startRealPairingFlow(cleanPhone: string): Promise<{ pairingCode: 
         defaultQueryTimeoutMs: 60000,
         retryRequestDelayMs: 2500,
         maxMsgRetryCount: 3,
+        cachedGroupMetadata: async (jid: string) => getCachedGroupMetadataSync(jid),
       });
 
       currentSock = sock;
@@ -1117,7 +1148,37 @@ app.post('/api/moderation/member-block', async (req: Request, res: Response) => 
   }
 });
 
-// Moderation Logs Endpoint
+// Moderation Logs & High-Priority Sticker Queue Endpoints
+app.get('/api/moderation/sticker-queue', (_req: Request, res: Response) => {
+  res.json({ success: true, ...getStickerQueueStatus() });
+});
+
+app.post('/api/moderation/sticker-queue/retry-failed', (_req: Request, res: Response) => {
+  try {
+    const result = retryFailedStickerQueue();
+    res.json({
+      success: true,
+      ...result,
+      queue: getStickerQueueStatus(),
+      message:
+        result.requeuedCount > 0
+          ? `${result.requeuedCount}টি ব্যর্থ স্টিকার পুনরায় High-Priority Queue-তে যুক্ত হয়েছে!`
+          : 'পুনরায় চেষ্টা করার মতো কোনো ব্যর্থ স্টিকার নেই।',
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/moderation/sticker-queue/clear-history', (_req: Request, res: Response) => {
+  try {
+    clearStickerQueueHistory();
+    res.json({ success: true, queue: getStickerQueueStatus(), message: 'স্টিকার কিউ হিস্ট্রি পরিষ্কার করা হয়েছে।' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/api/moderation/logs', (req: Request, res: Response) => {
   const limit = req.query.limit ? parseInt(String(req.query.limit), 10) : 50;
   res.json({ success: true, logs: getActivityLogs(limit) });
@@ -1746,7 +1807,8 @@ async function startServer() {
   });
 
   const shutdown = () => {
-    console.log('Closing server socket gracefully...');
+    console.log('Flushing pending moderation queues and closing server gracefully...');
+    flushStickerQueueSync();
     server.close(() => {
       process.exit(0);
     });
