@@ -7,6 +7,7 @@ import makeWASocket, {
   DisconnectReason,
   downloadMediaMessage,
   fetchLatestBaileysVersion,
+  fetchLatestWaWebVersion,
   jidNormalizedUser,
   makeCacheableSignalKeyStore,
   useMultiFileAuthState,
@@ -93,6 +94,17 @@ const processedMsgIds = new Set<string>();
 const lastReplyAtByChat = new Map<string, number>();
 const inFlightChats = new Set<string>();
 const groupSubjectCache = new Map<string, string>();
+let recentGlobalReplyTimestamps: number[] = [];
+
+function checkAndRecordGlobalAntiBanQuota(): boolean {
+  const now = Date.now();
+  recentGlobalReplyTimestamps = recentGlobalReplyTimestamps.filter((ts) => now - ts < 3600_000);
+  const lastMinuteCount = recentGlobalReplyTimestamps.filter((ts) => now - ts < 60_000).length;
+  if (lastMinuteCount >= 8 || recentGlobalReplyTimestamps.length >= 40) {
+    return false;
+  }
+  return true;
+}
 
 function clearCompanionReconnectTimer() {
   if (companionReconnectTimer) {
@@ -101,15 +113,42 @@ function clearCompanionReconnectTimer() {
   }
 }
 
+function isVerifiedCompanionCreds(creds: any): boolean {
+  return Boolean(creds?.registered || (creds?.me?.id && creds?.account));
+}
+
 function hasRegisteredCompanionCreds(): boolean {
   try {
     const credsPath = path.join(COMPANION_SESSIONS_DIR, 'creds.json');
     if (!fs.existsSync(credsPath)) return false;
     const content = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
-    return Boolean(content?.registered || content?.me?.id);
+    return isVerifiedCompanionCreds(content);
   } catch {
     return false;
   }
+}
+
+function wipeCompanionSessionsDir() {
+  try {
+    fs.rmSync(COMPANION_SESSIONS_DIR, { recursive: true, force: true });
+    fs.mkdirSync(COMPANION_SESSIONS_DIR, { recursive: true });
+  } catch {}
+}
+
+async function resolveCompanionWaVersion(): Promise<[number, number, number]> {
+  try {
+    const waWeb = await fetchLatestWaWebVersion({});
+    if (Array.isArray(waWeb?.version) && waWeb.version.length === 3) {
+      return waWeb.version as [number, number, number];
+    }
+  } catch {}
+  try {
+    const fallback = await fetchLatestBaileysVersion();
+    if (Array.isArray(fallback?.version) && fallback.version.length === 3) {
+      return fallback.version as [number, number, number];
+    }
+  } catch {}
+  return [2, 3000, 1054933766];
 }
 
 function destroyCompanionSocket() {
@@ -367,6 +406,10 @@ async function handleCompanionIncomingMessage(sock: WASocket, msg: proto.IWebMes
     if (!isGroup || Date.now() - lastAt < 2000) return;
   }
   if (inFlightChats.has(remoteJid)) return;
+  if (!checkAndRecordGlobalAntiBanQuota()) {
+    console.warn('[Companion Anti-Ban Guard] Global reply rate cap reached temporarily to protect account.');
+    return;
+  }
 
   inFlightChats.add(remoteJid);
   try {
@@ -462,19 +505,24 @@ async function handleCompanionIncomingMessage(sock: WASocket, msg: proto.IWebMes
       );
     }
 
+    if (!result?.reply || result.provider === 'none') {
+      try {
+        await sock.sendPresenceUpdate('paused', remoteJid);
+      } catch {}
+      return;
+    }
+
+    // Human-like reading/typing pause (1.4s - 2.2s) to protect WhatsApp account from bot-speed detection
+    const naturalDelayMs = 1400 + Math.floor(Math.random() * 800);
+    await new Promise((r) => setTimeout(r, naturalDelayMs));
+    await sock.sendMessage(remoteJid, { text: result.reply }, { quoted: msg as any });
     try {
       await sock.sendPresenceUpdate('paused', remoteJid);
     } catch {}
 
-    if (!result?.reply || result.provider === 'none') {
-      return;
-    }
-
-    // Small human-like pause before sending
-    await new Promise((r) => setTimeout(r, 450));
-    await sock.sendMessage(remoteJid, { text: result.reply }, { quoted: msg as any });
-
-    lastReplyAtByChat.set(remoteJid, Date.now());
+    const sentNow = Date.now();
+    lastReplyAtByChat.set(remoteJid, sentNow);
+    recentGlobalReplyTimestamps.push(sentNow);
     companionState.repliesSent += 1;
     if (isGroup) companionState.groupReplies += 1;
     else companionState.inboxReplies += 1;
@@ -545,7 +593,7 @@ function setupCompanionSocketEvents(sock: WASocket, socketToken: number) {
       const isReplaced = statusCode === DisconnectReason.connectionReplaced || statusCode === 440;
       const isRestartRequired = statusCode === DisconnectReason.restartRequired || statusCode === 515;
       const isBanned = statusCode === 403 || statusCode === 405 || /banned|blocked|restricted/i.test(errMsg);
-      const isRegistered = Boolean(sock.authState?.creds?.registered) || hasRegisteredCompanionCreds();
+      const isRegistered = isVerifiedCompanionCreds(sock.authState?.creds) || hasRegisteredCompanionCreds();
 
       if (manualDisconnect) {
         companionState.status = 'disconnected';
@@ -558,26 +606,27 @@ function setupCompanionSocketEvents(sock: WASocket, socketToken: number) {
         clearCompanionReconnectTimer();
         companionState.status = 'disconnected';
         companionState.step = 'idle';
-        companionState.stepMessage = 'দ্বিতীয় অ্যাকাউন্ট লগআউট হয়েছে। পুনরায় কানেক্ট করুন।';
-        companionState.lastConnectionStatus = 'Logged out — Re-pairing required';
+        companionState.stepMessage = 'দ্বিতীয় অ্যাকাউন্ট লগআউট বা অসম্পূর্ণ সেশন ছিল। পুনরায় কানেক্ট করুন।';
+        companionState.lastConnectionStatus = 'Logged out (401) — Re-pairing required';
         companionState.lastError = errMsg;
         companionState.pairingCode = '';
         companionState.qrCodeDataUrl = '';
         companionState.pairingStartedAt = 0;
         companionState.user = null;
-        try {
-          fs.rmSync(COMPANION_SESSIONS_DIR, { recursive: true, force: true });
-          fs.mkdirSync(COMPANION_SESSIONS_DIR, { recursive: true });
-        } catch {}
+        wipeCompanionSessionsDir();
         return;
       }
 
       if (isBanned) {
         clearCompanionReconnectTimer();
+        if (!isRegistered) wipeCompanionSessionsDir();
         companionState.status = 'disconnected';
         companionState.step = 'error';
-        companionState.stepMessage = 'WhatsApp থেকে সাময়িক সীমাবদ্ধতা দেওয়া হয়েছে। কিছুক্ষণ অপেক্ষা করে চেষ্টা করুন।';
-        companionState.lastConnectionStatus = `Paused (${statusCode})`;
+        companionState.stepMessage =
+          statusCode === 405
+            ? 'WhatsApp সার্ভার হ্যান্ডশেক প্রত্যাখ্যান করেছে (405 Connection Failure)। কিছুক্ষণ অপেক্ষা করে চেষ্টা করুন অথবা নম্বর স্ট্যাটাস চেক করুন।'
+            : `WhatsApp থেকে সাময়িক সীমাবদ্ধতা দেওয়া হয়েছে (${statusCode || 'Restricted'})। কিছুক্ষণ অপেক্ষা করে চেষ্টা করুন।`;
+        companionState.lastConnectionStatus = `Closed (${statusCode || 'Restricted'}): ${errMsg}`;
         companionState.lastError = errMsg;
         companionState.pairingCode = '';
         companionState.pairingStartedAt = 0;
@@ -651,14 +700,16 @@ async function restoreCompanionSession() {
   isRestoringCompanion = true;
   try {
     const { state, saveCreds } = await useMultiFileAuthState(COMPANION_SESSIONS_DIR);
-    if (!state.creds?.registered && !state.creds?.me?.id) return;
+    if (!isVerifiedCompanionCreds(state.creds)) {
+      if (state.creds?.me?.id || fs.readdirSync(COMPANION_SESSIONS_DIR).length > 0) {
+        wipeCompanionSessionsDir();
+      }
+      return;
+    }
 
     destroyCompanionSocket();
     const myToken = activeCompanionToken;
-    const { version } = await fetchLatestBaileysVersion().catch(() => ({
-      version: [2, 3000, 1043857760] as [number, number, number],
-      isLatest: true,
-    }));
+    const version = await resolveCompanionWaVersion();
 
     companionState.status = 'connecting';
     companionState.step = 'initializing';
@@ -772,12 +823,12 @@ export async function startCompanionPairing(phoneInput: string): Promise<{ pairi
   }
 
   const msSinceLast = Date.now() - lastPairingRequestAt;
-  if (lastPairingRequestAt > 0 && msSinceLast < 30000) {
+  if (lastPairingRequestAt > 0 && msSinceLast < 90000) {
     if (companionState.pairingCode && companionState.phoneNumber === cleanPhone) {
       return { pairingCode: companionState.pairingCode, qrCode: companionState.qrCodeDataUrl, phoneNumber: cleanPhone };
     }
-    const waitSec = Math.ceil((30000 - msSinceLast) / 1000);
-    throw new Error(`WhatsApp নিরাপত্তা সীমার জন্য ${waitSec} সেকেন্ড অপেক্ষা করে আবার চেষ্টা করুন।`);
+    const waitSec = Math.ceil((90000 - msSinceLast) / 1000);
+    throw new Error(`WhatsApp অ্যান্টি-ব্যান নিরাপত্তার জন্য ${waitSec} সেকেন্ড অপেক্ষা করে আবার চেষ্টা করুন (ঘন ঘন কোড নিলে নম্বর ব্যান হতে পারে)।`);
   }
 
   pairingInFlightPhone = cleanPhone;
@@ -790,16 +841,10 @@ export async function startCompanionPairing(phoneInput: string): Promise<{ pairi
       destroyCompanionSocket();
       const myToken = activeCompanionToken;
 
-      if (!hasRegisteredCompanionCreds()) {
-        fs.rmSync(COMPANION_SESSIONS_DIR, { recursive: true, force: true });
-        fs.mkdirSync(COMPANION_SESSIONS_DIR, { recursive: true });
-      }
+      wipeCompanionSessionsDir();
 
       const { state, saveCreds } = await useMultiFileAuthState(COMPANION_SESSIONS_DIR);
-      const { version } = await fetchLatestBaileysVersion().catch(() => ({
-        version: [2, 3000, 1043857760] as [number, number, number],
-        isLatest: true,
-      }));
+      const version = await resolveCompanionWaVersion();
 
       companionState.status = 'connecting';
       companionState.step = 'initializing';
@@ -883,12 +928,28 @@ export async function startCompanionPairing(phoneInput: string): Promise<{ pairi
               reject(err);
             }
           } else if (update.connection === 'close') {
-            const err = update.lastDisconnect?.error;
+            const err = update.lastDisconnect?.error as any;
             if (err && !resolved) {
               resolved = true;
               clearTimeout(timer);
               sock.ev.off('connection.update', onUpdate);
-              reject(err);
+              const statusCode = err?.output?.statusCode;
+              wipeCompanionSessionsDir();
+              if (statusCode !== 403 && statusCode !== 429) {
+                lastPairingRequestAt = 0;
+              }
+              const friendly =
+                statusCode === 401
+                  ? 'পুরোনো অসম্পূর্ণ সেশন রিসেট করা হয়েছে — আবার কোড নিন।'
+                  : statusCode === 405
+                    ? 'WhatsApp সার্ভার হ্যান্ডশেক প্রত্যাখ্যান করেছে (405 Connection Failure)। কিছুক্ষণ অপেক্ষা করে চেষ্টা করুন।'
+                    : `WhatsApp সংযোগ বিচ্ছিন্ন (Code ${statusCode || 'Err'}): ${err?.message || 'Connection Failure'}`;
+              companionState.status = 'disconnected';
+              companionState.step = 'error';
+              companionState.stepMessage = friendly;
+              companionState.lastConnectionStatus = `Closed (${statusCode || 'Err'}): ${err?.message || 'Connection Failure'}`;
+              companionState.lastError = friendly;
+              reject(new Error(friendly));
             }
           }
         };

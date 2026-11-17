@@ -3848,19 +3848,21 @@ export default function App() {
                     {t.phoneInputHint}
                   </p>
 
-                  <div className="mode-switcher flex justify-center gap-2 my-3">
-                    <button
-                      className={`mode-btn ${pairingMode === 'code' ? 'active' : ''}`}
-                      onClick={() => setPairingMode('code')}
-                    >
-                      <KeyRound size={13} /> {t.eightDigitCode}
-                    </button>
-                    <button
-                      className={`mode-btn ${pairingMode === 'qr' ? 'active' : ''}`}
-                      onClick={() => setPairingMode('qr')}
-                    >
-                      <QrIcon size={13} /> {t.qrCodeLabel}
-                    </button>
+                  <div className="flex justify-center my-3">
+                    <div className="mode-switcher">
+                      <button
+                        className={`mode-btn ${pairingMode === 'code' ? 'active' : ''}`}
+                        onClick={() => setPairingMode('code')}
+                      >
+                        <KeyRound size={13} /> {t.eightDigitCode}
+                      </button>
+                      <button
+                        className={`mode-btn ${pairingMode === 'qr' ? 'active' : ''}`}
+                        onClick={() => setPairingMode('qr')}
+                      >
+                        <QrIcon size={13} /> {t.qrCodeLabel}
+                      </button>
+                    </div>
                   </div>
 
                   <div className="form-group text-left mt-3">
@@ -3875,7 +3877,7 @@ export default function App() {
                   </div>
 
                   {pairingError && (
-                    <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs p-2.5  text-left my-2">
+                    <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs p-3 rounded-lg font-medium leading-relaxed text-left my-2.5">
                       {pairingError}
                     </div>
                   )}

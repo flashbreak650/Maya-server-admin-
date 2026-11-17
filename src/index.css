@@ -250,3 +250,43 @@ input:checked + .slider:before{transform:translateX(18px)}
   letter-spacing: 0.05em;
   color: #475569;
 }
+
+.mode-switcher {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px;
+  background: #f1f5f9;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  max-width: 100%;
+}
+
+.mode-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #526359;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  line-height: 1.2;
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mode-btn svg {
+  flex-shrink: 0;
+}
+
+.mode-btn.active {
+  background: #ffffff;
+  color: var(--green);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+

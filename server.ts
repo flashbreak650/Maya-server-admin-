@@ -11,6 +11,7 @@ import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
+  fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   Browsers,
   WASocket,
@@ -304,15 +305,58 @@ function clearReconnectTimer() {
   }
 }
 
+function isVerifiedCreds(creds: any): boolean {
+  return Boolean(creds?.registered || (creds?.me?.id && creds?.account));
+}
+
 function hasRegisteredCredsOnDisk(): boolean {
   try {
     const credsPath = path.join(SESSIONS_DIR, 'creds.json');
     if (!fs.existsSync(credsPath)) return false;
     const content = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
-    return Boolean(content?.registered || content?.me?.id);
+    return isVerifiedCreds(content);
   } catch {
     return false;
   }
+}
+
+function wipePrimarySessionsDir(reason: string) {
+  try {
+    console.log(`[Baileys Engine] Cleaning session directory (${reason})...`);
+    fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
+    fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+  } catch (e) {
+    console.error('[Baileys Engine] Error cleaning session directory:', e);
+  }
+}
+
+async function resolveLatestWaVersion(): Promise<[number, number, number]> {
+  try {
+    const waWeb = await fetchLatestWaWebVersion({});
+    if (Array.isArray(waWeb?.version) && waWeb.version.length === 3) {
+      return waWeb.version as [number, number, number];
+    }
+  } catch {}
+  try {
+    const fallback = await fetchLatestBaileysVersion();
+    if (Array.isArray(fallback?.version) && fallback.version.length === 3) {
+      return fallback.version as [number, number, number];
+    }
+  } catch {}
+  return [2, 3000, 1054933766];
+}
+
+function formatPairingFailureMessage(statusCode?: number, errMsg?: string): string {
+  if (statusCode === 401) {
+    return 'পুরোনো অসম্পূর্ণ সেশন ছিল, অটো-রিসেট করা হয়েছে। এখন আবার "Generate Real Pairing Code" চাপুন।';
+  }
+  if (statusCode === 405) {
+    return 'WhatsApp সার্ভার সংযোগ প্রত্যাখ্যান করেছে (405 Connection Failure)। সাধারণত ঘন ঘন কোড রিকোয়েস্ট, বর্তমান ক্লাউড সার্ভার IP-তে WhatsApp-এর সাময়িক ব্লক অথবা নম্বরটি রেস্ট্রিক্টেড হলে এটি হয় — QR কোড দিয়ে স্ক্যান করুন অথবা কিছুক্ষণ পর অন্য নম্বর/সার্ভার থেকে চেষ্টা করুন।';
+  }
+  if (statusCode === 403 || statusCode === 406) {
+    return `WhatsApp এই অ্যাকাউন্ট/ডিভাইসে সাময়িক সীমাবদ্ধতা দিয়েছে (Code ${statusCode})। ফোনের WhatsApp অ্যাপ খুলে অ্যাকাউন্টটি ঠিক আছে কিনা দেখুন।`;
+  }
+  return `WhatsApp সংযোগ বিচ্ছিন্ন হয়েছে${statusCode ? ` (Code ${statusCode})` : ''}: ${errMsg || 'Connection Failure'}`;
 }
 
 function destroyCurrentSocket() {
@@ -415,7 +459,7 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
       const isConnectionReplaced = statusCode === DisconnectReason.connectionReplaced || statusCode === 440;
       const isRestartRequired = statusCode === DisconnectReason.restartRequired || statusCode === 515;
       const isBannedOrForbidden = statusCode === 403 || statusCode === 405 || /banned|blocked|restricted/i.test(errMsg);
-      const isRegistered = Boolean(sock.authState?.creds?.registered) || hasRegisteredCredsOnDisk();
+      const isRegistered = isVerifiedCreds(sock.authState?.creds) || hasRegisteredCredsOnDisk();
 
       if (manualDisconnect) {
         botState.status = 'disconnected';
@@ -425,31 +469,33 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
       }
 
       if (isLoggedOut) {
-        console.log('Logged out of WhatsApp. Cleaning up session credentials...');
+        console.log('Logged out or unverified 401 on WhatsApp. Cleaning up session credentials...');
         clearReconnectTimer();
         botState.status = 'disconnected';
         botState.step = 'idle';
-        botState.stepMessage = 'WhatsApp সেশন লগআউট হয়েছে। পুনরায় কানেক্ট করুন।';
-        botState.lastConnectionStatus = 'Logged out — Re-pairing required';
+        botState.stepMessage = pairingInFlightPromise
+          ? formatPairingFailureMessage(401, errMsg)
+          : 'WhatsApp সেশন লগআউট হয়েছে। পুনরায় কানেক্ট করুন।';
+        botState.lastConnectionStatus = 'Logged out (401) — Re-pairing ready';
         botState.lastError = errMsg;
         botState.pairingCode = '';
         botState.qrCodeDataUrl = '';
         botState.pairingStartedAt = 0;
         botState.user = null;
-        try {
-          fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
-          fs.mkdirSync(SESSIONS_DIR, { recursive: true });
-        } catch (e) {}
+        wipePrimarySessionsDir('401 logged out / invalid creds');
         return;
       }
 
       if (isBannedOrForbidden) {
         console.warn(`[Baileys Guard] WhatsApp returned status ${statusCode}: ${errMsg}. Stopping auto-reconnect to protect account.`);
         clearReconnectTimer();
+        if (!isRegistered) {
+          wipePrimarySessionsDir(`unregistered failure ${statusCode || 'restricted'}`);
+        }
         botState.status = 'disconnected';
         botState.step = 'error';
-        botState.stepMessage = 'WhatsApp থেকে সাময়িক সীমাবদ্ধতা দেওয়া হয়েছে। অন্তত কিছু সময় অপেক্ষা করে আবার চেষ্টা করুন।';
-        botState.lastConnectionStatus = `Paused (${statusCode || 'Restricted'})`;
+        botState.stepMessage = formatPairingFailureMessage(statusCode, errMsg);
+        botState.lastConnectionStatus = `Closed (${statusCode || 'Restricted'}): ${errMsg}`;
         botState.lastError = errMsg;
         botState.pairingCode = '';
         botState.pairingStartedAt = 0;
@@ -582,17 +628,17 @@ async function initializeExistingSession() {
 
   try {
     const { state, saveCreds } = await useMultiFileAuthState(SESSIONS_DIR);
-    if (!state.creds?.registered && !state.creds?.me?.id) {
+    if (!isVerifiedCreds(state.creds)) {
+      if (state.creds?.me?.id || fs.readdirSync(SESSIONS_DIR).length > 0) {
+        wipePrimarySessionsDir('half-paired unregistered startup cleanup');
+      }
       return;
     }
 
     destroyCurrentSocket();
     const myToken = activeSocketToken;
 
-    const { version } = await fetchLatestBaileysVersion().catch(() => ({
-      version: [2, 3000, 1043857760] as [number, number, number],
-      isLatest: true,
-    }));
+    const version = await resolveLatestWaVersion();
 
     botState.status = 'connecting';
     botState.step = 'initializing';
@@ -698,22 +744,11 @@ async function startRealPairingFlow(cleanPhone: string): Promise<{ pairingCode: 
       destroyCurrentSocket();
       const myToken = activeSocketToken;
 
-      // Clear unauthenticated session files completely to avoid stale keys
-      try {
-        if (!hasRegisteredCredsOnDisk()) {
-          console.log('[Baileys Engine] Cleaning unauthenticated session directory for fresh key generation...');
-          fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
-          fs.mkdirSync(SESSIONS_DIR, { recursive: true });
-        }
-      } catch (e) {
-        console.error('[Baileys Engine] Error cleaning session directory:', e);
-      }
+      // Always start pairing from clean unregistered keys so half-paired creds.me never triggers login 401/405
+      wipePrimarySessionsDir('fresh pairing request');
 
       const { state, saveCreds } = await useMultiFileAuthState(SESSIONS_DIR);
-      const { version } = await fetchLatestBaileysVersion().catch(() => ({
-        version: [2, 3000, 1043857760] as [number, number, number],
-        isLatest: true,
-      }));
+      const version = await resolveLatestWaVersion();
 
       console.log(`[Baileys Engine] Initializing WASocket with version ${version.join('.')}...`);
 
@@ -814,16 +849,30 @@ async function startRealPairingFlow(cleanPhone: string): Promise<{ pairingCode: 
               reject(err);
             }
           } else if (update.connection === 'close') {
-            const err = update.lastDisconnect?.error;
+            const err = update.lastDisconnect?.error as any;
             if (err && !resolved) {
               resolved = true;
               clearTimeout(timer);
               sock.ev.off('connection.update', onUpdate);
-              console.error('[Baileys Engine] Connection closed during pairing:', err?.message || 'Closed');
+              const statusCode = err?.output?.statusCode;
+              const reason = err?.data?.reason || statusCode;
+              const friendly = formatPairingFailureMessage(statusCode, err?.message);
+              console.error('[Baileys Engine] Connection closed during pairing:', {
+                statusCode,
+                reason,
+                message: err?.message || 'Closed',
+                data: err?.data,
+              });
+              wipePrimarySessionsDir(`pairing close (${statusCode || 'unknown'})`);
+              if (statusCode !== 403 && statusCode !== 429) {
+                lastPairingRequestAt = 0;
+              }
+              botState.status = 'disconnected';
               botState.step = 'error';
-              botState.stepMessage = `কানেকশন বন্ধ হয়েছে: ${err?.message || 'Connection closed'}`;
-              botState.lastConnectionStatus = `Closed: ${err?.message || 'Connection closed'}`;
-              reject(err || new Error('Connection closed by WhatsApp server'));
+              botState.stepMessage = friendly;
+              botState.lastConnectionStatus = `Closed (${statusCode || 'Err'}): ${err?.message || 'Connection Failure'}`;
+              botState.lastError = friendly;
+              reject(new Error(friendly));
             }
           }
         };
@@ -1322,10 +1371,10 @@ app.post('/api/whatsapp/session-import', async (req: Request, res: Response) => 
 
     const credsRaw = Buffer.from(String(files['creds.json']), 'base64').toString('utf8');
     const credsObj = JSON.parse(credsRaw);
-    if (!credsObj?.registered && !credsObj?.me?.id) {
+    if (!isVerifiedCreds(credsObj)) {
       return res.status(400).json({
         success: false,
-        error: 'এই ব্যাকআপের WhatsApp সেশনটি নিবন্ধিত নয়।',
+        error: 'এই ব্যাকআপের WhatsApp সেশনটি পূর্ণ নিবন্ধিত নয়।',
       });
     }
 

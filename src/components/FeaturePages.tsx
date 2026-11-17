@@ -2557,6 +2557,29 @@ export function CompanionBotPage({
                 </span>
               </div>
             )}
+
+            <div className="p-3 rounded-xl bg-amber-50/80 border border-amber-200 text-[11px] text-amber-950 leading-relaxed space-y-1">
+              <div className="font-extrabold text-amber-900">
+                {isBn ? 'নম্বর ব্যান থেকে বাঁচতে জরুরি নিয়ম:' : 'Anti-Ban Safety Tips:'}
+              </div>
+              <ul className="list-disc pl-4 space-y-0.5">
+                <li>
+                  {isBn
+                    ? 'একদম নতুন খোলা WhatsApp নম্বরে সরাসরি বট লিংক করবেন না—অন্তত ২-৪ সপ্তাহ পুরোনো ও নিয়মিত চ্যাট করা নম্বর ব্যবহার করুন।'
+                    : 'Use an aged, warmed-up account (at least 2–4 weeks old with normal chats).'}
+                </li>
+                <li>
+                  {isBn
+                    ? 'ঘন ঘন কোড রিকোয়েস্ট করবেন না এবং সম্ভব হলে ৮-ডিজিট কোডের বদলে QR স্ক্যান ব্যবহার করুন।'
+                    : 'Avoid spamming pairing requests; prefer QR scan when possible.'}
+                </li>
+                <li>
+                  {isBn
+                    ? 'নতুন আপডেট আগে আপনার Railway সার্ভারে Push করে সেখান থেকেই লিংক করুন—AI Studio ও Railway-তে একই নম্বর একসাথে চালাবেন না।'
+                    : 'Deploy to Railway first and connect only on your main host.'}
+                </li>
+              </ul>
+            </div>
           </div>
         )}
       </div>
