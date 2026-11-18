@@ -1,5 +1,4 @@
 import path from 'path';
-import { fileURLToPath } from 'url';
 import fs from 'fs';
 import pino from 'pino';
 import QRCode from 'qrcode';
@@ -21,10 +20,7 @@ import {
   getCompanionFemaleResponse,
   getCompanionMultimodalResponse,
 } from './aiEngine.ts';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const COMPANION_SESSIONS_DIR = path.join(__dirname, '..', '.sessions_companion');
+import { COMPANION_SESSIONS_DIR } from './storagePaths.ts';
 
 if (!fs.existsSync(COMPANION_SESSIONS_DIR)) {
   fs.mkdirSync(COMPANION_SESSIONS_DIR, { recursive: true });
@@ -1000,4 +996,57 @@ export function clearCompanionChatLogsAndMemory() {
 
 export function getCompanionOwnJid(): string | undefined {
   return companionSock?.user?.id;
+}
+
+export function exportCompanionSessionFiles(): Record<string, string> {
+  if (!hasRegisteredCompanionCreds()) return {};
+  const files: Record<string, string> = {};
+  try {
+    for (const entry of fs.readdirSync(COMPANION_SESSIONS_DIR, { withFileTypes: true })) {
+      if (entry.isFile()) {
+        const fullPath = path.join(COMPANION_SESSIONS_DIR, entry.name);
+        files[entry.name] = fs.readFileSync(fullPath).toString('base64');
+      }
+    }
+  } catch {
+    return {};
+  }
+  return files['creds.json'] ? files : {};
+}
+
+export async function importCompanionSessionFiles(files: Record<string, string>): Promise<boolean> {
+  if (!files || typeof files !== 'object' || !files['creds.json']) return false;
+  try {
+    const credsRaw = Buffer.from(String(files['creds.json']), 'base64').toString('utf8');
+    const credsObj = JSON.parse(credsRaw);
+    if (!isVerifiedCompanionCreds(credsObj)) return false;
+
+    clearCompanionReconnectTimer();
+    manualDisconnect = false;
+    reconnectAttempts = 0;
+    destroyCompanionSocket();
+    wipeCompanionSessionsDir();
+
+    for (const [rawName, b64] of Object.entries(files)) {
+      const safeName = path.basename(rawName);
+      if (!safeName || safeName === '.' || safeName === '..') continue;
+      fs.writeFileSync(path.join(COMPANION_SESSIONS_DIR, safeName), Buffer.from(String(b64), 'base64'));
+    }
+
+    companionState.pairingCode = '';
+    companionState.qrCodeDataUrl = '';
+    companionState.pairingStartedAt = 0;
+    companionState.lastError = null;
+    companionState.status = 'connecting';
+    companionState.step = 'initializing';
+    companionState.stepMessage = 'ব্যাকআপ থেকে ২য় AI অ্যাকাউন্ট রিস্টোর হচ্ছে...';
+    companionState.lastConnectionStatus = 'Restoring 2nd account session...';
+
+    restoreCompanionSession().catch((err) => {
+      console.warn('[Companion Session Import] Connect note:', err?.message || err);
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }

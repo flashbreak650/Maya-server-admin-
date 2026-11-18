@@ -7,6 +7,9 @@ coverage/
 data/*.tmp
 data/moderation_db.json
 data/sticker_queue.json
+data/sessions_primary/
+data/sessions_companion/
+data/.auth_secret
 public/assets/aistudio/
 .DS_Store
 *.log

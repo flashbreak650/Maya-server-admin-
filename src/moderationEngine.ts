@@ -1,13 +1,9 @@
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { downloadMediaMessage, jidNormalizedUser, type proto, type WASocket } from '@whiskeysockets/baileys';
 import { getMayaMultimodalResponse, getMayaResponse, inspectImageSafetyWithAi } from './aiEngine.ts';
+import { DATA_DIR, MODERATION_DB_PATH } from './storagePaths.ts';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const DB_PATH = path.join(DATA_DIR, 'moderation_db.json');
+const DB_PATH = MODERATION_DB_PATH;
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -114,6 +110,15 @@ export interface ModerationSettings {
   aiKeys: AiKey[];
   aiAutoRotate: boolean;
   aiProviderPriority: ('gemini' | 'groq' | 'openrouter')[];
+  // Anti-Spam Warning Privacy, Auto Salam, Typing Indicator, Boss Fight Alert & Zero-API Server Notice
+  autoSalamReplyEnabled?: boolean;
+  botTypingEnabled?: boolean;
+  bossAdminNumber?: string;
+  bossFightAlertEnabled?: boolean;
+  bossFightMinPeople?: number;
+  bossFightWindowMinutes?: number;
+  serverErrorNoticeEnabled?: boolean;
+  serverErrorNoticeTarget?: 'boss_inbox' | 'groups' | 'both';
   // Secondary Independent Female AI Companion Account (Zero Moderation, Pure Chat)
   companionEnabled?: boolean;
   companionName?: string;
@@ -265,6 +270,14 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   aiKeys: [],
   aiAutoRotate: true,
   aiProviderPriority: ['gemini', 'groq', 'openrouter'],
+  autoSalamReplyEnabled: true,
+  botTypingEnabled: true,
+  bossAdminNumber: '8801632222592',
+  bossFightAlertEnabled: true,
+  bossFightMinPeople: 3,
+  bossFightWindowMinutes: 5,
+  serverErrorNoticeEnabled: true,
+  serverErrorNoticeTarget: 'boss_inbox',
   companionEnabled: true,
   companionName: 'নিলা (Nila)',
   companionInboxReply: true,
@@ -341,16 +354,34 @@ export function loadDatabase() {
 
 // Atomic save database to disk
 let saveTimeout: NodeJS.Timeout | null = null;
+export function flushDatabaseSync() {
+  if (saveTimeout) {
+    clearTimeout(saveTimeout);
+    saveTimeout = null;
+  }
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const tmpPath = DB_PATH + '.tmp';
+    fs.writeFileSync(tmpPath, JSON.stringify(db, null, 2), 'utf-8');
+    fs.renameSync(tmpPath, DB_PATH);
+  } catch (err: any) {
+    console.error('Error saving moderation DB:', err.message);
+    reportServerProblem({
+      category: 'db_save_error',
+      title: 'ডাটাবেজ সেভ ব্যর্থ (DB Write Error)',
+      details: err?.message || 'moderation_db.json সংরক্ষণ করা যায়নি।',
+      suggestion: 'সার্ভারের ডিস্ক স্পেস ও ফোল্ডার পারমিশন পরীক্ষা করুন।',
+    });
+  }
+}
+
 export function saveDatabase() {
   if (saveTimeout) clearTimeout(saveTimeout);
   saveTimeout = setTimeout(() => {
-    try {
-      const tmpPath = DB_PATH + '.tmp';
-      fs.writeFileSync(tmpPath, JSON.stringify(db, null, 2), 'utf-8');
-      fs.renameSync(tmpPath, DB_PATH);
-    } catch (err: any) {
-      console.error('Error saving moderation DB:', err.message);
-    }
+    saveTimeout = null;
+    flushDatabaseSync();
   }, 200);
 }
 
@@ -491,7 +522,7 @@ export function updateSettings(newSettings: Partial<ModerationSettings>): Modera
   }
 
   db.settings = { ...db.settings, ...patch };
-  saveDatabase();
+  flushDatabaseSync(); // Immediately write settings changes to disk so toggles never revert on redeploy/restart
   return JSON.parse(JSON.stringify(db.settings));
 }
 
@@ -1061,9 +1092,20 @@ export function isSafeWordOrGreeting(token: string): boolean {
   return SAFE_WHITELIST.has(t);
 }
 
+// Strict detector for Islamic Salam greetings (for Zero-API Auto Salam Reply)
+export function isSalamMessage(text: string): boolean {
+  if (!text) return false;
+  const clean = text.normalize('NFC').trim().toLowerCase();
+  if (clean.length > 140) return false;
+  const salamPattern =
+    /(?:^|[\s,!?.])(?:আস+া?লামু\s*আলাইকুম|আসসালামুআলাইকুম|আসলামু\s*আলাইকুম|স্লামালাইকুম|সালামু\s*আলাইকুম|শুধু\s*সালাম|সালাম\s*(?:সবাইকে|ভাই|বোন|আপুরা|বন্ধুরা|গ্রুপ)?|ass?alamu\s*a?laikum|ass?alamualaykum|as[-\s]?salamu\s*alaykum|salam\s*a?laikum|walikum\s*assalam|salam\b|slm\b|السلام\s*عليكم)(?:$|[\s,!?.]|(?:সবাই|কেমন|ভাই|আপু|বন্ধু))/iu;
+  return salamPattern.test(clean);
+}
+
 // Regex to check if the message is a greeting (Salam, How are you, etc.)
 export function isRespectfulSalamOrGreeting(text: string): boolean {
   if (!text) return false;
+  if (isSalamMessage(text)) return true;
   const clean = text.trim().toLowerCase();
   // Expanded regex to cover almost all common variations of Salam and greetings
   const salamRegex = /(?:^|\s)(?:আস+া?লামু|সালাম|ওয়ালাইকুম|ওয়ালাইকুম|নমস্কার|আদাব|আলহামদুলিল্লাহ|ইনশাআল্লাহ|মাশাআল্লাহ|সুবহানাল্লাহ|salam|assalamu|alaikum|walikum|slaam|nomoshkar|adab|কেমন আছেন|কেমন আছো|সবাই কেমন|সবাই কেমন আছেন|শুভ সকাল|শুভ রাত্রি|hello|hi|hey)(?:$|\s|[!?.,])/iu;
@@ -1359,24 +1401,327 @@ export function normalizeJid(jid: string): string {
   return `${user}@${domain}`;
 }
 
+const typingWait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export async function safeSendMessage(
   sock: WASocket,
   jid: string,
   content: any,
   options?: any
 ): Promise<boolean> {
+  const settings = getSettings();
+  const shouldShowTyping =
+    settings.botTypingEnabled !== false &&
+    !content?.delete &&
+    !options?.skipTyping &&
+    Boolean(sock?.user) &&
+    Boolean((sock as any)?.ws?.isOpen ?? true);
+
   try {
+    if (shouldShowTyping) {
+      try {
+        await sock.sendPresenceUpdate('composing', jid);
+        const textSample = String(content?.text || content?.caption || '');
+        const typingDelayMs = Math.min(1250, Math.max(450, Math.round(textSample.length * 10)));
+        await typingWait(typingDelayMs);
+      } catch {
+        // Presence update failure must never block actual message delivery
+      }
+    }
+
     await sock.sendMessage(jid, content, options);
+
+    if (shouldShowTyping) {
+      sock.sendPresenceUpdate('paused', jid).catch(() => {});
+    }
     return true;
   } catch (err: any) {
+    if (shouldShowTyping) {
+      sock.sendPresenceUpdate('paused', jid).catch(() => {});
+    }
     const msg = err?.message || String(err);
+    const statusCode = Number(err?.output?.statusCode || err?.status || 0);
     if (msg.includes('Connection Closed') || msg.includes('Closed') || msg.includes('not connected')) {
       console.warn(`[Baileys Socket Warn] Cannot send message to ${jid} because connection was closed/reconnecting.`);
     } else {
       console.error(`[Baileys Socket Error] Failed to send message to ${jid}:`, msg);
+      if (statusCode === 429 || statusCode >= 500) {
+        reportServerProblem(
+          {
+            category: `wa_send_${statusCode}`,
+            title: statusCode === 429 ? 'WhatsApp রেট-লিমিট সতর্কতা (429)' : `WhatsApp সার্ভার এরর (${statusCode})`,
+            details: msg,
+            suggestion: 'বট স্বয়ংক্রিয়ভাবে গতি নিয়ন্ত্রণ করছে। কিছুক্ষণ পর স্বাভাবিক হয়ে যাবে।',
+          },
+          sock
+        );
+      }
     }
     return false;
   }
+}
+
+// -------------------------------------------------------------
+// BOSS ADMIN INBOX (ONLY SINGLE OWNER NUMBER), FIGHT TRACKER & ZERO-API SERVER ALERT
+// -------------------------------------------------------------
+export function resolveBossAdminJid(): string {
+  const settings = getSettings();
+  let digits = String(settings.bossAdminNumber || DEFAULT_SETTINGS.bossAdminNumber || '8801632222592').replace(/\D/g, '');
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  if (digits.startsWith('01') && digits.length === 11) digits = '88' + digits;
+  else if (digits.startsWith('1') && digits.length === 10) digits = '880' + digits;
+  if (!digits || digits.length < 10) digits = '8801632222592';
+  return `${digits}@s.whatsapp.net`;
+}
+
+interface ConflictEvent {
+  senderKey: string;
+  senderPhone: string;
+  senderName: string;
+  reason: string;
+  timestamp: number;
+}
+
+const groupConflictWindow = new Map<string, ConflictEvent[]>();
+const lastBossFightAlertAt = new Map<string, number>();
+const lastAutoSalamAt = new Map<string, number>();
+const lastServerProblemAlertAt = new Map<string, number>();
+
+interface QueuedServerProblem {
+  category: string;
+  title: string;
+  details: string;
+  suggestion?: string;
+  timestamp: number;
+}
+const pendingServerProblems: QueuedServerProblem[] = [];
+
+const FIGHT_QUARREL_PATTERNS: RegExp[] = [
+  /(?:তোরে|তোর|তুই)\s*(?:দেখে নিব|দেখব|মারব|খাব|চুদ|ফাট|মেরে ফেলব|জবাই|পাছায়|বের হ)/iu,
+  /(?:ঝগড়া|গালাগালি|গালি দিচ্ছিস|চুপ কর|মুখ সামলে|বেয়াদব|ফাজিল|হারামি|শয়তান|কামড়াবি|মাইর খাবি|ফাইজলামি)/iu,
+  /\b(?:shut up|f\*+k|bastard|idiot|stupid|fight me|motherfucker|bitch)\b/iu,
+];
+
+function hasHeatedFightSignal(text: string): boolean {
+  if (!text || text.trim().length < 3) return false;
+  if (isRespectfulSalamOrGreeting(text)) return false;
+  return FIGHT_QUARREL_PATTERNS.some((rx) => rx.test(text));
+}
+
+async function trackGroupConflictAndNotifyBoss(
+  sock: WASocket,
+  params: {
+    groupId: string;
+    groupName: string;
+    senderKey: string;
+    senderPhone: string;
+    senderName: string;
+    reason: string;
+  }
+): Promise<boolean> {
+  const settings = getSettings();
+  if (settings.bossFightAlertEnabled === false) return false;
+
+  const now = Date.now();
+  const windowMinutes = Math.max(1, Math.min(30, Number(settings.bossFightWindowMinutes ?? 5)));
+  const minPeople = Math.max(2, Math.min(10, Number(settings.bossFightMinPeople ?? 3)));
+  const windowMs = windowMinutes * 60 * 1000;
+
+  const currentList = (groupConflictWindow.get(params.groupId) || []).filter((e) => now - e.timestamp <= windowMs);
+  currentList.push({
+    senderKey: params.senderKey,
+    senderPhone: params.senderPhone,
+    senderName: params.senderName,
+    reason: params.reason,
+    timestamp: now,
+  });
+  groupConflictWindow.set(params.groupId, currentList);
+
+  const distinctParticipants = new Map<string, string>();
+  for (const item of currentList) {
+    const label = item.senderName && item.senderName !== 'User'
+      ? `${item.senderName} (+${item.senderPhone})`
+      : `+${item.senderPhone}`;
+    distinctParticipants.set(item.senderKey, label);
+  }
+
+  if (distinctParticipants.size < minPeople) {
+    return false;
+  }
+
+  const lastAlert = lastBossFightAlertAt.get(params.groupId) || 0;
+  if (now - lastAlert < 10 * 60 * 1000) {
+    return false; // 10-minute per-group alert cooldown
+  }
+
+  const bossJid = resolveBossAdminJid();
+  if (!sock?.user || !sock?.authState?.creds?.registered) {
+    return false;
+  }
+
+  lastBossFightAlertAt.set(params.groupId, now);
+  const participantListText = Array.from(distinctParticipants.values()).slice(0, 8).join(', ');
+  const timeStr = new Date(now).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+  const bossMessage =
+    `বস, জরুরি সমস্যা! 😟\n\n` +
+    `*"${params.groupName}"* গ্রুপে এখন *${distinctParticipants.size} জন* সদস্য মিলে গালিগালাজ বা ঝগড়া করছে!\n\n` +
+    `👥 জড়িত সদস্য: ${participantListText}\n` +
+    `📊 সাম্প্রতিক ঘটনা: ${currentList.length}টি আপত্তিকর/ঝগড়াপূর্ণ মেসেজ (গত ${windowMinutes} মিনিটে)\n` +
+    `🕒 সময়: ${timeStr}\n\n` +
+    `বস, দয়া করে একটু গ্রুপটা দেখুন বা প্রয়োজনীয় ব্যবস্থা নিন। আমি স্বয়ংক্রিয়ভাবে মেসেজগুলো নজরদারিতে রেখেছি। 🛡️`;
+
+  const sent = await safeSendMessage(sock, bossJid, { text: bossMessage });
+  if (sent) {
+    addActivityLog({
+      groupId: params.groupId,
+      groupName: params.groupName,
+      senderJid: bossJid,
+      senderPhone: cleanJidUser(bossJid),
+      action: 'warned',
+      reason: `বস অ্যাডমিনকে গ্রুপ ঝগড়া/গালি অ্যালার্ট পাঠানো হয়েছে (${distinctParticipants.size} জন)`,
+      details: participantListText,
+    });
+  }
+  return sent;
+}
+
+function buildServerNoticeText(problem: QueuedServerProblem): string {
+  const timeStr = new Date(problem.timestamp).toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  return (
+    `⚠️ *[WAGuard সার্ভার ও সিস্টেম নোটিশ]*\n\n` +
+    `বস, সার্ভারে একটি সমস্যা শনাক্ত হয়েছে:\n` +
+    `📌 ধরন: ${problem.title}\n` +
+    `📝 বিবরণ: ${problem.details}\n` +
+    `🕒 সময়: ${timeStr}` +
+    (problem.suggestion ? `\n\n💡 পরামর্শ: ${problem.suggestion}` : '')
+  );
+}
+
+async function deliverServerNotice(sock: WASocket, problem: QueuedServerProblem): Promise<boolean> {
+  const settings = getSettings();
+  if (settings.serverErrorNoticeEnabled === false) return false;
+  if (!sock?.user || !sock?.authState?.creds?.registered) return false;
+  const ws = (sock as any).ws;
+  if (ws && typeof ws.isOpen === 'boolean' && !ws.isOpen) return false;
+
+  const targetMode = settings.serverErrorNoticeTarget || 'boss_inbox';
+  const text = buildServerNoticeText(problem);
+  let deliveredAny = false;
+
+  if (targetMode === 'boss_inbox' || targetMode === 'both') {
+    const bossJid = resolveBossAdminJid();
+    const ok = await safeSendMessage(sock, bossJid, { text });
+    if (ok) deliveredAny = true;
+  }
+
+  if (targetMode === 'groups' || targetMode === 'both') {
+    const groupIds = Object.keys(groupMetaCache).slice(0, 5);
+    for (const gid of groupIds) {
+      const ok = await safeSendMessage(sock, gid, { text });
+      if (ok) deliveredAny = true;
+    }
+  }
+
+  if (deliveredAny) {
+    addActivityLog({
+      groupId: 'SYSTEM',
+      groupName: 'Server Health Monitor',
+      senderJid: resolveBossAdminJid(),
+      senderPhone: cleanJidUser(resolveBossAdminJid()),
+      action: 'error',
+      reason: `সার্ভার সমস্যা নোটিশ পাঠানো হয়েছে: ${problem.title}`,
+      details: problem.details,
+    });
+  }
+  return deliveredAny;
+}
+
+export async function reportServerProblem(
+  params: { category: string; title: string; details: string; suggestion?: string; urgent?: boolean },
+  sock?: WASocket | null
+): Promise<boolean> {
+  const settings = getSettings();
+  if (settings.serverErrorNoticeEnabled === false) return false;
+
+  const now = Date.now();
+  const lastAt = lastServerProblemAlertAt.get(params.category) || 0;
+  const cooldownMs = params.urgent ? 2 * 60 * 1000 : 8 * 60 * 1000;
+  if (now - lastAt < cooldownMs) {
+    return false;
+  }
+  lastServerProblemAlertAt.set(params.category, now);
+
+  const item: QueuedServerProblem = {
+    category: params.category,
+    title: params.title,
+    details: params.details,
+    suggestion: params.suggestion,
+    timestamp: now,
+  };
+
+  if (sock) {
+    const sent = await deliverServerNotice(sock, item);
+    if (sent) return true;
+  }
+
+  if (!pendingServerProblems.some((p) => p.category === item.category)) {
+    pendingServerProblems.push(item);
+    if (pendingServerProblems.length > 12) pendingServerProblems.shift();
+  }
+  return false;
+}
+
+export async function flushPendingServerNotices(sock: WASocket | null) {
+  if (!sock || pendingServerProblems.length === 0) return;
+  while (pendingServerProblems.length > 0) {
+    const next = pendingServerProblems[0];
+    const ok = await deliverServerNotice(sock, next);
+    if (!ok) break;
+    pendingServerProblems.shift();
+  }
+}
+
+let serverHealthTimer: ReturnType<typeof setInterval> | null = null;
+export function startServerHealthMonitor(getSock: () => WASocket | null) {
+  if (serverHealthTimer) clearInterval(serverHealthTimer);
+  serverHealthTimer = setInterval(async () => {
+    const sock = getSock();
+    if (sock) {
+      await flushPendingServerNotices(sock);
+    }
+    try {
+      const memMb = Math.round(process.memoryUsage().rss / (1024 * 1024));
+      if (memMb > 460) {
+        await reportServerProblem(
+          {
+            category: 'high_memory',
+            title: 'সার্ভার মেমোরি (RAM) বেশি ব্যবহৃত হচ্ছে',
+            details: `বর্তমান RAM ব্যবহার: ${memMb} MB। এতে বট স্লো বা রিস্টার্ট হতে পারে।`,
+            suggestion: 'সার্ভার রিস্টার্ট অথবা অপ্রয়োজনীয় লগ ক্লিয়ার করুন।',
+          },
+          sock
+        );
+      }
+    } catch {}
+  }, 45000);
+}
+
+export async function sendTestBossAndServerNotice(sock: WASocket | null): Promise<{ bossSent: boolean; targetJid: string }> {
+  const targetJid = resolveBossAdminJid();
+  if (!sock || !sock.user || !sock.authState?.creds?.registered) {
+    return { bossSent: false, targetJid };
+  }
+  const ok = await safeSendMessage(sock, targetJid, {
+    text:
+      `বস, আমি WAGuard বট! ✅\n\n` +
+      `আপনার পার্সোনাল বস অ্যালার্ট, টাইপিং ইন্ডিকেটর এবং সার্ভার হেলথ নোটিশ সিস্টেম একদম সক্রিয় আছে।\n` +
+      `কোনো গ্রুপে ৩+ জন গালি/ঝগড়া করলে বা সার্ভারে কোনো সমস্যা হলেই আমি সাথে সাথে আপনাকে এখানে নক দেবো! 🛡️`,
+  });
+  return { bossSent: ok, targetJid };
 }
 
 // -------------------------------------------------------------
@@ -2908,6 +3253,7 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
   // -------------------------------------------------------------
   let violationType: string | null = null;
   let violationDetails = '';
+  let publicViolationReason = '';
 
   // Feature 1: Admin Security Shield (Respects settings.adminShield toggle)
   const isProtectedAdmin = settings.adminShield && isSenderAdmin; 
@@ -2917,47 +3263,55 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
   if (settings.antiSticker && isSticker) {
     violationType = 'Anti-Sticker';
     violationDetails = 'স্টিকার পাঠানো নিষিদ্ধ';
+    publicViolationReason = 'স্টিকার পাঠানো নিষিদ্ধ';
   }
   // Feature 7: ANTI-VIEW ONCE (Must run before antiVideo/antiImage so view-once photo/video/audio is properly caught)
     else if (settings.antiViewOnce && isViewOnce) {
       violationType = 'Anti-View Once';
       violationDetails = 'View Once মিডিয়া (ছবি/ভিডিও/ভয়েস) পাঠানো নিষিদ্ধ';
+      publicViolationReason = 'View Once মিডিয়া (ছবি/ভিডিও/ভয়েস) পাঠানো নিষিদ্ধ';
     }
   // Feature 4: ANTI-GIF
     else if (settings.antiGif && isGif) {
       violationType = 'Anti-GIF';
       violationDetails = 'GIF এবং এনিমেটেড ভিডিও পাঠানো নিষিদ্ধ';
+      publicViolationReason = 'GIF এবং এনিমেটেড ভিডিও পাঠানো নিষিদ্ধ';
     }
     // Feature 5: ANTI-VIDEO
     else if (settings.antiVideo && isVideo) {
       violationType = 'Anti-Video';
       violationDetails = 'ভিডিও পাঠানো নিষিদ্ধ';
+      publicViolationReason = 'ভিডিও পাঠানো নিষিদ্ধ';
     }
     // Feature 6: ANTI-IMAGE
     else if (settings.antiImage && isImage) {
       violationType = 'Anti-Image';
       violationDetails = 'ছবি বা ফটো পাঠানো নিষিদ্ধ';
+      publicViolationReason = 'ছবি বা ফটো পাঠানো নিষিদ্ধ';
     }
-    // Feature 9: ANTI-LINK
+    // Feature 9: ANTI-LINK (NEVER echo deleted URL back into public WhatsApp warning notice!)
     else if (settings.antiLink && messageText) {
       const linkCheck = checkLinkViolation(messageText);
       if (linkCheck.isLink) {
         violationType = 'Anti-Link';
-        violationDetails = `লিংক পাঠানো নিষিদ্ধ (${linkCheck.matchedLink})`;
+        violationDetails = 'লিংক শেয়ার করা নিষিদ্ধ';
+        publicViolationReason = 'লিংক পাঠানো নিষিদ্ধ';
       }
     }
-    // Feature 8: ADVANCED MULTILINGUAL ANTI-BADWORD
+    // Feature 8: ADVANCED MULTILINGUAL ANTI-BADWORD (NEVER echo deleted slur back into warning notice!)
     if (!violationType && settings.antiBadword && messageText) {
       const badwordCheck = checkBadwordViolation(messageText, settings.customBadwords);
       if (badwordCheck.isBad) {
         violationType = 'Anti-Badword';
-        violationDetails = `গালি শনাক্ত হয়েছে (${badwordCheck.matchedWord})`;
+        violationDetails = 'অশালীন শব্দ বা গালি শনাক্ত হয়েছে';
+        publicViolationReason = 'অশালীন শব্দ বা গালি ব্যবহার করা নিষিদ্ধ';
       } else if (settings.aiBadwordDetection) {
         // Fallback to AI detection if standard dictionary doesn't catch it
         const aiCheck = await checkBadwordWithAi(messageText, cleanPhone, msg.pushName || 'User', groupSubject, settings);
         if (aiCheck.isBad) {
           violationType = 'AI-Anti-Badword';
-          violationDetails = aiCheck.reason;
+          violationDetails = aiCheck.reason || 'অশালীন ভাষা শনাক্ত হয়েছে';
+          publicViolationReason = 'অশালীন শব্দ বা গালি ব্যবহার করা নিষিদ্ধ';
         }
       }
     }
@@ -2984,15 +3338,33 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
         if (nsfwCheck.isUnsafe) {
           violationType = 'AI-Anti-NSFW';
           violationDetails = nsfwCheck.reason;
+          publicViolationReason = 'অশ্লীল বা আপত্তিকর ছবি পাঠানো নিষিদ্ধ';
         }
       }
     }
+  }
+
+  // Track multi-person badword abuse / heated group quarrel (Works 100% locally WITHOUT AI API)
+  const isConflictMessage =
+    violationType === 'Anti-Badword' ||
+    violationType === 'AI-Anti-Badword' ||
+    (!isProtectedAdmin && messageText && hasHeatedFightSignal(messageText));
+  if (isConflictMessage) {
+    trackGroupConflictAndNotifyBoss(sock, {
+      groupId: remoteJid,
+      groupName: groupSubject,
+      senderKey: canonicalSender,
+      senderPhone: cleanPhone,
+      senderName: msg.pushName || 'User',
+      reason: violationType || 'Group Quarrel',
+    }).catch(() => {});
   }
 
   // -------------------------------------------------------------
   // VIOLATION ENFORCEMENT (Delete -> Warning -> Auto Kick on 3rd)
   // -------------------------------------------------------------
   if (violationType) {
+    const noticeReason = publicViolationReason || violationDetails;
     console.log(`[Moderation Triggered] ${violationType} in ${groupSubject} by @${cleanPhone} (isBotAdmin=${isBotAdmin})`);
 
     // Step 1: Real Message Delete Operation (PN + LID compatible & Admin permission verified)
@@ -3001,6 +3373,15 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
       db.stats.deletedMessages++;
     } else if (!isBotAdmin) {
       console.warn(`[Moderation Warn] Cannot delete message in "${groupSubject}" because bot is NOT Group Admin.`);
+      reportServerProblem(
+        {
+          category: `no_admin_${remoteJid}`,
+          title: 'গ্রুপে বটের Admin Delete Permission নেই',
+          details: `"${groupSubject}" গ্রুপে নিয়ম ভঙ্গ (${noticeReason}) শনাক্ত হয়েছে, কিন্তু বট Admin না থাকায় মেসেজ ডিলিট করা যায়নি।`,
+          suggestion: `দয়া করে "${groupSubject}" গ্রুপে বট নম্বরটিকে Admin বানিয়ে দিন।`,
+        },
+        sock
+      ).catch(() => {});
     }
 
     // Step 2: Warning Counter per Member per Group
@@ -3025,7 +3406,7 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
     db.warnings[warningKey].lastViolation = Date.now();
     db.warnings[warningKey].violations.push({
       timestamp: Date.now(),
-      reason: violationDetails,
+      reason: noticeReason,
     });
     db.stats.warningsGiven++;
     saveDatabase();
@@ -3035,7 +3416,7 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
     // Feature 10: THREE WARNING AUTO KICK (Always enforce kick even if silentModeration is enabled)
     if (warningCount === 1 && !settings.silentModeration) {
       await safeSendMessage(sock, remoteJid, {
-        text: `⚠️ [সতর্কবার্তা ১/৩]\nসদস্য @${cleanPhone}, গ্রুপে ${violationDetails}!\n${
+        text: `⚠️ [সতর্কবার্তা ১/৩]\nসদস্য @${cleanPhone}, গ্রুপে ${noticeReason}!\n${
           deleteSuccessful
             ? 'আপনার মেসেজটি মুছে দেওয়া হয়েছে।'
             : !isBotAdmin
@@ -3046,7 +3427,7 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
       });
     } else if (warningCount === 2 && !settings.silentModeration) {
       await safeSendMessage(sock, remoteJid, {
-        text: `⚠️ [সতর্কবার্তা ২/৩]\nসদস্য @${cleanPhone}, এটি আপনার দ্বিতীয় সতর্কতা (${violationDetails})!\nপরবর্তী আরেকটি নিয়মলঙ্ঘনে আপনাকে স্বয়ংক্রিয়ভাবে গ্রুপ থেকে রিমুভ (Kick) করা হবে!`,
+        text: `⚠️ [সতর্কবার্তা ২/৩]\nসদস্য @${cleanPhone}, এটি আপনার দ্বিতীয় সতর্কতা (${noticeReason})!\nপরবর্তী আরেকটি নিয়মলঙ্ঘনে আপনাকে স্বয়ংক্রিয়ভাবে গ্রুপ থেকে রিমুভ (Kick) করা হবে!`,
         mentions: [senderJid],
       });
     } else if (warningCount >= 3 && settings.autoKick3Warnings) {
@@ -3072,7 +3453,7 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
 
         if (!settings.silentModeration) {
           await safeSendMessage(sock, remoteJid, {
-            text: `🚨 [চূড়ান্ত অ্যাকশন - ৩য় সতর্কতা]\nসদস্য @${cleanPhone} ৩ বার গ্রুপের নিয়ম লঙ্ঘন করেছেন (${violationDetails})।\nনিরাপত্তার স্বার্থে তাকে গ্রুপ থেকে রিমুভ করা হচ্ছে!`,
+            text: `🚨 [চূড়ান্ত অ্যাকশন - ৩য় সতর্কতা]\nসদস্য @${cleanPhone} ৩ বার গ্রুপের নিয়ম লঙ্ঘন করেছেন (${noticeReason})।\nনিরাপত্তার স্বার্থে তাকে গ্রুপ থেকে রিমুভ করা হচ্ছে!`,
             mentions: [senderJid],
           });
         }
@@ -3132,7 +3513,7 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
       senderPhone: cleanPhone,
       action: warningCount >= 3 && settings.autoKick3Warnings ? 'kicked' : 'warned',
       reason: `${violationType} (${actionMap[warningCount] || 'সতর্কতা'})${deleteSuccessful ? '' : ' [Delete Failed: বট অ্যাডমিন নয়]'}`,
-      details: violationDetails,
+      details: noticeReason,
       warningCount,
     });
 
@@ -3180,6 +3561,45 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
       });
       return;
     }
+  }
+
+  // -------------------------------------------------------------
+  // AUTO SALAM REPLY IN GROUP ONLY (ZERO AI API NEEDED, PURE SALAM REPLY ONLY)
+  // -------------------------------------------------------------
+  if (settings.autoSalamReplyEnabled !== false && messageText && isSalamMessage(messageText)) {
+    const salamCooldownKey = `${remoteJid}:${canonicalSender}`;
+    const nowMs = Date.now();
+    const lastUserSalam = lastAutoSalamAt.get(salamCooldownKey) || 0;
+    const lastGroupSalam = lastAutoSalamAt.get(remoteJid) || 0;
+    if (nowMs - lastUserSalam >= 20000 && nowMs - lastGroupSalam >= 3000) {
+      lastAutoSalamAt.set(salamCooldownKey, nowMs);
+      lastAutoSalamAt.set(remoteJid, nowMs);
+
+      const salamReplies = [
+        'ওয়ালাইকুম আসসালাম ওয়া রাহমাতুল্লাহ! 🌸',
+        'ওয়ালাইকুম আসসালাম ওয়া রাহমাতুল্লাহি ওয়া বারাকাতুহ! 😊🌸',
+        'ওয়ালাইকুম আসসালাম! কেমন আছেন? 🌸',
+      ];
+      const chosenReply = salamReplies[Math.floor(Math.random() * salamReplies.length)];
+      const sent = await safeSendMessage(
+        sock,
+        remoteJid,
+        { text: chosenReply },
+        { quoted: msg as any }
+      );
+      if (sent) {
+        addActivityLog({
+          groupId: remoteJid,
+          groupName: groupSubject,
+          senderJid,
+          senderPhone: cleanPhone,
+          action: 'replied',
+          reason: 'অটো সালাম উত্তর (Auto Salam Reply — Zero API)',
+          details: chosenReply,
+        });
+      }
+    }
+    return; // Only reply to Salam and nothing else!
   }
 
   // -------------------------------------------------------------

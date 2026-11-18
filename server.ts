@@ -54,6 +54,11 @@ import {
   manualBlockMember,
   DEFAULT_MANUAL_MEMBER_BLOCK_NOTICE,
   getCachedGroupMetadataSync,
+  startServerHealthMonitor,
+  flushPendingServerNotices,
+  reportServerProblem,
+  sendTestBossAndServerNotice,
+  flushDatabaseSync,
 } from './src/moderationEngine.ts';
 import {
   initStickerQueue,
@@ -71,13 +76,22 @@ import {
   disconnectCompanionBot,
   refreshCompanionGroups,
   clearCompanionChatLogsAndMemory,
+  exportCompanionSessionFiles,
+  importCompanionSessionFiles,
 } from './src/companionBot.ts';
 import { getCompanionFemaleResponse } from './src/aiEngine.ts';
+import {
+  AUTH_SECRET_PATH,
+  DATA_DIR,
+  PRIMARY_SESSIONS_DIR,
+  isPersistentVolumeConfigured,
+} from './src/storagePaths.ts';
 
 startRestrictedUsersMonitor(() => currentSock);
 startGroupLockMonitor(() => currentSock);
 startNightModeScheduler(() => currentSock);
 initStickerQueue(() => currentSock);
+startServerHealthMonitor(() => currentSock);
 
 dotenv.config();
 
@@ -115,8 +129,7 @@ app.use((req: Request, res: Response, next) => {
 
 app.use(express.json({ limit: '15mb' }));
 
-// Persistent HMAC secret for Dashboard Admin PIN Lock
-const AUTH_SECRET_PATH = path.join(__dirname, 'data', '.auth_secret');
+// Persistent HMAC secret stored inside unified DATA_DIR
 function getAuthSecret(): string {
   try {
     if (fs.existsSync(AUTH_SECRET_PATH)) {
@@ -255,8 +268,8 @@ app.post('/api/auth/update-pin', (req: Request, res: Response) => {
   }
 });
 
-// Persistent directory for WhatsApp session auth keys
-const SESSIONS_DIR = path.join(__dirname, '.sessions');
+// Persistent directory for WhatsApp session auth keys (inside unified DATA_DIR)
+const SESSIONS_DIR = PRIMARY_SESSIONS_DIR;
 if (!fs.existsSync(SESSIONS_DIR)) {
   fs.mkdirSync(SESSIONS_DIR, { recursive: true });
 }
@@ -452,6 +465,7 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
           const groups = await sock.groupFetchAllParticipating();
           primeGroupMetaCache(groups);
           notifyStickerQueueSocketReady();
+          await flushPendingServerNotices(sock);
           const groupList = Object.values(groups).map((g) => ({
             id: g.id,
             name: g.subject,
@@ -543,6 +557,12 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
           botState.step = 'error';
           botState.stepMessage = 'দীর্ঘ সময় নেটওয়ার্ক সংযোগ পাওয়া যায়নি। ম্যানুয়ালি পুনরায় চেষ্টা করুন।';
           botState.lastConnectionStatus = 'Reconnect paused after extended outage';
+          reportServerProblem({
+            category: 'wa_extended_outage',
+            title: 'WhatsApp দীর্ঘ সময় ডিসকানেক্ট ছিল',
+            details: `নেটওয়ার্ক বা সার্ভার সমস্যার কারণে বট ${reconnectAttempts} বার রিকানেক্টের চেষ্টা করেছে।`,
+            suggestion: 'অ্যাপের Connect পেজ থেকে সংযোগ পরীক্ষা করুন।',
+          });
           return;
         }
 
@@ -552,6 +572,14 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
             ? Math.min(30000, 2500 * Math.pow(2, reconnectAttempts))
             : 60000;
         reconnectAttempts += 1;
+        if (isRegistered && !isRestartRequired && reconnectAttempts === 3) {
+          reportServerProblem({
+            category: 'wa_disconnect_drop',
+            title: 'WhatsApp কানেকশন সাময়িক বিচ্ছিন্ন হয়েছিল',
+            details: `সার্ভার/নেটওয়ার্ক সমস্যার কারণে সংযোগ পড়ে গিয়েছিল (Code: ${statusCode || 'unknown'}, ${errMsg})।`,
+            suggestion: 'বট স্বয়ংক্রিয়ভাবে রিকানেক্ট হয়েছে/চেষ্টা করছে।',
+          });
+        }
         console.log(`[Baileys Engine] Controlled reconnect scheduled in ${delayMs}ms (statusCode=${statusCode}, attempt=${reconnectAttempts})`);
         scheduleControlledReconnect(delayMs);
         return;
@@ -1054,6 +1082,10 @@ app.get('/api/dashboard', (req: Request, res: Response) => {
       stats: modStats,
       restrictedUsers: getActiveRestrictedUsers(),
     },
+    storageInfo: {
+      dataDir: DATA_DIR,
+      persistentVolumeDetected: isPersistentVolumeConfigured(),
+    },
   });
 });
 
@@ -1075,10 +1107,37 @@ app.get('/api/moderation/settings', (req: Request, res: Response) => {
 app.post('/api/moderation/settings', (req: Request, res: Response) => {
   try {
     const updated = updateModerationSettings(req.body);
-    if (updated.dashboardPin) updated.dashboardPin = '****';
-    res.json({ success: true, settings: updated, message: 'Settings saved and active in real-time' });
+    const safeCopy = {
+      ...updated,
+      dashboardPin: updated.dashboardPin ? '****' : '',
+      aiKeys: (updated.aiKeys || []).map(k => ({ ...k, key: maskAiKey(k.key) })),
+      geminiApiKey: updated.geminiApiKey ? maskAiKey(updated.geminiApiKey) : '',
+      groqApiKey: updated.groqApiKey ? maskAiKey(updated.groqApiKey) : '',
+      openrouterApiKey: updated.openrouterApiKey ? maskAiKey(updated.openrouterApiKey) : '',
+    };
+    res.json({ success: true, settings: safeCopy, message: 'Settings saved and active in real-time' });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/moderation/test-boss-alert', async (_req: Request, res: Response) => {
+  try {
+    const result = await sendTestBossAndServerNotice(currentSock);
+    if (!result.bossSent) {
+      return res.status(400).json({
+        success: false,
+        error: 'বটের WhatsApp অ্যাকাউন্ট বর্তমানে কানেক্টেড নয়। কানেক্ট করে আবার চেষ্টা করুন।',
+        targetJid: result.targetJid,
+      });
+    }
+    res.json({
+      success: true,
+      targetJid: result.targetJid,
+      message: `বস অ্যাডমিন (+${result.targetJid.split('@')[0]})-এর ইনবক্সে টেস্ট মেসেজ পাঠানো হয়েছে!`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Test failed' });
   }
 });
 
@@ -1321,43 +1380,36 @@ app.post('/api/whatsapp/disconnect', async (req: Request, res: Response) => {
   }
 });
 
-// 5b. Encrypted Session Backup Export (Transfer verified Google session to any hosting without re-pairing)
+// 5b. Encrypted Full State Backup Export (Primary WhatsApp + Companion Account + All ON/OFF Settings)
 app.post('/api/whatsapp/session-export', async (req: Request, res: Response) => {
   try {
     const passphrase = String(req.body?.passphrase || '').trim();
     if (passphrase.length < 4) {
       return res.status(400).json({
         success: false,
-        error: 'সেশন সুরক্ষার জন্য কমপক্ষে ৪ অক্ষরের একটি পাসওয়ার্ড/পিন দিন।',
-      });
-    }
-
-    if (!hasRegisteredCredsOnDisk()) {
-      return res.status(400).json({
-        success: false,
-        error: 'আগে WhatsApp কানেক্ট করুন, তারপর সেশন ব্যাকআপ ডাউনলোড করুন।',
+        error: 'সেশন ও সেটিংস সুরক্ষার জন্য কমপক্ষে ৪ অক্ষরের একটি পাসওয়ার্ড/পিন দিন।',
       });
     }
 
     const files: Record<string, string> = {};
-    for (const entry of fs.readdirSync(SESSIONS_DIR, { withFileTypes: true })) {
-      if (entry.isFile()) {
-        const fullPath = path.join(SESSIONS_DIR, entry.name);
-        files[entry.name] = fs.readFileSync(fullPath).toString('base64');
+    if (hasRegisteredCredsOnDisk()) {
+      for (const entry of fs.readdirSync(SESSIONS_DIR, { withFileTypes: true })) {
+        if (entry.isFile()) {
+          const fullPath = path.join(SESSIONS_DIR, entry.name);
+          files[entry.name] = fs.readFileSync(fullPath).toString('base64');
+        }
       }
     }
 
-    if (!files['creds.json']) {
-      return res.status(400).json({
-        success: false,
-        error: 'সক্রিয় WhatsApp সেশন ফাইল পাওয়া যায়নি।',
-      });
-    }
+    const companionFiles = exportCompanionSessionFiles();
+    const moderationSettings = getModerationSettings();
 
     const payload = JSON.stringify({
       exportedAt: Date.now(),
       phoneNumber: botState.phoneNumber || '',
       files,
+      companionFiles,
+      moderationSettings,
     });
 
     const salt = crypto.randomBytes(16);
@@ -1367,24 +1419,30 @@ app.post('/api/whatsapp/session-export', async (req: Request, res: Response) => 
     const encrypted = Buffer.concat([cipher.update(payload, 'utf8'), cipher.final()]);
     const tag = cipher.getAuthTag();
 
+    const hasPrimarySession = Boolean(files['creds.json']);
+    const hasCompanionSession = Boolean(companionFiles['creds.json']);
+
     res.json({
       success: true,
-      filename: `waguard-session-${botState.phoneNumber || 'backup'}.json`,
+      filename: `waguard-full-backup-${botState.phoneNumber || 'settings'}.json`,
       bundle: {
-        v: 1,
+        v: 2,
         alg: 'aes-256-gcm',
         salt: salt.toString('base64'),
         iv: iv.toString('base64'),
         tag: tag.toString('base64'),
         data: encrypted.toString('base64'),
       },
+      hasPrimarySession,
+      hasCompanionSession,
+      includesSettings: true,
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// 5c. Encrypted Session Backup Import (Restore verified session on another host with zero pairing request)
+// 5c. Encrypted Full State Backup Import (Supports v1 session-only & v2 full state: Primary + Companion + All Settings)
 app.post('/api/whatsapp/session-import', async (req: Request, res: Response) => {
   try {
     const passphrase = String(req.body?.passphrase || '').trim();
@@ -1397,7 +1455,15 @@ app.post('/api/whatsapp/session-import', async (req: Request, res: Response) => 
       });
     }
 
-    if (!bundle || bundle.v !== 1 || bundle.alg !== 'aes-256-gcm' || !bundle.salt || !bundle.iv || !bundle.tag || !bundle.data) {
+    if (
+      !bundle ||
+      (bundle.v !== 1 && bundle.v !== 2) ||
+      bundle.alg !== 'aes-256-gcm' ||
+      !bundle.salt ||
+      !bundle.iv ||
+      !bundle.tag ||
+      !bundle.data
+    ) {
       return res.status(400).json({
         success: false,
         error: 'ব্যাকআপ ফাইলের ফরম্যাট সঠিক নয়।',
@@ -1423,54 +1489,92 @@ app.post('/api/whatsapp/session-import', async (req: Request, res: Response) => 
 
     const parsed = JSON.parse(decryptedText);
     const files = parsed?.files;
-    if (!files || typeof files !== 'object' || !files['creds.json']) {
+    const companionFiles = parsed?.companionFiles;
+    const incomingSettings = parsed?.moderationSettings;
+
+    let restoredSettingsPayload: any = null;
+    if (incomingSettings && typeof incomingSettings === 'object') {
+      const updated = updateModerationSettings(incomingSettings);
+      restoredSettingsPayload = {
+        ...updated,
+        dashboardPin: updated.dashboardPin ? '****' : '',
+        aiKeys: (updated.aiKeys || []).map((k) => ({ ...k, key: maskAiKey(k.key) })),
+        geminiApiKey: updated.geminiApiKey ? maskAiKey(updated.geminiApiKey) : '',
+        groqApiKey: updated.groqApiKey ? maskAiKey(updated.groqApiKey) : '',
+        openrouterApiKey: updated.openrouterApiKey ? maskAiKey(updated.openrouterApiKey) : '',
+      };
+    }
+
+    let restoredPrimary = false;
+    if (files && typeof files === 'object' && files['creds.json']) {
+      const credsRaw = Buffer.from(String(files['creds.json']), 'base64').toString('utf8');
+      const credsObj = JSON.parse(credsRaw);
+      if (!isVerifiedCreds(credsObj)) {
+        if (bundle.v === 1) {
+          return res.status(400).json({
+            success: false,
+            error: 'এই ব্যাকআপের WhatsApp সেশনটি পূর্ণ নিবন্ধিত নয়।',
+          });
+        }
+      } else {
+        clearReconnectTimer();
+        manualDisconnect = false;
+        reconnectAttempts = 0;
+        destroyCurrentSocket();
+
+        fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
+        fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+
+        for (const [rawName, b64] of Object.entries(files)) {
+          const safeName = path.basename(rawName);
+          if (!safeName || safeName === '.' || safeName === '..') continue;
+          fs.writeFileSync(path.join(SESSIONS_DIR, safeName), Buffer.from(String(b64), 'base64'));
+        }
+
+        botState.phoneNumber = parsed.phoneNumber || '';
+        botState.pairingCode = '';
+        botState.qrCodeDataUrl = '';
+        botState.pairingStartedAt = 0;
+        botState.lastError = null;
+        botState.status = 'connecting';
+        botState.step = 'initializing';
+        botState.stepMessage = 'ব্যাকআপ সেশন রিস্টোর সম্পন্ন! সরাসরি WhatsApp-এ সংযোগ হচ্ছে...';
+        botState.lastConnectionStatus = 'Restoring transferred session...';
+
+        initializeExistingSession().catch((err) => {
+          console.error('[Session Import] Restore connect error:', err?.message || err);
+        });
+        restoredPrimary = true;
+      }
+    } else if (bundle.v === 1) {
       return res.status(400).json({
         success: false,
         error: 'ব্যাকআপে বৈধ WhatsApp creds.json পাওয়া যায়নি।',
       });
     }
 
-    const credsRaw = Buffer.from(String(files['creds.json']), 'base64').toString('utf8');
-    const credsObj = JSON.parse(credsRaw);
-    if (!isVerifiedCreds(credsObj)) {
+    let restoredCompanion = false;
+    if (companionFiles && typeof companionFiles === 'object' && companionFiles['creds.json']) {
+      restoredCompanion = await importCompanionSessionFiles(companionFiles);
+    }
+
+    if (!restoredPrimary && !restoredCompanion && !restoredSettingsPayload) {
       return res.status(400).json({
         success: false,
-        error: 'এই ব্যাকআপের WhatsApp সেশনটি পূর্ণ নিবন্ধিত নয়।',
+        error: 'ব্যাকআপ ফাইলে রিস্টোর করার মতো কোনো বৈধ সেশন বা সেটিংস পাওয়া যায়নি।',
       });
     }
-
-    clearReconnectTimer();
-    manualDisconnect = false;
-    reconnectAttempts = 0;
-    destroyCurrentSocket();
-
-    fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
-    fs.mkdirSync(SESSIONS_DIR, { recursive: true });
-
-    for (const [rawName, b64] of Object.entries(files)) {
-      const safeName = path.basename(rawName);
-      if (!safeName || safeName === '.' || safeName === '..') continue;
-      fs.writeFileSync(path.join(SESSIONS_DIR, safeName), Buffer.from(String(b64), 'base64'));
-    }
-
-    botState.phoneNumber = parsed.phoneNumber || '';
-    botState.pairingCode = '';
-    botState.qrCodeDataUrl = '';
-    botState.pairingStartedAt = 0;
-    botState.lastError = null;
-    botState.status = 'connecting';
-    botState.step = 'initializing';
-    botState.stepMessage = 'ব্যাকআপ সেশন রিস্টোর সম্পন্ন! সরাসরি WhatsApp-এ সংযোগ হচ্ছে...';
-    botState.lastConnectionStatus = 'Restoring transferred session...';
-
-    initializeExistingSession().catch((err) => {
-      console.error('[Session Import] Restore connect error:', err?.message || err);
-    });
 
     res.json({
       success: true,
       phoneNumber: botState.phoneNumber,
-      message: 'সেশন সফলভাবে রিস্টোর হয়েছে! নতুন কোড ছাড়াই সংযোগ চালু হচ্ছে।',
+      restoredPrimary,
+      restoredCompanion,
+      restoredSettings: Boolean(restoredSettingsPayload),
+      settings: restoredSettingsPayload,
+      message: restoredPrimary
+        ? 'WhatsApp সেশন ও সব সেটিংস সফলভাবে রিস্টোর হয়েছে! নতুন কোড ছাড়াই সংযোগ চালু হচ্ছে।'
+        : 'সব ON/OFF সেটিংস সফলভাবে রিস্টোর হয়েছে!',
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -1807,7 +1911,8 @@ async function startServer() {
   });
 
   const shutdown = () => {
-    console.log('Flushing pending moderation queues and closing server gracefully...');
+    console.log('Flushing pending moderation DB & sticker queues and closing server gracefully...');
+    flushDatabaseSync();
     flushStickerQueueSync();
     server.close(() => {
       process.exit(0);
@@ -1817,10 +1922,30 @@ async function startServer() {
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
   process.on('unhandledRejection', (reason: any) => {
-    console.error('[Unhandled Rejection Guard]:', reason?.message || reason);
+    const msg = reason?.message || String(reason);
+    console.error('[Unhandled Rejection Guard]:', msg);
+    reportServerProblem(
+      {
+        category: 'unhandled_rejection',
+        title: 'সার্ভার প্রসেস এরর (Unhandled Promise Rejection)',
+        details: msg,
+        suggestion: 'সার্ভার ক্র্যাশ না করে চলমান রয়েছে, তবে সমস্যাটি অব্যাহত থাকলে রিস্টার্ট করুন।',
+      },
+      currentSock
+    ).catch(() => {});
   });
   process.on('uncaughtException', (err: any) => {
-    console.error('[Uncaught Exception Guard]:', err?.message || err);
+    const msg = err?.message || String(err);
+    console.error('[Uncaught Exception Guard]:', msg);
+    reportServerProblem(
+      {
+        category: 'uncaught_exception',
+        title: 'সার্ভার রানটাইম এরর (Uncaught Exception)',
+        details: msg,
+        suggestion: 'সার্ভার লগ ও কানেকশন স্ট্যাটাস যাচাই করুন।',
+      },
+      currentSock
+    ).catch(() => {});
   });
 
   server.listen(PORT, '0.0.0.0', () => {

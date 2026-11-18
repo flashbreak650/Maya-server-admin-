@@ -1,6 +1,4 @@
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { jidNormalizedUser, type proto, type WASocket } from '@whiskeysockets/baileys';
 import {
   addActivityLog,
@@ -15,14 +13,13 @@ import {
   isUserRestricted,
   normalizeJid,
   recordStickerContactAndActivity,
+  reportServerProblem,
   restrictUser,
   safeSendMessage,
 } from './moderationEngine.ts';
+import { DATA_DIR, STICKER_QUEUE_DB_PATH } from './storagePaths.ts';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const QUEUE_DB_PATH = path.join(DATA_DIR, 'sticker_queue.json');
+const QUEUE_DB_PATH = STICKER_QUEUE_DB_PATH;
 
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -603,6 +600,16 @@ async function notifyGroupAdminsNoDeletePermission(
     text: `⚠️ *[WAGuard Security — Delete Permission প্রয়োজন]*\n\nএই গ্রুপে স্প্যাম স্টিকার শনাক্ত হয়েছে, কিন্তু **বট নম্বরটি বর্তমানে গ্রুপ অ্যাডমিন (Admin) নয়**।\nতাই স্টিকারগুলো ডিলিট করা সম্ভব হচ্ছে না!${adminMentionsText}\n\n✅ সমাধান: গ্রুপের যেকোনো অ্যাডমিন অনুগ্রহ করে বটটিকে **Admin** বানিয়ে দিন, তাহলে Queue-তে থাকা স্টিকারগুলোও স্বয়ংক্রিয়ভাবে মুছে যাবে।`,
     mentions: adminJids.slice(0, 6),
   }).catch(() => {});
+
+  reportServerProblem(
+    {
+      category: `sticker_no_perm_${groupId}`,
+      title: 'স্টিকার ডিলিট করার Admin Permission নেই',
+      details: `"${groupName}" গ্রুপে স্প্যাম স্টিকার এসেছে, কিন্তু বট গ্রুপ Admin না থাকায় ডিলিট আটকে আছে।`,
+      suggestion: `"${groupName}" গ্রুপে বট নম্বরটিকে Admin বানান।`,
+    },
+    sock
+  ).catch(() => {});
 }
 
 async function getVerifiedGroupPermsForWorker(
@@ -798,6 +805,15 @@ async function processStickerTask(item: StickerQueueItem) {
 
     if (classified.kind === 'rate_limit') {
       rateLimitBackoffUntil = Math.max(rateLimitBackoffUntil, Date.now() + 3000 * Math.min(3, item.attempts));
+      reportServerProblem(
+        {
+          category: 'sticker_rate_limit',
+          title: 'WhatsApp স্টিকার ডিলিট Rate Limit (429)',
+          details: `"${item.groupName}" গ্রুপে দ্রুত ডিলিট করার সময় WhatsApp সাময়িক Rate Limit দিয়েছে (${classified.message})।`,
+          suggestion: 'বট স্বয়ংক্রিয়ভাবে ব্যাকঅফ ও প্যারালাল গতি কমিয়ে রিট্রাই করছে।',
+        },
+        sock
+      ).catch(() => {});
     }
 
     if (item.attempts < item.maxRetries) {
@@ -829,6 +845,16 @@ async function processStickerTask(item: StickerQueueItem) {
         reason: `স্টিকার ডিলিট ব্যর্থ (${item.attempts} বার চেষ্টা করা হয়েছে)`,
         details: classified.message,
       });
+
+      reportServerProblem(
+        {
+          category: `sticker_perm_fail_${item.groupId}`,
+          title: 'স্টিকার ডিলিট বারবার ব্যর্থ হয়েছে',
+          details: `"${item.groupName}" গ্রুপে ${item.attempts} বার চেষ্টা করেও ডিলিট করা যায়নি (${classified.message})।`,
+          suggestion: 'ড্যাশবোর্ডের Security পেজ থেকে "ব্যর্থ স্টিকার রিট্রাই" করে দেখতে পারেন।',
+        },
+        sock
+      ).catch(() => {});
     }
   }
 }

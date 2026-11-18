@@ -14,6 +14,7 @@ import {
   ArrowRight,
   Sparkles,
   Save,
+  Send,
   Activity,
   MessageCircle,
   Zap,
@@ -166,6 +167,14 @@ interface ModerationSettings {
   stickerDeleteMaxRetries?: number;
   stickerQueueConcurrency?: number;
   manualBlockNotice?: string;
+  autoSalamReplyEnabled?: boolean;
+  botTypingEnabled?: boolean;
+  bossAdminNumber?: string;
+  bossFightAlertEnabled?: boolean;
+  bossFightMinPeople?: number;
+  bossFightWindowMinutes?: number;
+  serverErrorNoticeEnabled?: boolean;
+  serverErrorNoticeTarget?: 'boss_inbox' | 'groups' | 'both';
   // Secondary Female AI Companion Account
   companionEnabled?: boolean;
   companionName?: string;
@@ -526,6 +535,14 @@ export default function App() {
     stickerDeleteMaxRetries: 4,
     stickerQueueConcurrency: 5,
     manualBlockNotice: '',
+    autoSalamReplyEnabled: true,
+    botTypingEnabled: true,
+    bossAdminNumber: '8801632222592',
+    bossFightAlertEnabled: true,
+    bossFightMinPeople: 3,
+    bossFightWindowMinutes: 5,
+    serverErrorNoticeEnabled: true,
+    serverErrorNoticeTarget: 'boss_inbox',
   });
   const [customBadwordsText, setCustomBadwordsText] = useState('');
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
@@ -683,6 +700,7 @@ export default function App() {
     { id: '12036303@g.us', name: 'Devs & Admins Group', participants: 42, status: 'Active' },
   ]);
   const [isGroupsLoading, setIsGroupsLoading] = useState(false);
+  const [storageInfo, setStorageInfo] = useState<{ dataDir: string; persistentVolumeDetected: boolean } | null>(null);
 
   // Configuration settings
   const [geminiKey, setGeminiKey] = useState(localStorage.getItem('wg_gemini_key') || '');
@@ -901,6 +919,9 @@ export default function App() {
       ]);
       if (data.overview) {
         setOverview(data.overview);
+      }
+      if (data.storageInfo) {
+        setStorageInfo(data.storageInfo);
       }
       if (data.moderation?.settings) {
         const s = data.moderation.settings;
@@ -1397,6 +1418,33 @@ export default function App() {
     }
   };
 
+  const handleSaveBossAndNoticeConfig = async () => {
+    const patch = {
+      bossAdminNumber: String(settings.bossAdminNumber || '8801632222592').trim(),
+      bossFightAlertEnabled: settings.bossFightAlertEnabled !== false,
+      bossFightMinPeople: Math.max(2, Math.min(10, Number(settings.bossFightMinPeople ?? 3))),
+      bossFightWindowMinutes: Math.max(1, Math.min(30, Number(settings.bossFightWindowMinutes ?? 5))),
+      serverErrorNoticeEnabled: settings.serverErrorNoticeEnabled !== false,
+      serverErrorNoticeTarget: settings.serverErrorNoticeTarget || 'boss_inbox',
+    };
+    try {
+      const res = await callApi('/api/moderation/settings', 'POST', patch);
+      if (res?.settings) setSettings(res.settings);
+      showNotification(isBn ? 'বস অ্যালার্ট ও সার্ভার নোটিশ সেটিংস সেভ হয়েছে!' : 'Boss & Server Alert settings saved!');
+    } catch (err: any) {
+      showNotification((isBn ? 'সেভ ব্যর্থ: ' : 'Save failed: ') + err.message);
+    }
+  };
+
+  const handleTestBossAlert = async () => {
+    try {
+      const res = await callApi('/api/moderation/test-boss-alert', 'POST');
+      showNotification(res?.message || (isBn ? 'বস ইনবক্সে টেস্ট মেসেজ পাঠানো হয়েছে!' : 'Boss inbox test alert sent!'));
+    } catch (err: any) {
+      showNotification((isBn ? 'টেস্ট ব্যর্থ: ' : 'Test failed: ') + err.message);
+    }
+  };
+
   const handleManualUnmute = async (groupId: string, senderJid: string) => {
     try {
       const res = await callApi('/api/moderation/unmute', 'POST', { groupId, senderJid });
@@ -1442,14 +1490,20 @@ export default function App() {
 
 
   const updateSettingToggle = async (key: keyof ModerationSettings, value: any) => {
-    const updated = { ...settings, [key]: value };
-    setSettings(updated);
+    let previousValue: any;
+    setSettings((prev) => {
+      previousValue = prev[key];
+      return { ...prev, [key]: value };
+    });
     try {
-      await callApi('/api/moderation/settings', 'POST', { [key]: value });
+      const res = await callApi('/api/moderation/settings', 'POST', { [key]: value });
+      if (res?.settings) {
+        setSettings(res.settings);
+      }
       showNotification(isBn ? `সফলভাবে সেভ হয়েছে` : `Settings updated successfully`);
     } catch (err: any) {
       showNotification((isBn ? 'সেভ করতে ব্যর্থ: ' : 'Save failed: ') + err.message);
-      setSettings(settings);
+      setSettings((prev) => ({ ...prev, [key]: previousValue }));
     }
   };
 
@@ -1759,10 +1813,13 @@ export default function App() {
         return;
       }
       const jsonStr = JSON.stringify(res.bundle, null, 2);
+      const summaryBn = res.hasPrimarySession
+        ? 'WhatsApp সেশন ও সব ON/OFF সেটিংস ব্যাকআপ'
+        : 'সব ON/OFF সেটিংস ব্যাকআপ';
       if (copyOnly) {
         try {
           await navigator.clipboard.writeText(jsonStr);
-          showNotification(isBn ? 'সেশন ব্যাকআপ কোড কপি হয়েছে! নিরাপদ জায়গায় সেভ করে রাখুন।' : 'Encrypted backup copied to clipboard!');
+          showNotification(isBn ? `${summaryBn} কোড কপি হয়েছে! নিরাপদ জায়গায় সেভ করে রাখুন।` : 'Encrypted full backup copied to clipboard!');
         } catch {
           setSessionPasteText(jsonStr);
           setShowSessionPasteBox(true);
@@ -1774,12 +1831,12 @@ export default function App() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = res.filename || 'waguard-session-backup.json';
+      a.download = res.filename || 'waguard-full-backup.json';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      showNotification(isBn ? 'সেশন ব্যাকআপ ফাইল ডাউনলোড হয়েছে!' : 'Session backup downloaded!');
+      showNotification(isBn ? `${summaryBn} ফাইল ডাউনলোড হয়েছে!` : 'Full backup file downloaded!');
     } catch (err: any) {
       showNotification(err?.message || (isBn ? 'ব্যাকআপ ডাউনলোড ব্যর্থ — "ব্যাকআপ কপি" বাটন ব্যবহার করুন' : 'Export failed — try Copy Backup'));
     } finally {
@@ -1801,10 +1858,14 @@ export default function App() {
         showNotification(res?.error || (isBn ? 'সেশন রিস্টোর ব্যর্থ হয়েছে' : 'Session import failed'));
         return;
       }
+      if (res.settings) {
+        setSettings(res.settings);
+        setCustomBadwordsText((res.settings.customBadwords || []).join(', '));
+      }
       setSessionPasteText('');
       setShowSessionPasteBox(false);
-      showNotification(res.message || (isBn ? 'সেশন রিস্টোর সম্পন্ন! কানেক্ট হচ্ছে...' : 'Session restored! Connecting...'));
-      await checkStatus();
+      showNotification(res.message || (isBn ? 'সেশন ও সেটিংস রিস্টোর সম্পন্ন!' : 'Backup restored!'));
+      await Promise.all([checkStatus(), loadDashboard()]);
     } catch (err: any) {
       showNotification(err?.message || (isBn ? 'ব্যাকআপ ডাটা সঠিক নয়' : 'Invalid backup data'));
     } finally {
@@ -3553,6 +3614,168 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+
+                {/* Auto Salam Reply (Zero API) */}
+                <div className="toggle-row">
+                  <div className="toggle-info">
+                    <h4>
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {isBn ? 'অটো সালাম উত্তর (গ্রুপে শুধু সালামের জবাব)' : 'Auto Salam Reply (Zero API)'}
+                        <span className={`badge ${settings.autoSalamReplyEnabled !== false ? 'badge-green' : 'badge-amber'}`}>
+                          {settings.autoSalamReplyEnabled !== false ? 'ACTIVE' : 'OFF'}
+                        </span>
+                      </span>
+                    </h4>
+                    <p>
+                      {isBn
+                        ? 'গ্রুপে কেউ সালাম দিলে কোনো AI API ছাড়াই স্বয়ংক্রিয়ভাবে সালামের উত্তর দেবে—অন্য কোনো বাড়তি কথা বলবে না।'
+                        : 'Automatically replies to Salam in groups with zero AI API key required.'}
+                    </p>
+                  </div>
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.autoSalamReplyEnabled !== false}
+                      onChange={(e) => updateSettingToggle('autoSalamReplyEnabled', e.target.checked)}
+                    />
+                    <span className="slider"></span>
+                  </label>
+                </div>
+
+                {/* Bot Typing Indicator */}
+                <div className="toggle-row">
+                  <div className="toggle-info">
+                    <h4>
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {isBn ? 'বট টাইপিং ইন্ডিকেটর (Typing...)' : 'Bot Typing Indicator'}
+                        <span className={`badge ${settings.botTypingEnabled !== false ? 'badge-green' : 'badge-amber'}`}>
+                          {settings.botTypingEnabled !== false ? 'ACTIVE' : 'OFF'}
+                        </span>
+                      </span>
+                    </h4>
+                    <p>
+                      {isBn
+                        ? 'বট কোনো উত্তর বা সতর্কবার্তা/নোটিশ লেখার আগে WhatsApp-এ "typing..." (লিখছে) দেখাবে।'
+                        : 'Displays live WhatsApp typing presence before sending replies or notices.'}
+                    </p>
+                  </div>
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.botTypingEnabled !== false}
+                      onChange={(e) => updateSettingToggle('botTypingEnabled', e.target.checked)}
+                    />
+                    <span className="slider"></span>
+                  </label>
+                </div>
+
+                {/* Boss Admin Fight Alert & Zero-API Server Health Notice */}
+                <div className="mt-3 p-3 rounded-xl border border-indigo-200 bg-indigo-50/40 space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div>
+                      <h4 className="text-xs font-extrabold text-indigo-950 flex items-center gap-1.5 flex-wrap">
+                        <span>{isBn ? '🚨 বস অ্যাডমিন ইনবক্স অ্যালার্ট ও অটো সার্ভার নোটিশ' : '🚨 Boss Inbox Fight Alert & Zero-API Server Notice'}</span>
+                        <span className="badge badge-blue">{isBn ? 'API ছাড়া' : 'Zero-API'}</span>
+                      </h4>
+                      <p className="text-[10px] text-slate-600 mt-0.5">
+                        {isBn
+                          ? 'গ্রুপে ৩+ জন গালি/ঝগড়া করলে বা সার্ভারে কোনো সমস্যা হলে শুধু নিচের এক অ্যাডমিন ইনবক্সে (বস) অটো নক দেবে।'
+                          : 'Alerts single Boss Admin inbox on multi-member fights or server problems without AI API.'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button type="button" className="btn outline" onClick={handleTestBossAlert}>
+                        <Send size={11} /> {isBn ? 'বস টেস্ট' : 'Test Boss'}
+                      </button>
+                      <button type="button" className="btn primary" onClick={handleSaveBossAndNoticeConfig}>
+                        <Save size={11} /> {isBn ? 'সেভ করুন' : 'Save'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="bg-white p-2 rounded-lg border border-slate-200">
+                      <label className="block text-[9.5px] font-bold text-slate-500 mb-1">
+                        {isBn ? 'শুধুমাত্র এই একজন বস অ্যাডমিন নম্বর' : 'Single Boss Admin WhatsApp Number'}
+                      </label>
+                      <input
+                        type="text"
+                        value={settings.bossAdminNumber ?? '8801632222592'}
+                        onChange={(e) => setSettings((prev) => ({ ...prev, bossAdminNumber: e.target.value }))}
+                        placeholder="8801632222592"
+                        className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-mono font-bold"
+                      />
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-slate-200">
+                      <label className="block text-[9.5px] font-bold text-slate-500 mb-1">
+                        {isBn ? 'সার্ভার সমস্যা হলে কোথায় নোটিশ যাবে' : 'Server Problem Notice Target'}
+                      </label>
+                      <select
+                        value={settings.serverErrorNoticeTarget || 'boss_inbox'}
+                        onChange={(e) =>
+                          setSettings((prev) => ({
+                            ...prev,
+                            serverErrorNoticeTarget: e.target.value as 'boss_inbox' | 'groups' | 'both',
+                          }))
+                        }
+                        className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-bold bg-white"
+                      >
+                        <option value="boss_inbox">{isBn ? 'শুধু বস অ্যাডমিনের ইনবক্সে' : 'Boss Inbox Only'}</option>
+                        <option value="groups">{isBn ? 'সক্রিয় গ্রুপগুলোতে' : 'Active Groups'}</option>
+                        <option value="both">{isBn ? 'বস ইনবক্স + গ্রুপ উভয় জায়গায়' : 'Both Boss & Groups'}</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div className="bg-white p-2 rounded-lg border border-slate-200 flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-bold text-slate-700">{isBn ? 'ঝগড়া অ্যালার্ট' : 'Fight Alert'}</span>
+                      <input
+                        type="checkbox"
+                        checked={settings.bossFightAlertEnabled !== false}
+                        onChange={(e) => setSettings((prev) => ({ ...prev, bossFightAlertEnabled: e.target.checked }))}
+                      />
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-slate-200 flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-bold text-slate-700">{isBn ? 'সার্ভার নোটিশ' : 'Server Notice'}</span>
+                      <input
+                        type="checkbox"
+                        checked={settings.serverErrorNoticeEnabled !== false}
+                        onChange={(e) => setSettings((prev) => ({ ...prev, serverErrorNoticeEnabled: e.target.checked }))}
+                      />
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-slate-200">
+                      <label className="block text-[9px] font-bold text-slate-500 mb-0.5">
+                        {isBn ? 'কতজন গালি/ঝগড়া করলে' : 'Min Offenders'}
+                      </label>
+                      <input
+                        type="number"
+                        min={2}
+                        max={10}
+                        value={settings.bossFightMinPeople ?? 3}
+                        onChange={(e) =>
+                          setSettings((prev) => ({ ...prev, bossFightMinPeople: Number(e.target.value || 3) }))
+                        }
+                        className="w-full px-1.5 py-0.5 border border-slate-300 rounded text-xs font-bold"
+                      />
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-slate-200">
+                      <label className="block text-[9px] font-bold text-slate-500 mb-0.5">
+                        {isBn ? 'সময় উইন্ডো (মিনিট)' : 'Window (min)'}
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={30}
+                        value={settings.bossFightWindowMinutes ?? 5}
+                        onChange={(e) =>
+                          setSettings((prev) => ({ ...prev, bossFightWindowMinutes: Number(e.target.value || 5) }))
+                        }
+                        className="w-full px-1.5 py-0.5 border border-slate-300 rounded text-xs font-bold"
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* CATEGORY E: LOGS & STATUS */}
@@ -4204,15 +4427,15 @@ export default function App() {
                 </div>
               )}
 
-              {/* Encrypted Session Transfer Card (Export from Google / Import to Any Host without Re-pairing) */}
+              {/* Encrypted Full State Backup Card (Primary WhatsApp + 2nd Account + All ON/OFF Settings) */}
               <div ref={sessionCardRef} className="card mt-4 border border-emerald-200">
                 <div className="card-head">
                   <div>
-                    <h3>{isBn ? 'সেশন ব্যাকআপ ও অন্য হোস্টিংয়ে স্থানান্তর' : 'Session Transfer (Zero-Ban Migration)'}</h3>
+                    <h3>{isBn ? 'সেশন ও সব সেটিংস ব্যাকআপ (Full Backup & Restore)' : 'Full Session & Settings Backup'}</h3>
                     <p>
                       {isBn
-                        ? 'এখানে (Google সার্ভারে) কানেক্ট করা সেশন পাসওয়ার্ড দিয়ে ডাউনলোড বা কপি করে অন্য যেকোনো হোস্টিংয়ে দিন—নতুন কোড ছাড়াই সরাসরি চলবে।'
-                        : 'Export your verified session from Google and restore it on any hosting without sending a new pairing code request.'}
+                        ? 'এখানে WhatsApp সেশন (প্রাইমারি + ২য় অ্যাকাউন্ট) এবং আপনার চালু/বন্ধ (ON/OFF) করা সব সেটিংস পাসওয়ার্ড দিয়ে ডাউনলোড বা কপি করে রাখতে পারবেন—সার্ভার আপডেট করলে এক ক্লিকেই রিস্টোর হবে।'
+                        : 'Export both WhatsApp sessions and all your ON/OFF settings encrypted with your PIN, and restore cleanly after any redeploy.'}
                     </p>
                   </div>
                   <div className="symbol sg">
@@ -4220,10 +4443,34 @@ export default function App() {
                   </div>
                 </div>
 
+                {storageInfo && (
+                  <div
+                    className={`mt-2.5 px-3 py-2 text-[11px] leading-relaxed border ${
+                      storageInfo.persistentVolumeDetected
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                        : 'bg-amber-50 border-amber-200 text-amber-900'
+                    }`}
+                  >
+                    {storageInfo.persistentVolumeDetected ? (
+                      <span>
+                        {isBn
+                          ? `✅ Persistent Volume সক্রিয় রয়েছে (${storageInfo.dataDir}) — নতুন কোড পুশ করলেও WhatsApp ও সেটিংস ডিসকানেক্ট/রিসেট হবে না।`
+                          : `Persistent Volume active (${storageInfo.dataDir}) — sessions and settings persist across redeploys.`}
+                      </span>
+                    ) : (
+                      <span>
+                        {isBn
+                          ? `ℹ️ স্থায়ী ডিস্ক ছাড়া অস্থায়ী কন্টেইনারে চলছে। Railway/Render-এ '/app/data' Volume মাউন্ট করলে (বা WAGUARD_DATA_DIR সেট করলে) কোড আপডেটে আর কখনোই ডিসকানেক্ট বা সেটিংস রিসেট হবে না; নতুবা আপডেটের আগে এখান থেকে ব্যাকআপ নিয়ে রাখুন।`
+                          : `No Persistent Volume env detected (${storageInfo.dataDir}). Mount a persistent disk at /app/data or download a full backup before pushing updates.`}
+                      </span>
+                    )}
+                  </div>
+                )}
+
                 <div className="mt-3 space-y-3">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                      {isBn ? 'সেশন ব্যাকআপ পাসওয়ার্ড / পিন (কমপক্ষে ৪ অক্ষর)' : 'Backup Passphrase / PIN (min 4 chars)'}
+                      {isBn ? 'ব্যাকআপ পাসওয়ার্ড / পিন (কমপক্ষে ৪ অক্ষর)' : 'Backup Passphrase / PIN (min 4 chars)'}
                     </label>
                     <input
                       type="password"
