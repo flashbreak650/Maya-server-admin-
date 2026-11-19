@@ -116,6 +116,7 @@ interface ModerationSettings {
   antiViewOnce: boolean;
   antiBadword: boolean;
   antiLink: boolean;
+  allowCarromLinks?: boolean;
   autoKick3Warnings: boolean;
   autoWelcome: boolean;
   welcomeMessage?: string;
@@ -169,6 +170,9 @@ interface ModerationSettings {
   manualBlockNotice?: string;
   autoSalamReplyEnabled?: boolean;
   botTypingEnabled?: boolean;
+  adminMentionReplyEnabled?: boolean;
+  adminMentionReplyTarget?: 'all_admins' | 'boss_only';
+  adminMentionReplyMessage?: string;
   bossAdminNumber?: string;
   bossFightAlertEnabled?: boolean;
   bossFightMinPeople?: number;
@@ -491,6 +495,7 @@ export default function App() {
     antiViewOnce: true,
     antiBadword: true,
     antiLink: true,
+    allowCarromLinks: true,
     autoKick3Warnings: true,
     autoWelcome: true,
     welcomeMessage: '',
@@ -537,6 +542,9 @@ export default function App() {
     manualBlockNotice: '',
     autoSalamReplyEnabled: true,
     botTypingEnabled: true,
+    adminMentionReplyEnabled: true,
+    adminMentionReplyTarget: 'all_admins',
+    adminMentionReplyMessage: '🛡️ সম্মানিত @{{admin}}, সদস্য @{{user}} আপনাকে মেনশন করেছেন। অ্যাডমিন বর্তমানে ব্যস্ত থাকতে পারেন — অনুগ্রহ করে একটু অপেক্ষা করুন, সময় পেলে উত্তর দেবেন।',
     bossAdminNumber: '8801632222592',
     bossFightAlertEnabled: true,
     bossFightMinPeople: 3,
@@ -1431,6 +1439,21 @@ export default function App() {
       const res = await callApi('/api/moderation/settings', 'POST', patch);
       if (res?.settings) setSettings(res.settings);
       showNotification(isBn ? 'বস অ্যালার্ট ও সার্ভার নোটিশ সেটিংস সেভ হয়েছে!' : 'Boss & Server Alert settings saved!');
+    } catch (err: any) {
+      showNotification((isBn ? 'সেভ ব্যর্থ: ' : 'Save failed: ') + err.message);
+    }
+  };
+
+  const handleSaveAdminMentionConfig = async () => {
+    const patch = {
+      adminMentionReplyEnabled: settings.adminMentionReplyEnabled !== false,
+      adminMentionReplyTarget: settings.adminMentionReplyTarget === 'boss_only' ? 'boss_only' : 'all_admins',
+      adminMentionReplyMessage: String(settings.adminMentionReplyMessage || '').trim(),
+    };
+    try {
+      const res = await callApi('/api/moderation/settings', 'POST', patch);
+      if (res?.settings) setSettings(res.settings);
+      showNotification(isBn ? 'অ্যাডমিন মেনশন রিপ্লাই সেটিংস সেভ হয়েছে!' : 'Admin Mention Reply settings saved!');
     } catch (err: any) {
       showNotification((isBn ? 'সেভ ব্যর্থ: ' : 'Save failed: ') + err.message);
     }
@@ -3520,6 +3543,35 @@ export default function App() {
                   </label>
                 </div>
 
+                {/* Carrom Pool Link Allowlist */}
+                {settings.antiLink && (
+                  <div className="toggle-row">
+                    <div className="toggle-info">
+                      <h4>
+                        <span className="flex items-center gap-1.5 flex-wrap">
+                          {isBn ? 'Carrom Pool লিংক অনুমোদিত (carrom.co)' : 'Allow Carrom Pool Match Links (carrom.co)'}
+                          <span className={`badge ${settings.allowCarromLinks !== false ? 'badge-green' : 'badge-amber'}`}>
+                            {settings.allowCarromLinks !== false ? 'ALLOWED' : 'BLOCKED'}
+                          </span>
+                        </span>
+                      </h4>
+                      <p>
+                        {isBn
+                          ? 'চালু থাকলে শুধু Carrom Pool রুম ইনভাইট লিংক (carrom.co) রিমুভ হবে না — বাকি সব লিংক আগের মতোই ডিলিট ও ওয়ার্নিং হবে।'
+                          : 'Keeps official Carrom Pool match invite links (carrom.co) safe while still deleting all other links.'}
+                      </p>
+                    </div>
+                    <label className="switch">
+                      <input
+                        type="checkbox"
+                        checked={settings.allowCarromLinks !== false}
+                        onChange={(e) => updateSettingToggle('allowCarromLinks', e.target.checked)}
+                      />
+                      <span className="slider"></span>
+                    </label>
+                  </div>
+                )}
+
                 {/* AI Badword Detection */}
                 <div className="toggle-row">
                   <div className="toggle-info">
@@ -3668,6 +3720,84 @@ export default function App() {
                     <span className="slider"></span>
                   </label>
                 </div>
+
+                {/* Admin Mention Auto-Reply (Zero API) */}
+                <div className="toggle-row">
+                  <div className="toggle-info">
+                    <h4>
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {isBn ? 'অ্যাডমিনকে মেনশন করলে অটো রিপ্লাই (Admin Mention)' : 'Admin Mention Auto-Reply (Zero API)'}
+                        <span className={`badge ${settings.adminMentionReplyEnabled !== false ? 'badge-green' : 'badge-amber'}`}>
+                          {settings.adminMentionReplyEnabled !== false ? 'ACTIVE' : 'OFF'}
+                        </span>
+                      </span>
+                    </h4>
+                    <p>
+                      {isBn
+                        ? 'গ্রুপে কেউ কোনো অ্যাডমিনকে @মেনশন করলে কোন অ্যাডমিনকে ডাকা হয়েছে তা উল্লেখ করে বট স্বয়ংক্রিয়ভাবে ভদ্র রিপ্লাই দেবে।'
+                        : 'Automatically responds in group when a member @mentions an admin (zero AI API needed).'}
+                    </p>
+                  </div>
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.adminMentionReplyEnabled !== false}
+                      onChange={(e) => updateSettingToggle('adminMentionReplyEnabled', e.target.checked)}
+                    />
+                    <span className="slider"></span>
+                  </label>
+                </div>
+
+                {settings.adminMentionReplyEnabled !== false && (
+                  <div className="mt-2 p-3 rounded-xl border border-emerald-200 bg-emerald-50/40 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-[11px] font-bold text-emerald-950">
+                        {isBn ? '🛡️ অ্যাডমিন মেনশন রিপ্লাই কাস্টমাইজ করুন' : '🛡️ Customize Admin Mention Reply'}
+                      </span>
+                      <button type="button" className="btn primary" onClick={handleSaveAdminMentionConfig}>
+                        <Save size={11} /> {isBn ? 'সেভ করুন' : 'Save'}
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div className="bg-white p-2 rounded-lg border border-slate-200">
+                        <label className="block text-[9.5px] font-bold text-slate-500 mb-1">
+                          {isBn ? 'কাকে মেনশন করলে বলবে' : 'Trigger Target'}
+                        </label>
+                        <select
+                          value={settings.adminMentionReplyTarget === 'boss_only' ? 'boss_only' : 'all_admins'}
+                          onChange={(e) =>
+                            setSettings((prev) => ({
+                              ...prev,
+                              adminMentionReplyTarget: e.target.value as 'all_admins' | 'boss_only',
+                            }))
+                          }
+                          className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-bold bg-white"
+                        >
+                          <option value="all_admins">{isBn ? 'যেকোনো গ্রুপ অ্যাডমিন' : 'Any Group Admin'}</option>
+                          <option value="boss_only">{isBn ? 'শুধু বস অ্যাডমিনকে' : 'Boss Admin Only'}</option>
+                        </select>
+                      </div>
+                      <div className="sm:col-span-2 bg-white p-2 rounded-lg border border-slate-200">
+                        <label className="block text-[9.5px] font-bold text-slate-500 mb-1">
+                          {isBn
+                            ? 'মেনশন করলে বট যা লিখবে ({{admin}} = অ্যাডমিন, {{user}} = যে মেনশন করেছে)'
+                            : 'Auto-Reply Message ({{admin}} = admin, {{user}} = sender)'}
+                        </label>
+                        <textarea
+                          rows={2}
+                          value={
+                            settings.adminMentionReplyMessage ??
+                            '🛡️ সম্মানিত @{{admin}}, সদস্য @{{user}} আপনাকে মেনশন করেছেন। অ্যাডমিন বর্তমানে ব্যস্ত থাকতে পারেন — অনুগ্রহ করে একটু অপেক্ষা করুন, সময় পেলে উত্তর দেবেন।'
+                          }
+                          onChange={(e) =>
+                            setSettings((prev) => ({ ...prev, adminMentionReplyMessage: e.target.value }))
+                          }
+                          className="w-full px-2 py-1 border border-slate-300 rounded text-xs outline-none focus:border-emerald-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Boss Admin Fight Alert & Zero-API Server Health Notice */}
                 <div className="mt-3 p-3 rounded-xl border border-indigo-200 bg-indigo-50/40 space-y-3">

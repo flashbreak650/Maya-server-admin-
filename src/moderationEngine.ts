@@ -51,6 +51,7 @@ export interface ModerationSettings {
   antiViewOnce: boolean;
   antiBadword: boolean;
   antiLink: boolean;
+  allowCarromLinks?: boolean;
   autoKick3Warnings: boolean;
   autoWelcome: boolean;
   welcomeMessage?: string;
@@ -110,9 +111,12 @@ export interface ModerationSettings {
   aiKeys: AiKey[];
   aiAutoRotate: boolean;
   aiProviderPriority: ('gemini' | 'groq' | 'openrouter')[];
-  // Anti-Spam Warning Privacy, Auto Salam, Typing Indicator, Boss Fight Alert & Zero-API Server Notice
+  // Anti-Spam Warning Privacy, Auto Salam, Admin Mention Reply, Typing Indicator, Boss Fight Alert & Zero-API Server Notice
   autoSalamReplyEnabled?: boolean;
   botTypingEnabled?: boolean;
+  adminMentionReplyEnabled?: boolean;
+  adminMentionReplyTarget?: 'all_admins' | 'boss_only';
+  adminMentionReplyMessage?: string;
   bossAdminNumber?: string;
   bossFightAlertEnabled?: boolean;
   bossFightMinPeople?: number;
@@ -221,6 +225,7 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   antiViewOnce: true,
   antiBadword: true,
   antiLink: true,
+  allowCarromLinks: true,
   autoKick3Warnings: true,
   autoWelcome: true,
   welcomeMessage: '',
@@ -272,6 +277,9 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   aiProviderPriority: ['gemini', 'groq', 'openrouter'],
   autoSalamReplyEnabled: true,
   botTypingEnabled: true,
+  adminMentionReplyEnabled: true,
+  adminMentionReplyTarget: 'all_admins',
+  adminMentionReplyMessage: '🛡️ সম্মানিত @{{admin}}, সদস্য @{{user}} আপনাকে মেনশন করেছেন। অ্যাডমিন বর্তমানে ব্যস্ত থাকতে পারেন — অনুগ্রহ করে একটু অপেক্ষা করুন, সময় পেলে উত্তর দেবেন।',
   bossAdminNumber: '8801632222592',
   bossFightAlertEnabled: true,
   bossFightMinPeople: 3,
@@ -1288,11 +1296,36 @@ STRICT RULES:
 // -------------------------------------------------------------
 const LINK_REGEX = /(?:https?:\/\/|ftp:\/\/|www\.)[^\s]+|[a-zA-Z0-9-]+\.(?:com|org|net|edu|gov|io|me|app|xyz|info|biz|top|bd|co|in|link|site|online|live|tv|cc|ly|to|gg|me|dev)[^\s]*|chat\.whatsapp\.com\/[a-zA-Z0-9]+|t\.me\/[a-zA-Z0-9_]+|wa\.me\/[0-9]+|facebook\.com\/[^\s]+|fb\.watch\/[^\s]+|youtu\.be\/[^\s]+|youtube\.com\/[^\s]+|tiktok\.com\/[^\s]+|instagram\.com\/[^\s]+/i;
 
-export function checkLinkViolation(text: string): { isLink: boolean; matchedLink?: string } {
+export function isAllowedCarromUrl(rawToken: string): boolean {
+  if (!rawToken) return false;
+  try {
+    const trimmed = rawToken.trim().replace(/[),.!?;:]+$/g, '');
+    const normalized = /^[a-z]+:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+    const parsed = new URL(normalized);
+    if (parsed.username || parsed.password) return false;
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+    if (parsed.port && parsed.port !== '80' && parsed.port !== '443') return false;
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+    return host === 'carrom.co' || host.endsWith('.carrom.co');
+  } catch {
+    return false;
+  }
+}
+
+export function checkLinkViolation(
+  text: string,
+  options?: { allowCarromLinks?: boolean }
+): { isLink: boolean; matchedLink?: string } {
   if (!text) return { isLink: false };
-  const match = text.match(LINK_REGEX);
-  if (match) {
-    return { isLink: true, matchedLink: match[0] };
+  const allowCarrom = options?.allowCarromLinks !== false;
+  const globalRx = new RegExp(LINK_REGEX.source, 'gi');
+  for (const match of text.matchAll(globalRx)) {
+    const token = match[0];
+    if (!token) continue;
+    if (allowCarrom && isAllowedCarromUrl(token)) {
+      continue;
+    }
+    return { isLink: true, matchedLink: token };
   }
   return { isLink: false };
 }
@@ -1482,10 +1515,96 @@ interface ConflictEvent {
   timestamp: number;
 }
 
+export const DEFAULT_ADMIN_MENTION_REPLY =
+  '🛡️ সম্মানিত @{{admin}}, সদস্য @{{user}} আপনাকে মেনশন করেছেন। অ্যাডমিন বর্তমানে ব্যস্ত থাকতে পারেন — অনুগ্রহ করে একটু অপেক্ষা করুন, সময় পেলে উত্তর দেবেন।';
+
 const groupConflictWindow = new Map<string, ConflictEvent[]>();
 const lastBossFightAlertAt = new Map<string, number>();
 const lastAutoSalamAt = new Map<string, number>();
+const lastAdminMentionReplyAt = new Map<string, number>();
 const lastServerProblemAlertAt = new Map<string, number>();
+
+export async function findMentionedAdminInMessage(
+  sock: WASocket,
+  groupId: string,
+  realMsg: any,
+  messageText: string,
+  senderJid: string,
+  senderAltJid: string | undefined,
+  targetMode: 'all_admins' | 'boss_only',
+  bossPhoneDigits: string
+): Promise<{ adminJid: string; adminTag: string } | null> {
+  const ctx =
+    realMsg?.extendedTextMessage?.contextInfo ||
+    realMsg?.imageMessage?.contextInfo ||
+    realMsg?.videoMessage?.contextInfo ||
+    realMsg?.audioMessage?.contextInfo ||
+    realMsg?.documentMessage?.contextInfo;
+
+  const rawMentions: string[] = Array.isArray(ctx?.mentionedJid) ? ctx.mentionedJid.filter(Boolean) : [];
+  if (rawMentions.length === 0 && messageText) {
+    const inlineMatches = messageText.match(/@(\d{10,16})\b/g);
+    if (inlineMatches) {
+      for (const m of inlineMatches) {
+        const digits = m.slice(1).replace(/\D/g, '');
+        if (digits.length >= 10) rawMentions.push(`${digits}@s.whatsapp.net`);
+      }
+    }
+  }
+  if (rawMentions.length === 0) return null;
+
+  const botRawIds = [
+    sock?.user?.id,
+    sock?.user?.lid,
+    sock?.authState?.creds?.me?.id,
+    sock?.authState?.creds?.me?.lid,
+  ].filter(Boolean) as string[];
+  const botUsers = new Set(botRawIds.map((j) => cleanJidUser(j)).filter(Boolean));
+  const senderUsers = new Set([cleanJidUser(senderJid), cleanJidUser(senderAltJid)].filter(Boolean));
+
+  const cleanBossDigits = String(bossPhoneDigits || '').replace(/\D/g, '');
+  const meta = await getGroupMeta(sock, groupId, false).catch(() => null);
+  const participants: any[] = Array.isArray(meta?.participants) ? meta.participants : [];
+
+  for (const mentionedJid of rawMentions) {
+    const mentionedUser = cleanJidUser(mentionedJid);
+    if (!mentionedUser) continue;
+    // Never trigger on mentioning the bot itself or self-mention
+    if (botUsers.has(mentionedUser) || senderUsers.has(mentionedUser)) continue;
+
+    // 1. Check against Boss Admin digits directly first
+    if (cleanBossDigits && mentionedUser === cleanBossDigits) {
+      return { adminJid: normalizeJid(mentionedJid), adminTag: mentionedUser };
+    }
+
+    // 2. Resolve participant via group metadata (handles PN + @lid addressing modes)
+    const matchedParticipant = participants.find((p: any) => {
+      const pJids = [p.id, p.lid, p.phoneNumber].filter(Boolean) as string[];
+      return pJids.some((j) => cleanJidUser(j) === mentionedUser);
+    });
+
+    if (matchedParticipant) {
+      const pJids = [matchedParticipant.id, matchedParticipant.lid, matchedParticipant.phoneNumber].filter(Boolean) as string[];
+      const pUsers = pJids.map((j) => cleanJidUser(j)).filter(Boolean);
+      // Exclude if resolved participant is the bot itself or the sender
+      if (pUsers.some((u) => botUsers.has(u) || senderUsers.has(u))) continue;
+
+      const isBoss = Boolean(cleanBossDigits && pUsers.includes(cleanBossDigits));
+      const isGroupAdmin =
+        matchedParticipant.admin === 'admin' ||
+        matchedParticipant.admin === 'superadmin' ||
+        Boolean(matchedParticipant.isAdmin) ||
+        Boolean(matchedParticipant.isSuperAdmin);
+
+      if (targetMode === 'boss_only' ? isBoss : isBoss || isGroupAdmin) {
+        const replyMentionJid = normalizeJid(mentionedJid);
+        return { adminJid: replyMentionJid, adminTag: cleanJidUser(replyMentionJid) };
+      }
+    }
+  }
+
+  return null;
+}
 
 interface QueuedServerProblem {
   category: string;
@@ -3291,7 +3410,9 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
     }
     // Feature 9: ANTI-LINK (NEVER echo deleted URL back into public WhatsApp warning notice!)
     else if (settings.antiLink && messageText) {
-      const linkCheck = checkLinkViolation(messageText);
+      const linkCheck = checkLinkViolation(messageText, {
+        allowCarromLinks: settings.allowCarromLinks !== false,
+      });
       if (linkCheck.isLink) {
         violationType = 'Anti-Link';
         violationDetails = 'লিংক শেয়ার করা নিষিদ্ধ';
@@ -3600,6 +3721,61 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
       }
     }
     return; // Only reply to Salam and nothing else!
+  }
+
+  // -------------------------------------------------------------
+  // ADMIN MENTION AUTO-REPLY IN GROUP (ZERO AI API, TYPING INDICATOR + COOLDOWN)
+  // -------------------------------------------------------------
+  if (settings.adminMentionReplyEnabled !== false) {
+    const bossDigits = resolveBossAdminJid().split('@')[0];
+    const targetMode = settings.adminMentionReplyTarget === 'boss_only' ? 'boss_only' : 'all_admins';
+    const adminHit = await findMentionedAdminInMessage(
+      sock,
+      remoteJid,
+      realMsg,
+      messageText,
+      senderJid,
+      senderAltJid,
+      targetMode,
+      bossDigits
+    );
+    if (adminHit) {
+      const nowMs = Date.now();
+      const userCooldownKey = `${remoteJid}:${canonicalSender}`;
+      const adminCooldownKey = `${remoteJid}:admin:${cleanJidUser(adminHit.adminJid)}`;
+      const lastUserAt = lastAdminMentionReplyAt.get(userCooldownKey) || 0;
+      const lastAdminAt = lastAdminMentionReplyAt.get(adminCooldownKey) || 0;
+      if (nowMs - lastUserAt >= 25000 && nowMs - lastAdminAt >= 8000) {
+        lastAdminMentionReplyAt.set(userCooldownKey, nowMs);
+        lastAdminMentionReplyAt.set(adminCooldownKey, nowMs);
+
+        const template = (settings.adminMentionReplyMessage || '').trim() || DEFAULT_ADMIN_MENTION_REPLY;
+        const userTag = cleanJidUser(senderJid) || cleanPhone;
+        const replyText = template
+          .replace(/\{\{\s*admin\s*\}\}|\{\s*admin\s*\}/gi, adminHit.adminTag)
+          .replace(/\{\{\s*user\s*\}\}|\{\s*user\s*\}/gi, userTag);
+
+        const mentionJids = Array.from(new Set([adminHit.adminJid, normalizeJid(senderJid)].filter(Boolean)));
+        const sent = await safeSendMessage(
+          sock,
+          remoteJid,
+          { text: replyText, mentions: mentionJids },
+          { quoted: msg as any }
+        );
+        if (sent) {
+          addActivityLog({
+            groupId: remoteJid,
+            groupName: groupSubject,
+            senderJid,
+            senderPhone: cleanPhone,
+            action: 'replied',
+            reason: 'অ্যাডমিন মেনশন অটো রিপ্লাই (Admin Mention Reply — Zero API)',
+            details: replyText.slice(0, 80),
+          });
+        }
+      }
+      return;
+    }
   }
 
   // -------------------------------------------------------------
