@@ -114,6 +114,7 @@ export interface ModerationSettings {
   // Anti-Spam Warning Privacy, Auto Salam, Admin Mention Reply, Typing Indicator, Boss Fight Alert & Zero-API Server Notice
   autoSalamReplyEnabled?: boolean;
   botTypingEnabled?: boolean;
+  leaderboardCleanOnly?: boolean;
   adminMentionReplyEnabled?: boolean;
   adminMentionReplyTarget?: 'all_admins' | 'boss_only';
   adminMentionReplyMessage?: string;
@@ -277,6 +278,7 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   aiProviderPriority: ['gemini', 'groq', 'openrouter'],
   autoSalamReplyEnabled: true,
   botTypingEnabled: true,
+  leaderboardCleanOnly: true,
   adminMentionReplyEnabled: true,
   adminMentionReplyTarget: 'all_admins',
   adminMentionReplyMessage: '🛡️ সম্মানিত @{{admin}}, সদস্য @{{user}} আপনাকে মেনশন করেছেন। অ্যাডমিন বর্তমানে ব্যস্ত থাকতে পারেন — অনুগ্রহ করে একটু অপেক্ষা করুন, সময় পেলে উত্তর দেবেন।',
@@ -689,12 +691,70 @@ export function setSocketGetter(getter: () => WASocket | null) {
 }
 
 const contactNamesCache: Record<string, string> = {};
+const lidToPnUserMap = new Map<string, string>();
+const pnToLidUserMap = new Map<string, string>();
+
+export function normalizePhoneDigits(raw?: string | null): string {
+  if (!raw) return '';
+  let digits = String(raw)
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
+    .replace(/\D/g, '');
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  if (digits.startsWith('01') && digits.length === 11) digits = '88' + digits;
+  else if (digits.startsWith('1') && digits.length === 10) digits = '880' + digits;
+  return digits;
+}
+
+function isLidJid(jid?: string | null): boolean {
+  return Boolean(jid && String(jid).toLowerCase().includes('@lid'));
+}
+
+function isPnJid(jid?: string | null): boolean {
+  if (!jid) return false;
+  const lower = String(jid).toLowerCase();
+  return lower.includes('@s.whatsapp.net') || lower.includes('@c.us');
+}
+
+export function rememberLidPnPair(jidA?: string | null, jidB?: string | null) {
+  const cands = [jidA, jidB].filter(Boolean) as string[];
+  if (cands.length < 2) return;
+  let lidUser = '';
+  let pnDigits = '';
+  for (const raw of cands) {
+    const str = String(raw).trim();
+    const cu = cleanJidUser(str);
+    if (!cu) continue;
+    if (isLidJid(str)) {
+      lidUser = cu;
+    } else if (isPnJid(str) || (!str.includes('@') && /^\d{10,15}$/.test(cu))) {
+      pnDigits = normalizePhoneDigits(cu) || cu;
+    }
+  }
+  if (lidUser && pnDigits && pnDigits.length >= 10) {
+    lidToPnUserMap.set(lidUser, pnDigits);
+    pnToLidUserMap.set(pnDigits, lidUser);
+  }
+}
+
+function learnGroupParticipantsLidPn(meta: any) {
+  if (!meta || !Array.isArray(meta.participants)) return;
+  for (const p of meta.participants) {
+    if (!p) continue;
+    const lidCand = p.lid || (isLidJid(p.id) ? p.id : '');
+    const pnCand = p.phoneNumber || (isPnJid(p.id) ? p.id : '');
+    if (lidCand && pnCand) {
+      rememberLidPnPair(lidCand, pnCand);
+    }
+  }
+}
 
 export function updateContactNames(
   contacts: Array<{ id?: string; lid?: string; phoneNumber?: string; name?: string; notify?: string; verifiedName?: string }>
 ) {
   if (!Array.isArray(contacts)) return;
   for (const c of contacts) {
+    rememberLidPnPair(c.id, c.phoneNumber || c.lid);
+    rememberLidPnPair(c.lid, c.phoneNumber || c.id);
     const display = (c.name || c.notify || c.verifiedName || '').trim();
     if (!display) continue;
     for (const jid of [c.id, c.lid, c.phoneNumber]) {
@@ -1499,10 +1559,7 @@ export async function safeSendMessage(
 // -------------------------------------------------------------
 export function resolveBossAdminJid(): string {
   const settings = getSettings();
-  let digits = String(settings.bossAdminNumber || DEFAULT_SETTINGS.bossAdminNumber || '8801632222592').replace(/\D/g, '');
-  if (digits.startsWith('00')) digits = digits.slice(2);
-  if (digits.startsWith('01') && digits.length === 11) digits = '88' + digits;
-  else if (digits.startsWith('1') && digits.length === 10) digits = '880' + digits;
+  let digits = normalizePhoneDigits(settings.bossAdminNumber || DEFAULT_SETTINGS.bossAdminNumber || '8801632222592');
   if (!digits || digits.length < 10) digits = '8801632222592';
   return `${digits}@s.whatsapp.net`;
 }
@@ -1524,6 +1581,45 @@ const lastAutoSalamAt = new Map<string, number>();
 const lastAdminMentionReplyAt = new Map<string, number>();
 const lastServerProblemAlertAt = new Map<string, number>();
 
+function collectMentionedJidsFromMessage(realMsg: any, rawMsg?: any): string[] {
+  const collected: string[] = [];
+  const pushJids = (arr: any) => {
+    if (!Array.isArray(arr)) return;
+    for (const item of arr) {
+      if (typeof item === 'string' && item.trim() && !collected.includes(item.trim())) {
+        collected.push(item.trim());
+      }
+    }
+  };
+
+  const inspectContainer = (obj: any) => {
+    if (!obj || typeof obj !== 'object') return;
+    pushJids(obj?.contextInfo?.mentionedJid);
+    for (const val of Object.values(obj)) {
+      if (val && typeof val === 'object' && !Array.isArray(val)) {
+        pushJids((val as any)?.contextInfo?.mentionedJid);
+      }
+    }
+  };
+
+  inspectContainer(realMsg);
+  if (rawMsg?.message && rawMsg.message !== realMsg) {
+    let cursor: any = rawMsg.message;
+    for (let depth = 0; depth < 6 && cursor && typeof cursor === 'object'; depth++) {
+      inspectContainer(cursor);
+      cursor =
+        cursor?.ephemeralMessage?.message ||
+        cursor?.groupMentionedMessage?.message ||
+        cursor?.associatedChildMessage?.message ||
+        cursor?.documentWithCaptionMessage?.message ||
+        cursor?.editedMessage?.message ||
+        null;
+    }
+  }
+
+  return collected;
+}
+
 export async function findMentionedAdminInMessage(
   sock: WASocket,
   groupId: string,
@@ -1532,26 +1628,30 @@ export async function findMentionedAdminInMessage(
   senderJid: string,
   senderAltJid: string | undefined,
   targetMode: 'all_admins' | 'boss_only',
-  bossPhoneDigits: string
-): Promise<{ adminJid: string; adminTag: string } | null> {
-  const ctx =
-    realMsg?.extendedTextMessage?.contextInfo ||
-    realMsg?.imageMessage?.contextInfo ||
-    realMsg?.videoMessage?.contextInfo ||
-    realMsg?.audioMessage?.contextInfo ||
-    realMsg?.documentMessage?.contextInfo;
+  bossPhoneDigits: string,
+  rawMsg?: any
+): Promise<{ adminJid: string; adminTag: string; isBoss: boolean } | null> {
+  const rawMentions: string[] = collectMentionedJidsFromMessage(realMsg, rawMsg);
+  const ctxMentionSet = new Set(rawMentions.map((j) => normalizeJid(j)));
 
-  const rawMentions: string[] = Array.isArray(ctx?.mentionedJid) ? ctx.mentionedJid.filter(Boolean) : [];
-  if (rawMentions.length === 0 && messageText) {
-    const inlineMatches = messageText.match(/@(\d{10,16})\b/g);
-    if (inlineMatches) {
-      for (const m of inlineMatches) {
-        const digits = m.slice(1).replace(/\D/g, '');
-        if (digits.length >= 10) rawMentions.push(`${digits}@s.whatsapp.net`);
+  // Also detect inline numeric mentions like @+8801632222592, @\u2068+8801632222592, @01632222592, @+880 1632-222592
+  if (messageText) {
+    const cleanedText = messageText.replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '');
+    const inlineMatches = cleanedText.matchAll(/@\s*(\+?[\d][\d\s-]{8,17}\d)/g);
+    for (const match of inlineMatches) {
+      const normalizedDigits = normalizePhoneDigits(match[1]);
+      if (normalizedDigits.length >= 10) {
+        const candJid = `${normalizedDigits}@s.whatsapp.net`;
+        if (!rawMentions.some((m) => normalizeJid(m) === candJid)) {
+          rawMentions.push(candJid);
+        }
       }
     }
   }
   if (rawMentions.length === 0) return null;
+
+  rememberLidPnPair(sock?.user?.id, sock?.user?.lid);
+  rememberLidPnPair(sock?.authState?.creds?.me?.id, sock?.authState?.creds?.me?.lid);
 
   const botRawIds = [
     sock?.user?.id,
@@ -1560,50 +1660,161 @@ export async function findMentionedAdminInMessage(
     sock?.authState?.creds?.me?.lid,
   ].filter(Boolean) as string[];
   const botUsers = new Set(botRawIds.map((j) => cleanJidUser(j)).filter(Boolean));
-  const senderUsers = new Set([cleanJidUser(senderJid), cleanJidUser(senderAltJid)].filter(Boolean));
+  for (const b of Array.from(botUsers)) {
+    const pn = lidToPnUserMap.get(b);
+    const lid = pnToLidUserMap.get(b);
+    if (pn) botUsers.add(pn);
+    if (lid) botUsers.add(lid);
+  }
 
-  const cleanBossDigits = String(bossPhoneDigits || '').replace(/\D/g, '');
-  const meta = await getGroupMeta(sock, groupId, false).catch(() => null);
-  const participants: any[] = Array.isArray(meta?.participants) ? meta.participants : [];
+  const senderUsers = new Set(
+    [cleanJidUser(senderJid), cleanJidUser(senderAltJid), normalizePhoneDigits(cleanJidUser(senderAltJid || senderJid))].filter(Boolean)
+  );
+  for (const s of Array.from(senderUsers)) {
+    const pn = lidToPnUserMap.get(s);
+    const lid = pnToLidUserMap.get(s);
+    if (pn) senderUsers.add(pn);
+    if (lid) senderUsers.add(lid);
+  }
+
+  const cleanBossDigits = normalizePhoneDigits(bossPhoneDigits);
+  const bossPnJid = cleanBossDigits ? `${cleanBossDigits}@s.whatsapp.net` : '';
+  const lidMappingApi = (sock as any)?.signalRepository?.lidMapping;
+
+  let bossLidUser = cleanBossDigits ? pnToLidUserMap.get(cleanBossDigits) || '' : '';
+  if (!bossLidUser && bossPnJid && typeof lidMappingApi?.getLIDForPN === 'function') {
+    try {
+      const lookedUpLid = await lidMappingApi.getLIDForPN(bossPnJid);
+      if (lookedUpLid) {
+        rememberLidPnPair(lookedUpLid, bossPnJid);
+        bossLidUser = cleanJidUser(lookedUpLid);
+      }
+    } catch {}
+  }
+
+  let meta = await getGroupMeta(sock, groupId, false).catch(() => null);
+  learnGroupParticipantsLidPn(meta);
+  let participants: any[] = Array.isArray(meta?.participants) ? meta.participants : [];
+  let didForceRefreshMeta = false;
+
+  let firstAdminHit: { adminJid: string; adminTag: string; isBoss: boolean } | null = null;
 
   for (const mentionedJid of rawMentions) {
     const mentionedUser = cleanJidUser(mentionedJid);
     if (!mentionedUser) continue;
-    // Never trigger on mentioning the bot itself or self-mention
-    if (botUsers.has(mentionedUser) || senderUsers.has(mentionedUser)) continue;
 
-    // 1. Check against Boss Admin digits directly first
-    if (cleanBossDigits && mentionedUser === cleanBossDigits) {
-      return { adminJid: normalizeJid(mentionedJid), adminTag: mentionedUser };
+    const resolvedUsers = new Set<string>([mentionedUser]);
+    const mentionedNormDigits = !isLidJid(mentionedJid) ? normalizePhoneDigits(mentionedUser) : '';
+    if (mentionedNormDigits) resolvedUsers.add(mentionedNormDigits);
+
+    // Resolve via cached map & Baileys lidMapping if mentionedJid is @lid
+    const mappedPn = lidToPnUserMap.get(mentionedUser);
+    if (mappedPn) resolvedUsers.add(mappedPn);
+    const mappedLid = pnToLidUserMap.get(mentionedUser) || (mentionedNormDigits ? pnToLidUserMap.get(mentionedNormDigits) : '');
+    if (mappedLid) resolvedUsers.add(mappedLid);
+
+    if (isLidJid(mentionedJid) && !mappedPn && typeof lidMappingApi?.getPNForLID === 'function') {
+      try {
+        const lookedUpPn = await lidMappingApi.getPNForLID(mentionedJid);
+        if (lookedUpPn) {
+          rememberLidPnPair(mentionedJid, lookedUpPn);
+          const pnUser = normalizePhoneDigits(cleanJidUser(lookedUpPn)) || cleanJidUser(lookedUpPn);
+          if (pnUser) resolvedUsers.add(pnUser);
+        }
+      } catch {}
     }
 
-    // 2. Resolve participant via group metadata (handles PN + @lid addressing modes)
-    const matchedParticipant = participants.find((p: any) => {
-      const pJids = [p.id, p.lid, p.phoneNumber].filter(Boolean) as string[];
-      return pJids.some((j) => cleanJidUser(j) === mentionedUser);
-    });
+    const findParticipant = (list: any[]) =>
+      list.find((p: any) => {
+        const pJids = [p.id, p.lid, p.phoneNumber].filter(Boolean) as string[];
+        return pJids.some((j) => {
+          const cu = cleanJidUser(j);
+          const nu = !isLidJid(j) ? normalizePhoneDigits(cu) : '';
+          return resolvedUsers.has(cu) || (nu && resolvedUsers.has(nu));
+        });
+      });
+
+    let matchedParticipant = findParticipant(participants);
+    // If @lid mention wasn't resolved to a phone number or participant wasn't found in stale cache, force refresh metadata once
+    if (
+      (!matchedParticipant || (isLidJid(mentionedJid) && !matchedParticipant.phoneNumber && !lidToPnUserMap.has(mentionedUser))) &&
+      !didForceRefreshMeta
+    ) {
+      didForceRefreshMeta = true;
+      const freshMeta = await getGroupMeta(sock, groupId, true).catch(() => null);
+      if (freshMeta) {
+        meta = freshMeta;
+        learnGroupParticipantsLidPn(freshMeta);
+        participants = Array.isArray(freshMeta.participants) ? freshMeta.participants : participants;
+        matchedParticipant = findParticipant(participants);
+      }
+    }
 
     if (matchedParticipant) {
       const pJids = [matchedParticipant.id, matchedParticipant.lid, matchedParticipant.phoneNumber].filter(Boolean) as string[];
-      const pUsers = pJids.map((j) => cleanJidUser(j)).filter(Boolean);
-      // Exclude if resolved participant is the bot itself or the sender
-      if (pUsers.some((u) => botUsers.has(u) || senderUsers.has(u))) continue;
+      for (const j of pJids) {
+        const cu = cleanJidUser(j);
+        if (cu) resolvedUsers.add(cu);
+        if (!isLidJid(j)) {
+          const nu = normalizePhoneDigits(cu);
+          if (nu) resolvedUsers.add(nu);
+        }
+      }
+      if (!bossLidUser && cleanBossDigits && resolvedUsers.has(cleanBossDigits)) {
+        const lidPart = pJids.find((j) => isLidJid(j));
+        if (lidPart) bossLidUser = cleanJidUser(lidPart);
+      }
+    }
 
-      const isBoss = Boolean(cleanBossDigits && pUsers.includes(cleanBossDigits));
-      const isGroupAdmin =
-        matchedParticipant.admin === 'admin' ||
+    const isSenderSelf = Array.from(resolvedUsers).some((u) => senderUsers.has(u));
+    if (isSenderSelf) continue;
+
+    const isBoss = Boolean(
+      (cleanBossDigits && resolvedUsers.has(cleanBossDigits)) ||
+      (bossLidUser && resolvedUsers.has(bossLidUser))
+    );
+
+    const isBotSelf = Array.from(resolvedUsers).some((u) => botUsers.has(u));
+    // Never trigger on mentioning a non-boss bot account (e.g. standalone Maya AI bot),
+    // but DO allow Boss Admin Mention Reply even if the bot session uses Boss's own WhatsApp number!
+    if (isBotSelf && !isBoss) continue;
+
+    const isGroupAdmin = Boolean(
+      matchedParticipant &&
+      (matchedParticipant.admin === 'admin' ||
         matchedParticipant.admin === 'superadmin' ||
         Boolean(matchedParticipant.isAdmin) ||
-        Boolean(matchedParticipant.isSuperAdmin);
+        Boolean(matchedParticipant.isSuperAdmin))
+    );
 
-      if (targetMode === 'boss_only' ? isBoss : isBoss || isGroupAdmin) {
-        const replyMentionJid = normalizeJid(mentionedJid);
-        return { adminJid: replyMentionJid, adminTag: cleanJidUser(replyMentionJid) };
-      }
+    const matched = targetMode === 'boss_only' ? isBoss : isBoss || isGroupAdmin;
+    if (!matched) continue;
+
+    // Prefer the exact tagged JID if it came from WhatsApp contextInfo; otherwise prefer group participant ID or normalized JID
+    const cameFromCtx = ctxMentionSet.has(normalizeJid(mentionedJid));
+    const replyMentionJid = cameFromCtx
+      ? normalizeJid(mentionedJid)
+      : matchedParticipant?.id
+        ? normalizeJid(matchedParticipant.id)
+        : isBoss && bossLidUser && (meta as any)?.addressingMode === 'lid'
+          ? `${bossLidUser}@lid`
+          : normalizeJid(mentionedJid);
+
+    const hit = {
+      adminJid: replyMentionJid,
+      adminTag: cleanJidUser(replyMentionJid) || mentionedUser,
+      isBoss,
+    };
+
+    if (isBoss) {
+      return hit; // Prioritize Boss Admin match immediately
+    }
+    if (!firstAdminHit) {
+      firstAdminHit = hit;
     }
   }
 
-  return null;
+  return firstAdminHit;
 }
 
 interface QueuedServerProblem {
@@ -1851,13 +2062,16 @@ export async function getGroupMeta(sock: WASocket, groupId: string, forceRefresh
   const now = Date.now();
   // Fast path: serve fresh cache within 5 minutes (0ms latency for instant sticker/profanity removal)
   if (!forceRefresh && cached && now - cached.fetchedAt < 300000) {
+    learnGroupParticipantsLidPn(cached.meta);
     return cached.meta;
   }
   // Stale-while-revalidate: if older cache exists, return immediately & refresh silently in background
   if (!forceRefresh && cached) {
+    learnGroupParticipantsLidPn(cached.meta);
     sock.groupMetadata(groupId)
       .then((freshMeta) => {
         groupMetaCache[groupId] = { meta: freshMeta, fetchedAt: Date.now() };
+        learnGroupParticipantsLidPn(freshMeta);
       })
       .catch(() => {});
     return cached.meta;
@@ -1865,6 +2079,7 @@ export async function getGroupMeta(sock: WASocket, groupId: string, forceRefresh
   try {
     const meta = await sock.groupMetadata(groupId);
     groupMetaCache[groupId] = { meta, fetchedAt: now };
+    learnGroupParticipantsLidPn(meta);
     return meta;
   } catch (err: any) {
     console.error(`Failed to fetch metadata for group ${groupId}:`, err.message);
@@ -1878,6 +2093,7 @@ export function primeGroupMetaCache(groupsMap: Record<string, any>) {
   for (const [groupId, meta] of Object.entries(groupsMap)) {
     if (groupId && meta) {
       groupMetaCache[groupId] = { meta, fetchedAt: now };
+      learnGroupParticipantsLidPn(meta);
     }
   }
 }
@@ -1904,16 +2120,17 @@ export function recordStickerContactAndActivity(
   groupName: string,
   senderJid: string,
   senderAltJid: string | undefined,
-  senderPhone: string,
+  _senderPhone: string,
   pushName?: string | null
 ) {
+  rememberLidPnPair(senderJid, senderAltJid);
   if (pushName) {
     const cu1 = cleanJidUser(senderJid);
     const cu2 = cleanJidUser(senderAltJid);
     if (cu1) contactNamesCache[cu1] = pushName;
     if (cu2) contactNamesCache[cu2] = pushName;
   }
-  recordMemberActivity(groupId, groupName, normalizeJid(senderJid), senderPhone, pushName);
+  // Clean-Behavior Leaderboard works automatically: stickers never add leaderboard points
 }
 
 export function getGroupAdminJidsFromCachedMeta(groupId: string): string[] {
@@ -3252,6 +3469,7 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
   const senderJid = msg.key.participant || msg.participant || '';
   if (!senderJid) return;
   const senderAltJid = (msg.key as any).participantAlt || '';
+  rememberLidPnPair(senderJid, senderAltJid);
 
   const cleanPhone = (senderAltJid || senderJid).split('@')[0].split(':')[0];
 
@@ -3272,8 +3490,7 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
     if (cu2) contactNamesCache[cu2] = msg.pushName;
   }
 
-  // Track active member message counts for Rank & Ghost Detector
-  recordMemberActivity(remoteJid, groupSubject, canonicalSender, cleanPhone, msg.pushName);
+  // Note: Clean-behavior Leaderboard tracking runs strictly AFTER spam/sticker/badword checks pass!
 
   // -------------------------------------------------------------
   // FEATURE 0: ACTIVE INDIVIDUAL RESTRICTION (MESSAGE INTERCEPTION & AUTO-DELETE)
@@ -3642,10 +3859,27 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
   }
 
   // -------------------------------------------------------------
-  // GROUP COMMAND: .top / !top / .rank (TOP ACTIVE LEADERBOARD)
+  // CLEAN-BEHAVIOR LEADERBOARD TRACKING (AUTOMATIC: NO BADWORDS, NO STICKERS, NO SPAM)
   // -------------------------------------------------------------
   const trimmedCmd = (messageText || '').trim().toLowerCase();
-  if (settings.activityTrackingEnabled && (trimmedCmd === '.top' || trimmedCmd === '!top' || trimmedCmd === '.rank')) {
+  const isRankCmd = trimmedCmd === '.top' || trimmedCmd === '!top' || trimmedCmd === '.rank';
+  const hasBadwordForRank = Boolean(messageText && checkBadwordViolation(messageText, settings.customBadwords).isBad);
+  const hasQuarrelForRank = Boolean(messageText && hasHeatedFightSignal(messageText));
+  const hasLinkForRank = Boolean(
+    messageText &&
+    checkLinkViolation(messageText, { allowCarromLinks: settings.allowCarromLinks !== false }).isLink
+  );
+  const shouldCountInLeaderboard =
+    !isSticker && !isGif && !isViewOnce && !hasBadwordForRank && !hasQuarrelForRank && !hasLinkForRank && !isRankCmd;
+
+  if (shouldCountInLeaderboard) {
+    recordMemberActivity(remoteJid, groupSubject, canonicalSender, cleanPhone, msg.pushName);
+  }
+
+  // -------------------------------------------------------------
+  // GROUP COMMAND: .top / !top / .rank (TOP ACTIVE LEADERBOARD)
+  // -------------------------------------------------------------
+  if (settings.activityTrackingEnabled && isRankCmd) {
     const report = getMemberActivityReport(remoteJid, 7);
     const top10 = report.topActive.slice(0, 10);
     if (top10.length > 0) {
@@ -3680,6 +3914,74 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
         reason: `Keyword Auto-Reply ("${kwHit.keyword}")`,
         details: kwHit.reply.slice(0, 60),
       });
+      return;
+    }
+  }
+
+  // -------------------------------------------------------------
+  // ADMIN MENTION AUTO-REPLY IN GROUP (ZERO AI API, TYPING INDICATOR + COOLDOWN)
+  // Runs BEFORE Auto-Salam so "সলাম @+8801632222592" still replies to Boss/Admin mention!
+  // -------------------------------------------------------------
+  if (settings.adminMentionReplyEnabled !== false) {
+    const bossDigits = resolveBossAdminJid().split('@')[0];
+    const targetMode = settings.adminMentionReplyTarget === 'boss_only' ? 'boss_only' : 'all_admins';
+    const adminHit = await findMentionedAdminInMessage(
+      sock,
+      remoteJid,
+      realMsg,
+      messageText,
+      senderJid,
+      senderAltJid,
+      targetMode,
+      bossDigits,
+      msg
+    );
+    if (adminHit) {
+      const nowMs = Date.now();
+      const userCooldownKey = `${remoteJid}:${canonicalSender}`;
+      const adminCooldownKey = `${remoteJid}:admin:${cleanJidUser(adminHit.adminJid)}`;
+      const lastUserAt = lastAdminMentionReplyAt.get(userCooldownKey) || 0;
+      const lastAdminAt = lastAdminMentionReplyAt.get(adminCooldownKey) || 0;
+      if (nowMs - lastUserAt >= 5000 && nowMs - lastAdminAt >= 3000) {
+        lastAdminMentionReplyAt.set(userCooldownKey, nowMs);
+        lastAdminMentionReplyAt.set(adminCooldownKey, nowMs);
+
+        const template = (settings.adminMentionReplyMessage || '').trim() || DEFAULT_ADMIN_MENTION_REPLY;
+        const userTag = cleanJidUser(senderJid) || cleanPhone;
+        const replyText = template
+          .replace(/\{\{\s*admin\s*\}\}|\{\s*admin\s*\}/gi, adminHit.adminTag)
+          .replace(/\{\{\s*user\s*\}\}|\{\s*user\s*\}/gi, userTag);
+
+        const mentionJids = Array.from(new Set([adminHit.adminJid, normalizeJid(senderJid)].filter(Boolean)));
+        console.log(
+          `[Admin Mention Reply] Matched (${adminHit.isBoss ? 'BOSS' : 'ADMIN'}, mode=${targetMode}) in "${groupSubject}": @${adminHit.adminTag} <- by @${userTag}`
+        );
+        const sent = await safeSendMessage(
+          sock,
+          remoteJid,
+          { text: replyText, mentions: mentionJids },
+          { quoted: msg as any }
+        );
+        if (sent) {
+          addActivityLog({
+            groupId: remoteJid,
+            groupName: groupSubject,
+            senderJid,
+            senderPhone: cleanPhone,
+            action: 'replied',
+            reason: adminHit.isBoss
+              ? 'বস অ্যাডমিন মেনশন অটো রিপ্লাই (Boss Mention Reply — Zero API)'
+              : 'অ্যাডমিন মেনশন অটো রিপ্লাই (Admin Mention Reply — Zero API)',
+            details: replyText.slice(0, 80),
+          });
+        } else {
+          console.warn(`[Admin Mention Reply Warn] Failed sending reply to "${groupSubject}"`);
+        }
+      } else {
+        console.log(
+          `[Admin Mention Reply Cooldown] Throttled duplicate ping in "${groupSubject}" for @${adminHit.adminTag}`
+        );
+      }
       return;
     }
   }
@@ -3721,61 +4023,6 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
       }
     }
     return; // Only reply to Salam and nothing else!
-  }
-
-  // -------------------------------------------------------------
-  // ADMIN MENTION AUTO-REPLY IN GROUP (ZERO AI API, TYPING INDICATOR + COOLDOWN)
-  // -------------------------------------------------------------
-  if (settings.adminMentionReplyEnabled !== false) {
-    const bossDigits = resolveBossAdminJid().split('@')[0];
-    const targetMode = settings.adminMentionReplyTarget === 'boss_only' ? 'boss_only' : 'all_admins';
-    const adminHit = await findMentionedAdminInMessage(
-      sock,
-      remoteJid,
-      realMsg,
-      messageText,
-      senderJid,
-      senderAltJid,
-      targetMode,
-      bossDigits
-    );
-    if (adminHit) {
-      const nowMs = Date.now();
-      const userCooldownKey = `${remoteJid}:${canonicalSender}`;
-      const adminCooldownKey = `${remoteJid}:admin:${cleanJidUser(adminHit.adminJid)}`;
-      const lastUserAt = lastAdminMentionReplyAt.get(userCooldownKey) || 0;
-      const lastAdminAt = lastAdminMentionReplyAt.get(adminCooldownKey) || 0;
-      if (nowMs - lastUserAt >= 25000 && nowMs - lastAdminAt >= 8000) {
-        lastAdminMentionReplyAt.set(userCooldownKey, nowMs);
-        lastAdminMentionReplyAt.set(adminCooldownKey, nowMs);
-
-        const template = (settings.adminMentionReplyMessage || '').trim() || DEFAULT_ADMIN_MENTION_REPLY;
-        const userTag = cleanJidUser(senderJid) || cleanPhone;
-        const replyText = template
-          .replace(/\{\{\s*admin\s*\}\}|\{\s*admin\s*\}/gi, adminHit.adminTag)
-          .replace(/\{\{\s*user\s*\}\}|\{\s*user\s*\}/gi, userTag);
-
-        const mentionJids = Array.from(new Set([adminHit.adminJid, normalizeJid(senderJid)].filter(Boolean)));
-        const sent = await safeSendMessage(
-          sock,
-          remoteJid,
-          { text: replyText, mentions: mentionJids },
-          { quoted: msg as any }
-        );
-        if (sent) {
-          addActivityLog({
-            groupId: remoteJid,
-            groupName: groupSubject,
-            senderJid,
-            senderPhone: cleanPhone,
-            action: 'replied',
-            reason: 'অ্যাডমিন মেনশন অটো রিপ্লাই (Admin Mention Reply — Zero API)',
-            details: replyText.slice(0, 80),
-          });
-        }
-      }
-      return;
-    }
   }
 
   // -------------------------------------------------------------

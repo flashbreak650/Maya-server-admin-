@@ -170,6 +170,7 @@ interface ModerationSettings {
   manualBlockNotice?: string;
   autoSalamReplyEnabled?: boolean;
   botTypingEnabled?: boolean;
+  leaderboardCleanOnly?: boolean;
   adminMentionReplyEnabled?: boolean;
   adminMentionReplyTarget?: 'all_admins' | 'boss_only';
   adminMentionReplyMessage?: string;
@@ -542,6 +543,7 @@ export default function App() {
     manualBlockNotice: '',
     autoSalamReplyEnabled: true,
     botTypingEnabled: true,
+    leaderboardCleanOnly: true,
     adminMentionReplyEnabled: true,
     adminMentionReplyTarget: 'all_admins',
     adminMentionReplyMessage: '🛡️ সম্মানিত @{{admin}}, সদস্য @{{user}} আপনাকে মেনশন করেছেন। অ্যাডমিন বর্তমানে ব্যস্ত থাকতে পারেন — অনুগ্রহ করে একটু অপেক্ষা করুন, সময় পেলে উত্তর দেবেন।',
@@ -2730,6 +2732,35 @@ export default function App() {
                 </button>
               </div>
 
+              {/* Quick-Access Control right at top of Security Page (Carrom Pool Link) */}
+              <div className="card mb-4 border border-emerald-200 bg-emerald-50/30">
+                <div className="toggle-row" style={{ paddingTop: 4, paddingBottom: 4 }}>
+                  <div className="toggle-info">
+                    <h4>
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {isBn ? '🎱 Carrom Pool লিংক চালু (carrom.co রিমুভ হবে না)' : '🎱 Allow Carrom Pool Links (carrom.co)'}
+                        <span className={`badge ${settings.allowCarromLinks !== false ? 'badge-green' : 'badge-amber'}`}>
+                          {settings.allowCarromLinks !== false ? (isBn ? 'চালু (ALLOWED)' : 'ALLOWED') : 'BLOCKED'}
+                        </span>
+                      </span>
+                    </h4>
+                    <p>
+                      {isBn
+                        ? 'চালু থাকলে শুধু Carrom Pool রুম লিংক (carrom.co) গ্রুপে থাকবে — বাকি সব লিংক আগের মতোই রিমুভ ও ওয়ার্নিং হবে।'
+                        : 'Allows carrom.co match links while still blocking all other URLs.'}
+                    </p>
+                  </div>
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.allowCarromLinks !== false}
+                      onChange={(e) => updateSettingToggle('allowCarromLinks', e.target.checked)}
+                    />
+                    <span className="slider"></span>
+                  </label>
+                </div>
+              </div>
+
               {/* CATEGORY A: SECURITY & PROTECTION */}
               <div ref={rulesCardRef} className="category-system-header mt-6 mb-4 px-1">
                  <div className="flex items-center gap-2 mb-1">
@@ -3544,33 +3575,31 @@ export default function App() {
                 </div>
 
                 {/* Carrom Pool Link Allowlist */}
-                {settings.antiLink && (
-                  <div className="toggle-row">
-                    <div className="toggle-info">
-                      <h4>
-                        <span className="flex items-center gap-1.5 flex-wrap">
-                          {isBn ? 'Carrom Pool লিংক অনুমোদিত (carrom.co)' : 'Allow Carrom Pool Match Links (carrom.co)'}
-                          <span className={`badge ${settings.allowCarromLinks !== false ? 'badge-green' : 'badge-amber'}`}>
-                            {settings.allowCarromLinks !== false ? 'ALLOWED' : 'BLOCKED'}
-                          </span>
+                <div className="toggle-row">
+                  <div className="toggle-info">
+                    <h4>
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        {isBn ? 'Carrom Pool লিংক অনুমোদিত (carrom.co)' : 'Allow Carrom Pool Match Links (carrom.co)'}
+                        <span className={`badge ${settings.allowCarromLinks !== false ? 'badge-green' : 'badge-amber'}`}>
+                          {settings.allowCarromLinks !== false ? 'ALLOWED' : 'BLOCKED'}
                         </span>
-                      </h4>
-                      <p>
-                        {isBn
-                          ? 'চালু থাকলে শুধু Carrom Pool রুম ইনভাইট লিংক (carrom.co) রিমুভ হবে না — বাকি সব লিংক আগের মতোই ডিলিট ও ওয়ার্নিং হবে।'
-                          : 'Keeps official Carrom Pool match invite links (carrom.co) safe while still deleting all other links.'}
-                      </p>
-                    </div>
-                    <label className="switch">
-                      <input
-                        type="checkbox"
-                        checked={settings.allowCarromLinks !== false}
-                        onChange={(e) => updateSettingToggle('allowCarromLinks', e.target.checked)}
-                      />
-                      <span className="slider"></span>
-                    </label>
+                      </span>
+                    </h4>
+                    <p>
+                      {isBn
+                        ? 'চালু থাকলে শুধু Carrom Pool রুম ইনভাইট লিংক (carrom.co) রিমুভ হবে না — বাকি সব লিংক আগের মতোই ডিলিট ও ওয়ার্নিং হবে।'
+                        : 'Keeps official Carrom Pool match invite links (carrom.co) safe while still deleting all other links.'}
+                    </p>
                   </div>
-                )}
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.allowCarromLinks !== false}
+                      onChange={(e) => updateSettingToggle('allowCarromLinks', e.target.checked)}
+                    />
+                    <span className="slider"></span>
+                  </label>
+                </div>
 
                 {/* AI Badword Detection */}
                 <div className="toggle-row">
@@ -3765,12 +3794,10 @@ export default function App() {
                         </label>
                         <select
                           value={settings.adminMentionReplyTarget === 'boss_only' ? 'boss_only' : 'all_admins'}
-                          onChange={(e) =>
-                            setSettings((prev) => ({
-                              ...prev,
-                              adminMentionReplyTarget: e.target.value as 'all_admins' | 'boss_only',
-                            }))
-                          }
+                          onChange={(e) => {
+                            const nextTarget = e.target.value === 'boss_only' ? 'boss_only' : 'all_admins';
+                            updateSettingToggle('adminMentionReplyTarget', nextTarget as any);
+                          }}
                           className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-bold bg-white"
                         >
                           <option value="all_admins">{isBn ? 'যেকোনো গ্রুপ অ্যাডমিন' : 'Any Group Admin'}</option>

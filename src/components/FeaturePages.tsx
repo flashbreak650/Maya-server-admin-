@@ -1459,8 +1459,8 @@ export function ActivityRankPage({
         title={isBn ? 'মেম্বার অ্যাক্টিভিটি র‍্যাংক ও Ghost তালিকা' : 'Member Activity Rank & Ghosts'}
         subtitle={
           isBn
-            ? 'গ্রুপের সবচেয়ে অ্যাক্টিভ মেম্বার এবং দীর্ঘদিন চুপ থাকা (Ghost) মেম্বারদের তালিকা। গ্রুপে .top লিখলেও র‍্যাংক দেখাবে।'
-            : 'Track active chatters, .top command leaderboard, and inactive ghost members.'
+            ? 'গ্রুপের সবচেয়ে অ্যাক্টিভ ও Ghost মেম্বারদের তালিকা। শুধু ভালো মেসেজ অটো গণনা হয় — গালি, স্টিকার ও নিষিদ্ধ লিংক স্বয়ংক্রিয়ভাবে বাদ থাকে।'
+            : 'Track active chatters, .top leaderboard, and inactive ghosts. Clean messages are counted automatically (slurs, stickers & banned links excluded).'
         }
         isBn={isBn}
         onBack={onBack}
