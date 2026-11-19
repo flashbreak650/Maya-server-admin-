@@ -6,6 +6,7 @@ import {
   ArrowRight,
   AudioLines,
   Ban,
+  BellRing,
   Bot,
   Check,
   CheckCircle2,
@@ -18,9 +19,11 @@ import {
   Hash,
   Heart,
   KeyRound,
+  Link as LinkIcon,
   Lock,
   LogOut,
   MessageCircle,
+  MessageSquareHeart,
   Moon,
   PhoneOff,
   Plug,
@@ -43,11 +46,22 @@ import {
   UserX,
   Users,
   VolumeX,
+  X,
+  Zap,
 } from 'lucide-react';
 
 export type PageId =
   | 'home'
   | 'security'
+  | 'sec_links'
+  | 'sec_shield'
+  | 'sec_welcome'
+  | 'sec_stickers'
+  | 'sec_media'
+  | 'sec_badwords'
+  | 'sec_mention'
+  | 'sec_replies'
+  | 'sec_bossalert'
   | 'warnings'
   | 'blocks'
   | 'memberblock'
@@ -279,6 +293,8 @@ export function HomeFeatureHub({
   nightStatus,
   isConnected,
   companionOnline,
+  searchQuery,
+  setSearchQuery,
   onNavigate,
   onOpenSessionBackup,
 }: {
@@ -293,24 +309,178 @@ export function HomeFeatureHub({
   nightStatus: NightModeStatusView | null;
   isConnected: boolean;
   companionOnline?: boolean;
+  searchQuery: string;
+  setSearchQuery: (q: string) => void;
   onNavigate: (page: PageId) => void;
   onOpenSessionBackup: () => void;
 }) {
-  const featureCards: Array<{
+  type HubCard = {
     id: PageId | 'backup';
     title: string;
     desc: string;
+    keywords: string;
     statusText: string;
     isOn: boolean;
     iconBg: string;
     iconText: string;
     icon: React.ReactNode;
     onClick: () => void;
-  }> = [
+  };
+
+  const securityToolCards: HubCard[] = [
+    {
+      id: 'sec_links',
+      title: isBn ? 'অ্যান্টি-লিংক ও Carrom Pool' : 'Anti-Link & Carrom Pool',
+      desc: isBn ? 'নিষিদ্ধ লিংক ডিলিট ও Carrom Pool লিংক অনুমোদন' : 'Block URLs & allow carrom.co links',
+      keywords: 'carrom pool carrom.co link anti link ক্যারম লিংক অনুমোদিত',
+      statusText:
+        settings.allowCarromLinks !== false
+          ? isBn
+            ? 'Carrom চালু'
+            : 'Carrom Allowed'
+          : settings.antiLink
+          ? isBn
+            ? 'সব লিংক ব্লক'
+            : 'All Links Blocked'
+          : 'OFF',
+      isOn: Boolean(settings.antiLink || settings.allowCarromLinks !== false),
+      iconBg: 'bg-emerald-50',
+      iconText: 'text-emerald-700',
+      icon: <LinkIcon size={18} />,
+      onClick: () => onNavigate('sec_links'),
+    },
+    {
+      id: 'sec_shield',
+      title: isBn ? 'অ্যাডমিন শিল্ড ও অটো কিক' : 'Admin Shield & Auto Kick',
+      desc: isBn ? 'অ্যাডমিন সুরক্ষা এবং ৩ ওয়ার্নিং অটো কিক' : 'Admin protection & 3-strike kick',
+      keywords: 'admin shield auto kick 3 warning কিক শিল্ড অ্যাডমিন সুরক্ষা',
+      statusText: settings.adminShield ? (isBn ? 'শিল্ড চালু' : 'Shield ON') : 'OFF',
+      isOn: Boolean(settings.adminShield),
+      iconBg: 'bg-emerald-50',
+      iconText: 'text-emerald-700',
+      icon: <ShieldAlert size={18} />,
+      onClick: () => onNavigate('sec_shield'),
+    },
+    {
+      id: 'sec_welcome',
+      title: isBn ? 'অটো ওয়েলকাম (@Mention)' : 'Auto Welcome (@Mention)',
+      desc: isBn ? 'নতুন মেম্বার জয়েন করলে অটো ওয়েলকাম' : 'Greet new members with @mention',
+      keywords: 'welcome greet new member ওয়েলকাম স্বাগতম মেনশন নতুন সদস্য',
+      statusText: settings.autoWelcome !== false ? (isBn ? 'চালু আছে' : 'ACTIVE') : 'OFF',
+      isOn: settings.autoWelcome !== false,
+      iconBg: 'bg-teal-50',
+      iconText: 'text-teal-700',
+      icon: <Sparkles size={18} />,
+      onClick: () => onNavigate('sec_welcome'),
+    },
+    {
+      id: 'sec_stickers',
+      title: isBn ? 'অ্যান্টি-স্টিকার ও স্প্যাম কিউ' : 'Anti-Sticker & Spam Queue',
+      desc: isBn ? 'স্টিকার ব্লক, লিমিট, ১০ মি. মিউট ও লাইভ কিউ' : 'Burst sticker mute & deletion queue',
+      keywords: 'sticker spam queue block স্টিকার স্প্যাম কিউ ডিলিট ব্লক',
+      statusText: settings.antiSticker
+        ? isBn
+          ? 'সব স্টিকার ব্লক'
+          : 'All Blocked'
+        : settings.antiStickerSpam
+        ? isBn
+          ? `${settings.individualMuteStickerLimit ?? 3}টি/${settings.individualMuteTimeWindow ?? 5}সে.`
+          : 'Spam Guard ON'
+        : 'OFF',
+      isOn: Boolean(settings.antiSticker || settings.antiStickerSpam),
+      iconBg: 'bg-amber-50',
+      iconText: 'text-amber-700',
+      icon: <Zap size={18} />,
+      onClick: () => onNavigate('sec_stickers'),
+    },
+    {
+      id: 'sec_media',
+      title: isBn ? 'ভিউ-ওয়ান্স, ছবি ও ভিডিও ব্লক' : 'View-Once & Media Block',
+      desc: isBn ? 'View Once, GIF, ভিডিও ও ছবি আলাদা ব্লক' : 'Anti View-Once, GIF, Video & Image',
+      keywords: 'view once gif video image photo ছবি ভিডিও ভিউ ওয়ান্স মিডিয়া',
+      statusText:
+        settings.antiViewOnce || settings.antiGif || settings.antiVideo || settings.antiImage
+          ? isBn
+            ? 'ফিল্টার চালু'
+            : 'Filter ON'
+          : isBn
+          ? 'সব অনুমোদিত'
+          : 'Allowed',
+      isOn: Boolean(settings.antiViewOnce || settings.antiGif || settings.antiVideo || settings.antiImage),
+      iconBg: 'bg-rose-50',
+      iconText: 'text-rose-700',
+      icon: <EyeOff size={18} />,
+      onClick: () => onNavigate('sec_media'),
+    },
+    {
+      id: 'sec_badwords',
+      title: isBn ? 'অ্যান্টি-গালি ও কাস্টম শব্দ' : 'Anti-Badword & Slurs',
+      desc: isBn ? '৬ ভাষার গালি ফিল্টার ও কাস্টম শব্দ যোগ' : 'Profanity filter & custom badword list',
+      keywords: 'badword gali slur profanity custom শব্দ গালি নিষিদ্ধ',
+      statusText: settings.antiBadword
+        ? isBn
+          ? `${settings.customBadwords?.length || 0} কাস্টম শব্দ`
+          : 'Filter ACTIVE'
+        : 'OFF',
+      isOn: Boolean(settings.antiBadword),
+      iconBg: 'bg-rose-50',
+      iconText: 'text-rose-700',
+      icon: <Ban size={18} />,
+      onClick: () => onNavigate('sec_badwords'),
+    },
+    {
+      id: 'sec_mention',
+      title: isBn ? 'বস ও অ্যাডমিন মেনশন রিপ্লাই' : 'Boss / Admin Mention Reply',
+      desc: isBn ? 'বস (+8801632...) বা অ্যাডমিনকে @মেনশনে অটো উত্তর' : 'Auto-reply when Boss or admin is tagged',
+      keywords: 'boss mention admin tag reply বস অ্যাডমিন মেনশন ট্যাগ রিপ্লাই',
+      statusText:
+        settings.adminMentionReplyEnabled !== false
+          ? settings.adminMentionReplyTarget === 'boss_only'
+            ? isBn
+              ? 'শুধু বস মোড'
+              : 'Boss Only'
+            : isBn
+            ? 'সব অ্যাডমিন'
+            : 'All Admins'
+          : 'OFF',
+      isOn: settings.adminMentionReplyEnabled !== false,
+      iconBg: 'bg-emerald-50',
+      iconText: 'text-emerald-700',
+      icon: <MessageSquareHeart size={18} />,
+      onClick: () => onNavigate('sec_mention'),
+    },
+    {
+      id: 'sec_replies',
+      title: isBn ? 'অটো সালাম, টাইপিং ও সাইলেন্ট' : 'Salam, Typing & Silent Mode',
+      desc: isBn ? 'সালামের উত্তর, Typing..., সাইলেন্ট ও বট রিপ্লাই' : 'Zero-API Salam, typing indicator & silent mode',
+      keywords: 'salam typing silent bot reply সালাম টাইপিং সাইলেন্ট উত্তর',
+      statusText: settings.autoSalamReplyEnabled !== false ? (isBn ? 'সালাম চালু' : 'Salam ON') : 'Custom',
+      isOn: Boolean(settings.autoSalamReplyEnabled !== false || settings.botTypingEnabled !== false),
+      iconBg: 'bg-blue-50',
+      iconText: 'text-blue-700',
+      icon: <Bot size={18} />,
+      onClick: () => onNavigate('sec_replies'),
+    },
+    {
+      id: 'sec_bossalert',
+      title: isBn ? 'বস অ্যালার্ট ও সার্ভার নোটিশ' : 'Boss Fight & Server Alert',
+      desc: isBn ? 'ঝগড়া অ্যালার্ট ও সার্ভার নোটিশ বস ইনবক্সে' : 'Boss inbox alerts for fights & server health',
+      keywords: 'boss inbox alert fight server health বস ইনবক্স ঝগড়া সার্ভার নোটিশ',
+      statusText: settings.bossFightAlertEnabled !== false ? (isBn ? 'অ্যালার্ট চালু' : 'Alerts ON') : 'OFF',
+      isOn: Boolean(settings.bossFightAlertEnabled !== false),
+      iconBg: 'bg-indigo-50',
+      iconText: 'text-indigo-700',
+      icon: <BellRing size={18} />,
+      onClick: () => onNavigate('sec_bossalert'),
+    },
+  ];
+
+  const featureCards: HubCard[] = [
     {
       id: 'security',
-      title: isBn ? 'সিকিউরিটি রুলস' : 'Security Rules',
-      desc: isBn ? 'স্টিকার, গালি, লিংক, ভিউ ওয়ান্স, ওয়েলকাম' : 'Anti-sticker, View-Once, Link & Welcome',
+      title: isBn ? 'সব সিকিউরিটি রুলস (একসাথে)' : 'All Security Rules',
+      desc: isBn ? 'সব সিকিউরিটি নিয়ম, ওয়ার্নিং ও লগ এক পেজে' : 'Full security rules & logs in one view',
+      keywords: 'security rules all protection সিকিউরিটি রুলস সব নিয়ম',
       statusText: settings.adminShield ? (isBn ? 'সুরক্ষা চালু' : 'Shield ON') : 'OFF',
       isOn: Boolean(settings.adminShield),
       iconBg: 'bg-emerald-50',
@@ -322,6 +492,7 @@ export function HomeFeatureHub({
       id: 'warnings',
       title: isBn ? 'সতর্কবার্তা (Warnings)' : 'Member Warnings',
       desc: isBn ? 'সদস্যদের ১/৩, ২/৩ ওয়ার্নিং তালিকা ও রিসেট' : 'Strike 1/3, 2/3 counters & reset',
+      keywords: 'warnings strike reset সতর্কবার্তা ওয়ার্নিং রিসেট',
       statusText: isBn ? `${activeWarningsCount} জন পেন্ডিং` : `${activeWarningsCount} active`,
       isOn: activeWarningsCount > 0,
       iconBg: 'bg-amber-50',
@@ -333,6 +504,7 @@ export function HomeFeatureHub({
       id: 'blocks',
       title: isBn ? '১০ মি. ব্লক ও লক' : '10-Min Blocks',
       desc: isBn ? 'স্প্যাম ব্লক টাইমার ও ম্যানুয়াল আনলক' : 'Live block timers & unblock',
+      keywords: 'blocks locks timer mute unmute ১০ মিনিট ব্লক লক আনলক',
       statusText: isBn ? `${blocksCount}টি চলমান` : `${blocksCount} active`,
       isOn: blocksCount > 0,
       iconBg: 'bg-rose-50',
@@ -344,6 +516,7 @@ export function HomeFeatureHub({
       id: 'memberblock',
       title: isBn ? 'মেম্বার লিস্ট ও ১০ মি. ব্লক' : 'Members 10-Min Mute',
       desc: isBn ? 'নাম-নাম্বার দেখে ১ ক্লিকে ১০ মি. ব্লক ও ভিন্ন নোটিশ' : 'Member directory & 1-click 10m mute',
+      keywords: 'member list mute directory মেম্বার লিস্ট ব্লক',
       statusText: isBn ? `${groupsCount}টি গ্রুপ রেডি` : `${groupsCount} groups`,
       isOn: isConnected,
       iconBg: 'bg-rose-50',
@@ -355,6 +528,7 @@ export function HomeFeatureHub({
       id: 'logs',
       title: isBn ? 'লাইভ মডারেশন লগ' : 'Live Activity Logs',
       desc: isBn ? 'সকল ডিলিট, কিক ও লক হিস্ট্রি' : 'Filterable deletes, kicks & errors',
+      keywords: 'logs history audit delete kick লগ ইতিহাস ডিলিট',
       statusText: isBn ? `${logsCount}টি রেকর্ড` : `${logsCount} events`,
       isOn: logsCount > 0,
       iconBg: 'bg-blue-50',
@@ -366,6 +540,7 @@ export function HomeFeatureHub({
       id: 'nightmode',
       title: isBn ? 'শিডিউল নাইট মোড' : 'Scheduled Night Mode',
       desc: isBn ? 'নির্ধারিত রাতে গ্রুপ অটো লক ও সকালে আনলক' : 'Auto quiet-hours group lock',
+      keywords: 'night mode schedule lock রাত নাইট মোড শিডিউল লক',
       statusText: settings.nightModeEnabled
         ? `${settings.nightLockStart || '00:00'}–${settings.nightLockEnd || '06:00'}`
         : isBn
@@ -381,6 +556,7 @@ export function HomeFeatureHub({
       id: 'anticall',
       title: isBn ? 'অ্যান্টি-কল সুরক্ষা' : 'Anti-Call Shield',
       desc: isBn ? 'কল অটো-রিজেক্ট ও বারবার কলে অটো-ব্লক' : 'Auto-reject calls & repeat block',
+      keywords: 'call reject block অ্যান্টি কল রিজেক্ট',
       statusText: settings.antiCallEnabled
         ? isBn
           ? `চালু · ${callsCount} রিজেক্ট`
@@ -398,6 +574,7 @@ export function HomeFeatureHub({
       id: 'aivision',
       title: isBn ? 'ভয়েস ও ছবি AI' : 'Maya Voice & Vision',
       desc: isBn ? 'ভয়েস নোট শোনা, ছবি দেখা ও Anti-NSFW' : 'Voice notes, images & NSFW guard',
+      keywords: 'voice vision audio image nsfw ভয়েস ছবি অডিও',
       statusText:
         settings.mayaVoiceEnabled || settings.mayaVisionEnabled || settings.antiNsfwImage
           ? isBn
@@ -414,9 +591,10 @@ export function HomeFeatureHub({
     },
     {
       id: 'activity',
-      title: isBn ? 'অ্যাক্টিভিটি র‍্যাংক' : 'Activity & Ghosts',
+      title: isBn ? 'অ্যাক্টিভিটি র‍্যাংক (লিডারবোর্ড)' : 'Activity & Ghosts',
       desc: isBn ? 'টপ অ্যাক্টিভ তালিকা, .top ও Ghost মেম্বার' : 'Top rank leaderboard & inactive list',
-      statusText: settings.activityTrackingEnabled !== false ? (isBn ? 'ট্র্যাকিং চালু' : 'Tracking ON') : 'OFF',
+      keywords: 'leaderboard rank top ghost activity লিডারবোর্ড র‍্যাংক টপ',
+      statusText: settings.activityTrackingEnabled !== false ? (isBn ? 'অটো ট্র্যাকিং চালু' : 'Auto ON') : 'OFF',
       isOn: settings.activityTrackingEnabled !== false,
       iconBg: 'bg-amber-50',
       iconText: 'text-amber-700',
@@ -427,6 +605,7 @@ export function HomeFeatureHub({
       id: 'keywords',
       title: isBn ? 'কীওয়ার্ড অটো-রিপ্লাই' : 'Keyword Auto-Reply',
       desc: isBn ? 'AI ছাড়াই ফিক্সড প্রশ্ন-উত্তর সিস্টেম' : 'Zero-cost instant keyword triggers',
+      keywords: 'keyword auto reply trigger কীওয়ার্ড উত্তর',
       statusText: settings.keywordAutoReplyEnabled
         ? isBn
           ? `${keywordsCount}টি রুল চালু`
@@ -444,6 +623,7 @@ export function HomeFeatureHub({
       id: 'pinlock',
       title: isBn ? 'অ্যাডমিন পিন লক' : 'Admin PIN Lock',
       desc: isBn ? 'পাবলিক লিংক গোপন পিন দিয়ে সুরক্ষিত রাখুন' : 'Protect dashboard with secret PIN',
+      keywords: 'pin password lock পিন লক পাসওয়ার্ড',
       statusText: settings.dashboardPinEnabled ? (isBn ? 'লক সক্রিয়' : 'PIN Locked') : isBn ? 'সেট নেই' : 'Unlocked',
       isOn: Boolean(settings.dashboardPinEnabled),
       iconBg: 'bg-slate-100',
@@ -455,6 +635,7 @@ export function HomeFeatureHub({
       id: 'maya',
       title: isBn ? 'মায়া AI চ্যাট ও মুড' : 'Maya AI Companion',
       desc: isBn ? 'রোমান্টিক, ফানি মুড, ভাষা ও টেস্ট চ্যাট' : 'Personality, language & sandbox',
+      keywords: 'maya ai chat mood romantic মায়া চ্যাট মুড',
       statusText: settings.mayaAiEnabled ? (isBn ? 'সক্রিয়' : 'Active') : 'OFF',
       isOn: Boolean(settings.mayaAiEnabled),
       iconBg: 'bg-pink-50',
@@ -466,6 +647,7 @@ export function HomeFeatureHub({
       id: 'companion',
       title: isBn ? '২য় AI অ্যাকাউন্ট (গার্ল বট)' : '2nd Female AI Account',
       desc: isBn ? 'আলাদা নম্বরে ইনবক্স ও গ্রুপে মিষ্টি, রোমান্টিক ও নির্ভুল রিপ্লাই' : 'Dedicated 2nd account for smart romantic chat',
+      keywords: '2nd female companion nila গার্ল ২য় অ্যাকাউন্ট',
       statusText: companionOnline
         ? isBn
           ? 'কানেক্টেড ও সক্রিয়'
@@ -485,6 +667,7 @@ export function HomeFeatureHub({
       id: 'integrations',
       title: isBn ? 'API কী ও সার্ভার' : 'API Keys & Server',
       desc: isBn ? 'Gemini, Groq, OpenRouter কী রোটেশন' : 'Key pool rotation & server URL',
+      keywords: 'api gemini groq openrouter server url কী সার্ভার',
       statusText: isBn ? `${settings.aiKeys?.length || 0}টি কী সেভ` : `${settings.aiKeys?.length || 0} keys`,
       isOn: (settings.aiKeys?.length || 0) > 0,
       iconBg: 'bg-sky-50',
@@ -496,6 +679,7 @@ export function HomeFeatureHub({
       id: 'groups',
       title: isBn ? 'কানেক্টেড গ্রুপ' : 'Connected Groups',
       desc: isBn ? 'বট যুক্ত সব গ্রুপ ও মেম্বার সংখ্যা দেখুন' : 'View protected WhatsApp groups',
+      keywords: 'groups participants কানেক্টেড গ্রুপ তালিকা',
       statusText: isBn ? `${groupsCount}টি গ্রুপ` : `${groupsCount} groups`,
       isOn: groupsCount > 0,
       iconBg: 'bg-emerald-50',
@@ -507,6 +691,7 @@ export function HomeFeatureHub({
       id: 'pairing',
       title: isBn ? 'WhatsApp কানেক্ট' : 'Connect Device',
       desc: isBn ? '৮-ডিজিট পেয়ারিং কোড ও QR স্ক্যান' : '8-digit pairing code & QR link',
+      keywords: 'whatsapp connect pair qr code পেয়ারিং কানেক্ট',
       statusText: isConnected ? (isBn ? 'কানেক্টেড' : 'Connected') : isBn ? 'সংযোগ দিন' : 'Link now',
       isOn: isConnected,
       iconBg: 'bg-emerald-50',
@@ -518,6 +703,7 @@ export function HomeFeatureHub({
       id: 'backup',
       title: isBn ? 'সেশন ব্যাকআপ ও রিস্টোর' : 'Session Backup',
       desc: isBn ? 'কোড ছাড়াই অন্য হোস্টিংয়ে বট ট্রান্সফার' : 'Encrypted export & restore JSON',
+      keywords: 'backup restore export json ব্যাকআপ রিস্টোর',
       statusText: isBn ? 'AES-256 সুরক্ষা' : 'Zero-ban transfer',
       isOn: true,
       iconBg: 'bg-teal-50',
@@ -527,50 +713,130 @@ export function HomeFeatureHub({
     },
   ];
 
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const matchesSearch = (card: HubCard) => {
+    if (!normalizedQuery) return true;
+    const hay = `${card.title} ${card.desc} ${card.keywords} ${card.statusText}`.toLowerCase();
+    return hay.includes(normalizedQuery);
+  };
+
+  const visibleSecurityTools = securityToolCards.filter(matchesSearch);
+  const visibleFeatures = featureCards.filter(matchesSearch);
+
+  const renderCardGrid = (cards: HubCard[]) => (
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-3">
+      {cards.map((card) => (
+        <button
+          key={card.id}
+          type="button"
+          onClick={card.onClick}
+          className="group text-left min-h-[116px] p-3.5 bg-white rounded-2xl border border-slate-200 hover:border-emerald-400 active:scale-[0.98] transition-all flex flex-col justify-between cursor-pointer shadow-2xs"
+        >
+          <div>
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <span className={`w-9 h-9 rounded-xl ${card.iconBg} ${card.iconText} flex items-center justify-center shrink-0`}>
+                {card.icon}
+              </span>
+              <ArrowRight size={14} className="text-slate-300 group-hover:text-emerald-600 transition-colors shrink-0" />
+            </div>
+            <div className="text-xs sm:text-[13px] font-extrabold text-slate-900 leading-snug">
+              {card.title}
+            </div>
+            <p className="text-[10.5px] text-slate-500 mt-1 leading-snug line-clamp-2">
+              {card.desc}
+            </p>
+          </div>
+          <div className="mt-2.5 pt-2 border-t border-slate-100 text-[10.5px] font-bold tabular-nums flex items-center justify-between gap-1">
+            <span className={card.isOn ? 'text-emerald-700' : 'text-slate-400'}>{card.statusText}</span>
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+
   return (
-    <div className="mt-5">
-      <div className="flex items-center justify-between gap-2 mb-3 px-0.5">
-        <div>
-          <h2 className="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight">
-            {isBn ? 'সব ফিচার কন্ট্রোল প্যানেল' : 'All Features & Control Pages'}
-          </h2>
-          <p className="text-[11px] text-slate-500">
-            {isBn ? 'যেকোনো ফিচারে ট্যাপ করে তার আলাদা পেজে প্রবেশ করুন' : 'Tap any card to open its dedicated page'}
-          </p>
+    <div className="mt-5 space-y-5">
+      {/* Quick Search Box for Easy Tool & Feature Discovery */}
+      <div className="bg-white rounded-2xl border border-slate-200 p-3 shadow-2xs">
+        <div className="relative flex items-center">
+          <Search size={15} className="absolute left-3 text-emerald-700 pointer-events-none" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={
+              isBn
+                ? 'টুলস খুঁজুন (যেমন: Carrom, স্টিকার, গালি, বস, সালাম, নাইট মোড)...'
+                : 'Search any tool (e.g. Carrom, sticker, badword, boss, salam, night)...'
+            }
+            className="w-full min-h-[40px] pl-9 pr-9 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-emerald-500 outline-none text-xs font-semibold text-slate-800"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2 w-7 h-7 rounded-lg bg-slate-200/70 hover:bg-slate-200 text-slate-600 flex items-center justify-center cursor-pointer"
+              aria-label="Clear search"
+            >
+              <X size={13} />
+            </button>
+          )}
         </div>
-        <span className="text-[11px] font-bold text-emerald-700 tabular-nums shrink-0">
-          {featureCards.length} {isBn ? 'টি ফিচার' : 'Features'}
-        </span>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-3">
-        {featureCards.map((card) => (
-          <button
-            key={card.id}
-            type="button"
-            onClick={card.onClick}
-            className="group text-left min-h-[116px] p-3.5 bg-white rounded-2xl border border-slate-200 hover:border-emerald-400 active:scale-[0.98] transition-all flex flex-col justify-between cursor-pointer shadow-2xs"
-          >
+      {/* SECTION 1: SECURITY TOOLS (9 SEPARATE TOOL PAGES) */}
+      {visibleSecurityTools.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between gap-2 mb-3 px-0.5">
             <div>
-              <div className="flex items-center justify-between gap-2 mb-2">
-                <span className={`w-9 h-9 rounded-xl ${card.iconBg} ${card.iconText} flex items-center justify-center shrink-0`}>
-                  {card.icon}
-                </span>
-                <ArrowRight size={14} className="text-slate-300 group-hover:text-emerald-600 transition-colors shrink-0" />
-              </div>
-              <div className="text-xs sm:text-[13px] font-extrabold text-slate-900 leading-snug">
-                {card.title}
-              </div>
-              <p className="text-[10.5px] text-slate-500 mt-1 leading-snug line-clamp-2">
-                {card.desc}
+              <h2 className="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight">
+                {isBn ? '🛡️ সিকিউরিটি ও সুরক্ষা টুলস' : '🛡️ Security & Moderation Tools'}
+              </h2>
+              <p className="text-[11px] text-slate-500">
+                {isBn
+                  ? 'প্রতিটি সিকিউরিটি ফাংশনের আলাদা টুল পেজ — সহজে খুঁজে অন/অফ করুন'
+                  : 'Separate dedicated tool page for every security rule'}
               </p>
             </div>
-            <div className="mt-2.5 pt-2 border-t border-slate-100 text-[10.5px] font-bold tabular-nums flex items-center justify-between gap-1">
-              <span className={card.isOn ? 'text-emerald-700' : 'text-slate-400'}>{card.statusText}</span>
+            <span className="text-[11px] font-bold text-emerald-700 tabular-nums shrink-0">
+              {visibleSecurityTools.length} {isBn ? 'টি টুল' : 'Tools'}
+            </span>
+          </div>
+          {renderCardGrid(visibleSecurityTools)}
+        </div>
+      )}
+
+      {/* SECTION 2: 17 CORE FEATURE PAGES */}
+      {visibleFeatures.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between gap-2 mb-3 px-0.5">
+            <div>
+              <h2 className="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight">
+                {isBn ? '⚙️ সব ফিচার ও বট কন্ট্রোল' : '⚙️ All Features & Control Pages'}
+              </h2>
+              <p className="text-[11px] text-slate-500">
+                {isBn ? 'যেকোনো ফিচারে ট্যাপ করে তার আলাদা পেজে প্রবেশ করুন' : 'Tap any card to open its dedicated page'}
+              </p>
             </div>
+            <span className="text-[11px] font-bold text-emerald-700 tabular-nums shrink-0">
+              {visibleFeatures.length} {isBn ? 'টি ফিচার' : 'Features'}
+            </span>
+          </div>
+          {renderCardGrid(visibleFeatures)}
+        </div>
+      )}
+
+      {/* Empty Search Fallback */}
+      {visibleSecurityTools.length === 0 && visibleFeatures.length === 0 && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 text-center space-y-2">
+          <p className="text-xs font-bold text-slate-700">
+            {isBn ? `"${searchQuery}" নামে কোনো টুল বা ফিচার পাওয়া যায়নি` : `No tools found matching "${searchQuery}"`}
+          </p>
+          <button type="button" className="btn soft" onClick={() => setSearchQuery('')}>
+            {isBn ? 'সব টুলস দেখুন' : 'Show All Tools'}
           </button>
-        ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

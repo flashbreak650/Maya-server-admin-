@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import {
   ShieldCheck,
   RefreshCw,
@@ -83,6 +83,7 @@ import {
   PinLockPage,
   CompanionBotPage,
 } from './components/FeaturePages.tsx';
+import { SecurityToolPage, SecurityToolId } from './components/SecurityToolPages.tsx';
 
 
 interface GroupItem {
@@ -243,6 +244,7 @@ interface ActiveGroupLockItem {
 
 export default function App() {
   const [activePage, setActivePage] = useState<PageId>('home');
+  const [homeToolSearch, setHomeToolSearch] = useState('');
   const [isStaticHost] = useState(() => {
     const isCapacitor = !!(window as any).Capacitor?.isNativePlatform?.() || window.location.protocol === 'capacitor:';
     return isCapacitor || window.location.hostname.includes('github.io') || window.location.hostname.includes('pages.dev');
@@ -469,7 +471,7 @@ export default function App() {
   const sessionCardRef = useRef<HTMLDivElement | null>(null);
 
   const openSessionBackupSection = () => {
-    setActivePage('pairing');
+    navigateToPage('pairing');
     setTimeout(() => {
       sessionCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 120);
@@ -750,6 +752,8 @@ export default function App() {
   const statusInFlightRef = useRef(false);
   const pairingLockRef = useRef(false);
   const activePageRef = useRef(activePage);
+  const homeScrollYRef = useRef<number>(0);
+  const restoreHomeScrollRef = useRef<boolean>(false);
   const liveStatusRef = useRef(liveStatus);
   const baileysUrlRef = useRef(baileysUrl);
 
@@ -1321,11 +1325,45 @@ export default function App() {
     }
   };
 
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (activePage === 'home') {
+      if (restoreHomeScrollRef.current) {
+        const savedY = homeScrollYRef.current;
+        restoreHomeScrollRef.current = false;
+        window.scrollTo({ top: savedY, behavior: 'auto' });
+        const raf = requestAnimationFrame(() => window.scrollTo({ top: savedY, behavior: 'auto' }));
+        const timer = setTimeout(() => window.scrollTo({ top: savedY, behavior: 'auto' }), 45);
+        return () => {
+          cancelAnimationFrame(raf);
+          clearTimeout(timer);
+        };
+      }
+    } else {
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    }
+  }, [activePage]);
+
   const navigateToPage = (page: PageId) => {
+    const prevPage = activePageRef.current;
+    if (typeof window !== 'undefined' && prevPage === 'home' && page !== 'home') {
+      homeScrollYRef.current = window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;
+    }
+
+    if (page === 'home') {
+      if (prevPage !== 'home') {
+        restoreHomeScrollRef.current = true;
+      } else {
+        restoreHomeScrollRef.current = false;
+        if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    } else {
+      restoreHomeScrollRef.current = false;
+    }
+
     setActivePage(page);
-    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
     if (page === 'home') loadDashboard();
-    else if (page === 'security' || page === 'warnings' || page === 'blocks' || page === 'logs') loadModerationData();
+    else if (page === 'security' || page.startsWith('sec_') || page === 'warnings' || page === 'blocks' || page === 'logs') loadModerationData();
     else if (page === 'memberblock') loadGroupMembers();
     else if (page === 'nightmode') loadNightMode();
     else if (page === 'anticall') loadCalls();
@@ -2301,7 +2339,7 @@ export default function App() {
                     </p>
                     <button 
                       className="mt-3 px-3 py-1.5 bg-rose-600 text-white text-[10px] font-bold  hover:bg-rose-700 transition-colors"
-                      onClick={() => setActivePage('integrations')}
+                      onClick={() => navigateToPage('integrations')}
                     >
                       কানেক্ট ব্যাকএন্ড
                     </button>
@@ -2403,7 +2441,7 @@ export default function App() {
                           </button>
                         </>
                       ) : (
-                        <button className="btn" onClick={() => setActivePage('pairing')}>
+                        <button className="btn" onClick={() => navigateToPage('pairing')}>
                           <LinkIcon size={13} /> {t.connectWa}
                         </button>
                       )}
@@ -2433,17 +2471,14 @@ export default function App() {
                   <button
                     className="btn soft full"
                     style={{ marginTop: '12px' }}
-                    onClick={() => {
-                      setActivePage('security');
-                      loadModerationData();
-                    }}
+                    onClick={() => navigateToPage('security')}
                   >
                     {t.manageRulesBtn} <ArrowRight size={13} />
                   </button>
                 </div>
               </div>
 
-              {/* Every Feature Separate Button Cards Hub on Home Page */}
+              {/* Every Feature & Security Tool Separate Button Cards Hub on Home Page */}
               <HomeFeatureHub
                 isBn={isBn}
                 settings={settings}
@@ -2456,10 +2491,39 @@ export default function App() {
                 nightStatus={nightStatus}
                 isConnected={liveStatus.online}
                 companionOnline={companionStatus.online}
+                searchQuery={homeToolSearch}
+                setSearchQuery={setHomeToolSearch}
                 onNavigate={navigateToPage}
                 onOpenSessionBackup={openSessionBackupSection}
               />
             </section>
+          )}
+
+          {/* DEDICATED INDIVIDUAL SECURITY TOOL PAGES */}
+          {activePage.startsWith('sec_') && (
+            <SecurityToolPage
+              toolId={activePage as SecurityToolId}
+              isBn={isBn}
+              t={t}
+              settings={settings}
+              setSettings={setSettings}
+              customBadwordsText={customBadwordsText}
+              setCustomBadwordsText={setCustomBadwordsText}
+              stickerQueue={stickerQueue}
+              activeWarningsCount={activeWarnings.length}
+              onBack={() => navigateToPage('home')}
+              onNavigate={navigateToPage}
+              onUpdateToggle={(key, val) => updateSettingToggle(key as keyof ModerationSettings, val)}
+              onSaveBadwords={saveCustomBadwords}
+              onSaveStickerSpamConfig={handleSaveStickerSpamConfig}
+              onRefreshStickerQueue={handleRefreshStickerQueue}
+              onRetryFailedStickers={handleRetryFailedStickers}
+              onClearStickerQueueHistory={handleClearStickerQueueHistory}
+              onSaveAdminMentionConfig={handleSaveAdminMentionConfig}
+              onSaveBossAndNoticeConfig={handleSaveBossAndNoticeConfig}
+              onTestBossAlert={handleTestBossAlert}
+              renderInfoBtn={renderInfoBtn}
+            />
           )}
 
           {/* DEDICATED FEATURE PAGES */}
@@ -2730,35 +2794,6 @@ export default function App() {
                     {isBn ? 'স্টিকার, লিংক ও গালি ফিল্টার' : 'Toggle protection rules'}
                   </p>
                 </button>
-              </div>
-
-              {/* Quick-Access Control right at top of Security Page (Carrom Pool Link) */}
-              <div className="card mb-4 border border-emerald-200 bg-emerald-50/30">
-                <div className="toggle-row" style={{ paddingTop: 4, paddingBottom: 4 }}>
-                  <div className="toggle-info">
-                    <h4>
-                      <span className="flex items-center gap-1.5 flex-wrap">
-                        {isBn ? '🎱 Carrom Pool লিংক চালু (carrom.co রিমুভ হবে না)' : '🎱 Allow Carrom Pool Links (carrom.co)'}
-                        <span className={`badge ${settings.allowCarromLinks !== false ? 'badge-green' : 'badge-amber'}`}>
-                          {settings.allowCarromLinks !== false ? (isBn ? 'চালু (ALLOWED)' : 'ALLOWED') : 'BLOCKED'}
-                        </span>
-                      </span>
-                    </h4>
-                    <p>
-                      {isBn
-                        ? 'চালু থাকলে শুধু Carrom Pool রুম লিংক (carrom.co) গ্রুপে থাকবে — বাকি সব লিংক আগের মতোই রিমুভ ও ওয়ার্নিং হবে।'
-                        : 'Allows carrom.co match links while still blocking all other URLs.'}
-                    </p>
-                  </div>
-                  <label className="switch">
-                    <input
-                      type="checkbox"
-                      checked={settings.allowCarromLinks !== false}
-                      onChange={(e) => updateSettingToggle('allowCarromLinks', e.target.checked)}
-                    />
-                    <span className="slider"></span>
-                  </label>
-                </div>
               </div>
 
               {/* CATEGORY A: SECURITY & PROTECTION */}
@@ -4442,7 +4477,7 @@ export default function App() {
 
                   {/* Balanced 2x2 Action Button Cards */}
                   <div className="grid grid-cols-2 gap-2">
-                    <button className="btn primary py-2.5 text-xs font-bold shadow-sm w-full" onClick={() => setActivePage('home')}>
+                    <button className="btn primary py-2.5 text-xs font-bold shadow-sm w-full" onClick={() => navigateToPage('home')}>
                       <LayoutDashboard size={14} /> {isBn ? 'ড্যাশবোর্ডে যান' : 'Go to Dashboard'}
                     </button>
                     <button
