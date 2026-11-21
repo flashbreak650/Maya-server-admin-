@@ -992,3 +992,33 @@ export function clearCompanionMemory(memoryKey?: string) {
   }
 }
 
+export function pruneIdleConversationCaches(maxIdleMs = 6 * 60 * 60 * 1000): number {
+  const cutoff = Date.now() - maxIdleMs;
+  let pruned = 0;
+
+  for (const store of [conversationMemory, companionConversationMemory]) {
+    for (const [k, msgs] of Object.entries(store)) {
+      if (!Array.isArray(msgs) || msgs.length === 0) {
+        delete store[k];
+        pruned++;
+        continue;
+      }
+      const latestTs = msgs[msgs.length - 1]?.timestamp || 0;
+      if (latestTs > 0 && latestTs < cutoff) {
+        delete store[k];
+        pruned++;
+      }
+    }
+  }
+
+  const lastSentKeys = Object.keys(lastSentResponses);
+  if (lastSentKeys.length > 150) {
+    for (const k of lastSentKeys.slice(0, lastSentKeys.length - 100)) {
+      delete lastSentResponses[k];
+      pruned++;
+    }
+  }
+
+  return pruned;
+}
+

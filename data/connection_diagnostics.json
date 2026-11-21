@@ -2,7 +2,46 @@
   "wasPrimaryConnected": true,
   "wasCompanionConnected": false,
   "lastCleanShutdown": false,
-  "lastBootAt": 1795140935215,
-  "lastShutdownAt": 0,
-  "events": []
+  "lastBootAt": 1795272109477,
+  "lastShutdownAt": 1795272080881,
+  "events": [
+    {
+      "timestamp": 1795272080881,
+      "account": "server",
+      "source": "web_server",
+      "statusCode": "SIGTERM",
+      "reasonKey": "graceful_shutdown_sigterm",
+      "titleBn": "সার্ভার আপডেট বা রিস্টার্ট হয়েছে (SIGTERM)",
+      "titleEn": "Server Restarted / Redeployed (SIGTERM)",
+      "causeBn": "নতুন কোড ডিপ্লয়, Railway রিস্টার্ট অথবা মেইনটেনেন্সের কারণে সার্ভার বন্ধ হয়ে পুনরায় চালু হয়েছে।",
+      "causeEn": "Server received SIGTERM shutdown signal (deploy or maintenance restart).",
+      "solutionBn": "/app/data Volume যুক্ত থাকলে সেশন অটো-রিকানেক্ট হবে।",
+      "solutionEn": "Session restores automatically when persistent storage is mounted.",
+      "rawError": "Process received SIGTERM",
+      "autoReconnecting": true,
+      "id": "diag_1795272080881_8rg3w",
+      "occurrences": 1,
+      "sourceLabelBn": "ওয়েব / সার্ভার সমস্যা",
+      "sourceLabelEn": "Web & Server"
+    },
+    {
+      "timestamp": 1795272075131,
+      "account": "server",
+      "source": "web_server",
+      "statusCode": "REBOOT",
+      "reasonKey": "unexpected_server_restart",
+      "titleBn": "সার্ভার / কন্টেইনার হঠাৎ রিস্টার্ট হয়েছিল",
+      "titleEn": "Unexpected Server / Container Restart",
+      "causeBn": "WhatsApp চালু থাকা অবস্থায় ওয়েব সার্ভার প্রসেস হঠাৎ বন্ধ বা রিস্টার্ট হয়েছিল (যেমন Railway deploy, মেমোরি লিমিট বা সার্ভার ক্র্যাশ)।",
+      "causeEn": "The backend server stopped or rebooted without graceful shutdown while WhatsApp was active.",
+      "solutionBn": "সেভ করা সেশন থাকলে বট নিজে থেকেই আবার কানেক্ট করবে। নিয়মিত হলে RAM ও Persistent Volume (/app/data) চেক করুন।",
+      "solutionEn": "Saved sessions auto-restore on boot. Verify persistent volume (/app/data) and memory if this repeats.",
+      "rawError": "Previous run exited without SIGTERM/SIGINT graceful shutdown",
+      "autoReconnecting": true,
+      "id": "diag_1795272075131_d8u6m",
+      "occurrences": 1,
+      "sourceLabelBn": "ওয়েব / সার্ভার সমস্যা",
+      "sourceLabelEn": "Web & Server"
+    }
+  ]
 }

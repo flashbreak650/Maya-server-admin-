@@ -326,6 +326,96 @@ let db: ModerationDB = {
   },
 };
 
+interface QueuedServerProblem {
+  category: string;
+  title: string;
+  details: string;
+  suggestion?: string;
+  timestamp: number;
+}
+interface TrackedServerProblem {
+  category: string;
+  title: string;
+  details: string;
+  suggestion?: string;
+  reportedAt: number;
+  notifiedBoss: boolean;
+}
+interface QueuedServerRecovery {
+  category: string;
+  title: string;
+  details: string;
+  thanksNote: string;
+  reportedAt: number;
+  resolvedAt: number;
+}
+
+const pendingServerProblems: QueuedServerProblem[] = [];
+const activeProblemsMap = new Map<string, TrackedServerProblem>();
+const pendingServerRecoveries: QueuedServerRecovery[] = [];
+const lastServerRecoveryAlertAt = new Map<string, number>();
+
+function loadPersistedActiveProblems() {
+  try {
+    if (!fs.existsSync(ACTIVE_PROBLEMS_PATH)) return;
+    const raw = JSON.parse(fs.readFileSync(ACTIVE_PROBLEMS_PATH, 'utf-8'));
+    if (Array.isArray(raw?.activeProblems)) {
+      for (const p of raw.activeProblems) {
+        if (p?.category && p?.title) {
+          activeProblemsMap.set(String(p.category), {
+            category: String(p.category),
+            title: String(p.title),
+            details: String(p.details || ''),
+            suggestion: p.suggestion ? String(p.suggestion) : undefined,
+            reportedAt: Number(p.reportedAt || Date.now()),
+            notifiedBoss: Boolean(p.notifiedBoss),
+          });
+        }
+      }
+    }
+    if (Array.isArray(raw?.pendingRecoveries)) {
+      for (const r of raw.pendingRecoveries) {
+        if (r?.category && r?.title) {
+          pendingServerRecoveries.push({
+            category: String(r.category),
+            title: String(r.title),
+            details: String(r.details || ''),
+            thanksNote: String(r.thanksNote || 'ধন্যবাদ বস! সমস্যাটি এখন পুরোপুরি সমাধান হয়ে গেছে।'),
+            reportedAt: Number(r.reportedAt || Date.now()),
+            resolvedAt: Number(r.resolvedAt || Date.now()),
+          });
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn('[Server Health Monitor] Could not load active_problems.json:', err?.message || err);
+  }
+}
+
+function savePersistedActiveProblems() {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const tmp = ACTIVE_PROBLEMS_PATH + '.tmp';
+    fs.writeFileSync(
+      tmp,
+      JSON.stringify(
+        {
+          activeProblems: Array.from(activeProblemsMap.values()),
+          pendingRecoveries: pendingServerRecoveries.slice(0, 20),
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+    fs.renameSync(tmp, ACTIVE_PROBLEMS_PATH);
+  } catch {}
+}
+
+loadPersistedActiveProblems();
+
 // Load database from disk
 export function loadDatabase() {
   try {
@@ -413,6 +503,53 @@ const processedMsgIds = new Set<string>();
 const stickerTimestamps: Record<string, number[]> = {}; // key: `${groupId}:${senderJid}`
 const groupMetaCache: Record<string, { meta: any; fetchedAt: number }> = {};
 const lastAiReplyTime: Record<string, number> = {}; // key: groupId
+
+export function pruneExpiredRuntimeCaches(): number {
+  const now = Date.now();
+  let pruned = 0;
+
+  if (processedMsgIds.size > 500) {
+    const excess = processedMsgIds.size - 500;
+    let removed = 0;
+    for (const id of processedMsgIds) {
+      processedMsgIds.delete(id);
+      removed++;
+      pruned++;
+      if (removed >= excess) break;
+    }
+  }
+
+  const stickerCutoff = now - 5 * 60 * 1000;
+  for (const [k, arr] of Object.entries(stickerTimestamps)) {
+    const fresh = arr.filter((ts) => ts >= stickerCutoff);
+    if (fresh.length === 0) {
+      delete stickerTimestamps[k];
+      pruned++;
+    } else if (fresh.length < arr.length) {
+      stickerTimestamps[k] = fresh;
+      pruned += arr.length - fresh.length;
+    }
+  }
+
+  const aiCutoff = now - 2 * 60 * 60 * 1000;
+  for (const [gid, ts] of Object.entries(lastAiReplyTime)) {
+    if (ts < aiCutoff) {
+      delete lastAiReplyTime[gid];
+      pruned++;
+    }
+  }
+
+  // Keep recently active group metadata caches (within 6h); prune stale volatile cache entries only
+  const metaCutoff = now - 6 * 60 * 60 * 1000;
+  for (const [gid, entry] of Object.entries(groupMetaCache)) {
+    if (entry.fetchedAt < metaCutoff) {
+      delete groupMetaCache[gid];
+      pruned++;
+    }
+  }
+
+  return pruned;
+}
 
 const unmaskedKeyVault = new Map<string, string>();
 
@@ -1955,96 +2092,6 @@ export async function findMentionedAdminInMessage(
 
   return firstAdminHit;
 }
-
-interface QueuedServerProblem {
-  category: string;
-  title: string;
-  details: string;
-  suggestion?: string;
-  timestamp: number;
-}
-interface TrackedServerProblem {
-  category: string;
-  title: string;
-  details: string;
-  suggestion?: string;
-  reportedAt: number;
-  notifiedBoss: boolean;
-}
-interface QueuedServerRecovery {
-  category: string;
-  title: string;
-  details: string;
-  thanksNote: string;
-  reportedAt: number;
-  resolvedAt: number;
-}
-
-const pendingServerProblems: QueuedServerProblem[] = [];
-const activeProblemsMap = new Map<string, TrackedServerProblem>();
-const pendingServerRecoveries: QueuedServerRecovery[] = [];
-const lastServerRecoveryAlertAt = new Map<string, number>();
-
-function loadPersistedActiveProblems() {
-  try {
-    if (!fs.existsSync(ACTIVE_PROBLEMS_PATH)) return;
-    const raw = JSON.parse(fs.readFileSync(ACTIVE_PROBLEMS_PATH, 'utf-8'));
-    if (Array.isArray(raw?.activeProblems)) {
-      for (const p of raw.activeProblems) {
-        if (p?.category && p?.title) {
-          activeProblemsMap.set(String(p.category), {
-            category: String(p.category),
-            title: String(p.title),
-            details: String(p.details || ''),
-            suggestion: p.suggestion ? String(p.suggestion) : undefined,
-            reportedAt: Number(p.reportedAt || Date.now()),
-            notifiedBoss: Boolean(p.notifiedBoss),
-          });
-        }
-      }
-    }
-    if (Array.isArray(raw?.pendingRecoveries)) {
-      for (const r of raw.pendingRecoveries) {
-        if (r?.category && r?.title) {
-          pendingServerRecoveries.push({
-            category: String(r.category),
-            title: String(r.title),
-            details: String(r.details || ''),
-            thanksNote: String(r.thanksNote || 'ধন্যবাদ বস! সমস্যাটি এখন পুরোপুরি সমাধান হয়ে গেছে।'),
-            reportedAt: Number(r.reportedAt || Date.now()),
-            resolvedAt: Number(r.resolvedAt || Date.now()),
-          });
-        }
-      }
-    }
-  } catch (err: any) {
-    console.warn('[Server Health Monitor] Could not load active_problems.json:', err?.message || err);
-  }
-}
-
-function savePersistedActiveProblems() {
-  try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    const tmp = ACTIVE_PROBLEMS_PATH + '.tmp';
-    fs.writeFileSync(
-      tmp,
-      JSON.stringify(
-        {
-          activeProblems: Array.from(activeProblemsMap.values()),
-          pendingRecoveries: pendingServerRecoveries.slice(0, 20),
-        },
-        null,
-        2
-      ),
-      'utf-8'
-    );
-    fs.renameSync(tmp, ACTIVE_PROBLEMS_PATH);
-  } catch {}
-}
-
-loadPersistedActiveProblems();
 
 const FIGHT_QUARREL_PATTERNS: RegExp[] = [
   /(?:তোরে|তোর|তুই)\s*(?:দেখে নিব|দেখব|মারব|খাব|চুদ|ফাট|মেরে ফেলব|জবাই|পাছায়|বের হ)/iu,

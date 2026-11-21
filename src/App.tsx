@@ -58,6 +58,7 @@ import {
   ScanEye,
   Trophy,
   Hash,
+  HardDrive,
 } from 'lucide-react';
 import { HELP_ITEMS } from './helpData.ts';
 import { HelpModal } from './components/HelpModal.tsx';
@@ -84,6 +85,11 @@ import {
   CompanionBotPage,
 } from './components/FeaturePages.tsx';
 import { SecurityToolPage, SecurityToolId } from './components/SecurityToolPages.tsx';
+import {
+  StorageCleanupPage,
+  formatBytesHuman,
+  type StorageCleanupOverview,
+} from './components/StorageCleanupPage.tsx';
 
 interface LatestDisconnectInfo {
   id: string;
@@ -727,7 +733,12 @@ export default function App() {
     { id: '12036303@g.us', name: 'Devs & Admins Group', participants: 42, status: 'Active' },
   ]);
   const [isGroupsLoading, setIsGroupsLoading] = useState(false);
+  const [selectedGroupForLeave, setSelectedGroupForLeave] = useState<GroupItem | null>(null);
+  const [leavingGroupId, setLeavingGroupId] = useState<string | null>(null);
   const [storageInfo, setStorageInfo] = useState<{ dataDir: string; persistentVolumeDetected: boolean } | null>(null);
+  const [storageOverview, setStorageOverview] = useState<StorageCleanupOverview | null>(null);
+  const [isStorageLoading, setIsStorageLoading] = useState(false);
+  const [cleanupRunningMode, setCleanupRunningMode] = useState<string | null>(null);
 
   // Configuration settings
   const [geminiKey, setGeminiKey] = useState(localStorage.getItem('wg_gemini_key') || '');
@@ -979,9 +990,65 @@ export default function App() {
         loadNightMode().catch(() => {}),
         loadCalls().catch(() => {}),
         loadKeywords().catch(() => {}),
+        loadStorageOverview().catch(() => {}),
       ]);
     } catch {
       // non-blocking
+    }
+  };
+
+  const loadStorageOverview = async () => {
+    setIsStorageLoading(true);
+    try {
+      const res = await callApi('/api/server/storage');
+      if (res?.snapshot) {
+        setStorageOverview({
+          snapshot: res.snapshot,
+          settings: res.settings,
+          scheduler: res.scheduler,
+          alerts: res.alerts || [],
+          history: res.history || [],
+        });
+      }
+    } catch {
+      // non-blocking
+    } finally {
+      setIsStorageLoading(false);
+    }
+  };
+
+  const handleRunServerCleanup = async (mode: 'cache' | 'temp' | 'logs' | 'duplicates' | 'full') => {
+    setCleanupRunningMode(mode);
+    try {
+      const res = await callApi('/api/server/cleanup/run', 'POST', { mode });
+      if (res?.overview?.snapshot) {
+        setStorageOverview(res.overview);
+      } else {
+        await loadStorageOverview();
+      }
+      showNotification(res?.message || (isBn ? 'নিরাপদ সার্ভার ক্লিনআপ সম্পন্ন হয়েছে!' : 'Safe server cleanup completed!'));
+    } catch (err: any) {
+      showNotification((isBn ? 'ক্লিনআপ ব্যর্থ: ' : 'Cleanup failed: ') + err.message);
+    } finally {
+      setCleanupRunningMode(null);
+    }
+  };
+
+  const handleSaveCleanupSettings = async (patch: {
+    autoCleanupEnabled?: boolean;
+    dailyTempCleanupEnabled?: boolean;
+    preserveErrorLogs?: boolean;
+    cacheIntervalHours?: number;
+    debugLogRetentionDays?: number;
+  }) => {
+    try {
+      const res = await callApi('/api/server/cleanup/settings', 'POST', patch);
+      if (res?.overview?.snapshot) {
+        setStorageOverview(res.overview);
+      }
+      showNotification(res?.message || (isBn ? 'অটো ক্লিনআপ সেটিংস সেভ হয়েছে!' : 'Cleanup settings saved!'));
+    } catch (err: any) {
+      showNotification((isBn ? 'সেভ ব্যর্থ: ' : 'Save failed: ') + err.message);
     }
   };
 
@@ -1396,6 +1463,8 @@ export default function App() {
     else if (page === 'companion') {
       loadCompanionStatus();
       loadModerationData();
+    } else if (page === 'storagecleanup') {
+      loadStorageOverview();
     }
   };
 
@@ -1746,6 +1815,28 @@ export default function App() {
       // non-blocking
     } finally {
       setIsGroupsLoading(false);
+    }
+  };
+
+  const handleLeaveGroupFromServer = async (group: GroupItem) => {
+    if (!group?.id || leavingGroupId) return;
+    setLeavingGroupId(group.id);
+    try {
+      const res = await callApi('/api/groups/leave', 'POST', { groupId: group.id });
+      if (Array.isArray(res?.groups)) {
+        setGroups(res.groups);
+      } else {
+        setGroups((prev) => prev.filter((item) => item.id !== group.id));
+      }
+      setSelectedGroupForLeave(null);
+      showNotification(
+        res?.message ||
+          (isBn ? `"${group.name}" গ্রুপ থেকে সফলভাবে লিভ নেওয়া হয়েছে!` : `Left group "${group.name}" successfully!`)
+      );
+    } catch (err: any) {
+      showNotification((isBn ? 'গ্রুপ লিভ ব্যর্থ: ' : 'Leave group failed: ') + err.message);
+    } finally {
+      setLeavingGroupId(null);
     }
   };
 
@@ -2314,6 +2405,9 @@ export default function App() {
           <button className={`nav ${activePage === 'integrations' ? 'active' : ''}`} onClick={() => navigateToPage('integrations')}>
             <Plug size={16} /> {t.integrations}
           </button>
+          <button className={`nav ${activePage === 'storagecleanup' ? 'active' : ''}`} onClick={() => navigateToPage('storagecleanup')}>
+            <HardDrive size={16} /> {isBn ? 'স্টোরেজ ও ক্লিনআপ' : 'Storage Cleanup'}
+          </button>
           <button className={`nav ${activePage === 'groups' ? 'active' : ''}`} onClick={() => navigateToPage('groups')}>
             <Users size={16} /> {t.groups}
           </button>
@@ -2530,6 +2624,12 @@ export default function App() {
                 nightStatus={nightStatus}
                 isConnected={liveStatus.online}
                 companionOnline={companionStatus.online}
+                storageUsedPercent={storageOverview?.snapshot?.disk?.usedPercent}
+                storageRecoveredLabel={
+                  storageOverview?.scheduler?.totalRecoveredBytes
+                    ? `+${formatBytesHuman(storageOverview.scheduler.totalRecoveredBytes)}`
+                    : undefined
+                }
                 searchQuery={homeToolSearch}
                 setSearchQuery={setHomeToolSearch}
                 onNavigate={navigateToPage}
@@ -2731,6 +2831,19 @@ export default function App() {
               onTestChat={handleTestCompanionChat}
               onClearMemory={handleClearCompanionMemory}
               onBack={() => navigateToPage('home')}
+            />
+          )}
+
+          {activePage === 'storagecleanup' && (
+            <StorageCleanupPage
+              isBn={isBn}
+              overview={storageOverview}
+              isLoading={isStorageLoading}
+              runningMode={cleanupRunningMode}
+              onBack={() => navigateToPage('home')}
+              onRefresh={loadStorageOverview}
+              onRunCleanup={handleRunServerCleanup}
+              onSaveSettings={handleSaveCleanupSettings}
             />
           )}
 
@@ -4830,13 +4943,68 @@ export default function App() {
               <div className="card">
                 <div className="card-head">
                   <div>
-                    <h3>Connected Groups</h3>
-                    <p>Group details from live WhatsApp session</p>
+                    <h3>{isBn ? 'কানেক্টেড গ্রুপসমূহ' : 'Connected Groups'}</h3>
+                    <p>
+                      {isBn
+                        ? 'যেকোনো গ্রুপের ওপর ক্লিক করলে সার্ভার থেকে সেই গ্রুপ লিভ নেওয়ার অপশন ওপেন হবে।'
+                        : 'Click any group below to open the Leave Group from Server option.'}
+                    </p>
                   </div>
                   <div className="symbol sb">
                     <Users size={16} />
                   </div>
                 </div>
+
+                {selectedGroupForLeave && (
+                  <div className="mb-4 p-3.5 rounded-xl bg-rose-50 border border-rose-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-xs font-extrabold text-rose-950 truncate">
+                        {isBn
+                          ? `"${selectedGroupForLeave.name}" গ্রুপ থেকে লিভ নিতে চান?`
+                          : `Leave "${selectedGroupForLeave.name}" from server?`}
+                      </div>
+                      <div className="text-[11px] text-rose-800 mt-0.5 tabular-nums">
+                        {isBn
+                          ? `সদস্য: ${selectedGroupForLeave.participants} জন · আইডি: ${selectedGroupForLeave.id}`
+                          : `${selectedGroupForLeave.participants} members · ${selectedGroupForLeave.id}`}
+                      </div>
+                      <p className="text-[11px] text-rose-700 mt-1">
+                        {isBn
+                          ? 'লিভ নিলে বট সার্ভার থেকে এই গ্রুপ ত্যাগ করবে। বাকি গ্রুপ, ডাটাবেজ ও সেশন অপরিবর্তিত থাকবে।'
+                          : 'The bot will leave this WhatsApp group from the server. Other groups, database, and session stay intact.'}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        disabled={Boolean(leavingGroupId)}
+                        onClick={() => handleLeaveGroupFromServer(selectedGroupForLeave)}
+                        className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-xs font-extrabold transition-colors cursor-pointer whitespace-nowrap"
+                      >
+                        <LogOut size={13} />
+                        <span>
+                          {leavingGroupId === selectedGroupForLeave.id
+                            ? isBn
+                              ? 'লিভ নিচ্ছে...'
+                              : 'Leaving...'
+                            : isBn
+                            ? 'সার্ভার থেকে লিভ নিন'
+                            : 'Leave Group'}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={Boolean(leavingGroupId)}
+                        onClick={() => setSelectedGroupForLeave(null)}
+                        className="inline-flex items-center min-h-[40px] px-3 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 cursor-pointer whitespace-nowrap"
+                      >
+                        {isBn ? 'বাতিল' : 'Cancel'}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <div className="tablewrap">
                   <table>
@@ -4849,25 +5017,40 @@ export default function App() {
                     </thead>
                     <tbody>
                       {groups.length > 0 ? (
-                        groups.map((g) => (
-                          <tr key={g.id}>
-                            <td>
-                              <b>{g.name}</b>
-                              <p className="text-[10px] text-gray-500 font-mono mt-0.5">{g.id}</p>
-                            </td>
-                            <td>{g.participants} members</td>
-                            <td>
-                              <span className="status-tag good">
-                                <CheckCircle2 size={12} style={{ display: 'inline', marginRight: '4px' }} />
-                                {t.protectedBadge}
-                              </span>
-                            </td>
-                          </tr>
-                        ))
+                        groups.map((g) => {
+                          const isSelected = selectedGroupForLeave?.id === g.id;
+                          return (
+                            <tr
+                              key={g.id}
+                              onClick={() => setSelectedGroupForLeave(isSelected ? null : g)}
+                              className={`cursor-pointer transition-colors ${
+                                isSelected ? 'bg-rose-50/70' : 'hover:bg-slate-50'
+                              }`}
+                              title={isBn ? 'ক্লিক করে সার্ভার থেকে লিভ নেওয়ার অপশন দেখুন' : 'Click to leave group from server'}
+                            >
+                              <td>
+                                <b>{g.name}</b>
+                                <p className="text-[10px] text-gray-500 font-mono mt-0.5 tabular-nums">{g.id}</p>
+                              </td>
+                              <td className="tabular-nums">{g.participants} {isBn ? 'সদস্য' : 'members'}</td>
+                              <td>
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="status-tag good">
+                                    <CheckCircle2 size={12} style={{ display: 'inline', marginRight: '4px' }} />
+                                    {t.protectedBadge}
+                                  </span>
+                                  <span className="text-[11px] font-bold text-rose-600 whitespace-nowrap">
+                                    {isSelected ? (isBn ? 'নিশ্চিত করুন' : 'Selected') : isBn ? 'লিভ অপশন' : 'Leave'}
+                                  </span>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
                       ) : (
                         <tr>
                           <td colSpan={3} className="empty">
-                            No groups found
+                            {isBn ? 'কোনো গ্রুপ পাওয়া যায়নি' : 'No groups found'}
                           </td>
                         </tr>
                       )}

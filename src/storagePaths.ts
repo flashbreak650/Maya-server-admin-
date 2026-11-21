@@ -1,10 +1,23 @@
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 export const PROJECT_ROOT = path.resolve(__dirname, '..');
+
+function isDirWritable(dirPath: string): boolean {
+  try {
+    if (!fs.existsSync(dirPath)) {
+      fs.mkdirSync(dirPath, { recursive: true });
+    }
+    fs.accessSync(dirPath, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function resolveUnifiedDataDir(): string {
   const envDir = (
@@ -13,11 +26,16 @@ function resolveUnifiedDataDir(): string {
     process.env.RENDER_DISK_PATH ||
     ''
   ).trim();
-  const target = envDir ? path.resolve(envDir) : path.join(PROJECT_ROOT, 'data');
-  if (!fs.existsSync(target)) {
-    fs.mkdirSync(target, { recursive: true });
+  const preferred = envDir ? path.resolve(envDir) : path.join(PROJECT_ROOT, 'data');
+  if (isDirWritable(preferred)) {
+    return preferred;
   }
-  return target;
+  const fallback = path.join(os.tmpdir(), 'waguard_data');
+  if (!fs.existsSync(fallback)) {
+    fs.mkdirSync(fallback, { recursive: true });
+  }
+  console.warn(`[Storage Fallback] ${preferred} is not writable; using ${fallback}`);
+  return fallback;
 }
 
 export const DATA_DIR = resolveUnifiedDataDir();
@@ -36,10 +54,10 @@ export function isPersistentVolumeConfigured(): boolean {
 }
 
 function ensureAndMigrateDir(legacyDir: string, targetDir: string, requiredMarkerFile: string) {
-  if (!fs.existsSync(targetDir)) {
-    fs.mkdirSync(targetDir, { recursive: true });
-  }
   try {
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
     const targetHasMarker = fs.existsSync(path.join(targetDir, requiredMarkerFile));
     const legacyHasMarker = fs.existsSync(path.join(legacyDir, requiredMarkerFile));
     if (!targetHasMarker && legacyHasMarker) {

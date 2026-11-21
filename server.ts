@@ -1,4 +1,4 @@
-import express, { Request, Response } from 'express';
+import express, { type Request, type Response } from 'express';
 import { createServer } from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -14,7 +14,7 @@ import makeWASocket, {
   fetchLatestWaWebVersion,
   makeCacheableSignalKeyStore,
   Browsers,
-  WASocket,
+  type WASocket,
 } from '@whiskeysockets/baileys';
 
 import {
@@ -65,6 +65,7 @@ import {
   isBotGroupAdminFromMeta,
   sendTestBossAndServerNotice,
   flushDatabaseSync,
+  addActivityLog,
 } from './src/moderationEngine.ts';
 import {
   initStickerQueue,
@@ -100,13 +101,18 @@ import {
   recordDisconnectEvent,
   recordGracefulServerShutdown,
 } from './src/connectionDiagnostics.ts';
+import {
+  appendDebugLog,
+  appendErrorLog,
+  getStorageCleanupOverview,
+  runCleanup,
+  startCleanupScheduler,
+  stopCleanupScheduler,
+  updateCleanupSettings,
+  type CleanupMode,
+} from './src/storageCleanup.ts';
 
 initConnectionDiagnosticsOnBoot();
-startRestrictedUsersMonitor(() => currentSock);
-startGroupLockMonitor(() => currentSock);
-startNightModeScheduler(() => currentSock);
-initStickerQueue(() => currentSock);
-startServerHealthMonitor(() => currentSock);
 
 dotenv.config();
 
@@ -121,9 +127,16 @@ function resolvePort(): number {
     const cliPort = Number(process.argv[portArgIdx + 1]);
     if (Number.isFinite(cliPort) && cliPort > 0) return cliPort;
   }
-  if (process.env.NODE_ENV === 'production' && process.env.PORT) {
+  const isDevNginxProxy =
+    process.env.NODE_ENV !== 'production' &&
+    Boolean(process.env.NGINX_PORT && process.env.PORT === process.env.NGINX_PORT);
+  if (!isDevNginxProxy && process.env.PORT) {
     const envPort = Number(process.env.PORT);
     if (Number.isFinite(envPort) && envPort > 0) return envPort;
+  }
+  if (process.env.DEFAULT_APP_PORT) {
+    const defaultPort = Number(process.env.DEFAULT_APP_PORT);
+    if (Number.isFinite(defaultPort) && defaultPort > 0) return defaultPort;
   }
   return 3000;
 }
@@ -194,8 +207,12 @@ function extractRequestToken(req: Request): string {
   return '';
 }
 
+app.get('/health', (_req: Request, res: Response) => {
+  res.status(200).json({ ok: true, status: 'healthy', port: PORT });
+});
+
 app.use('/api', (req: Request, res: Response, next) => {
-  if (req.path === '/auth/status' || req.path === '/auth/verify' || req.path === '/auth/lock') {
+  if (req.path === '/health' || req.path === '/auth/status' || req.path === '/auth/verify' || req.path === '/auth/lock') {
     return next();
   }
   const settings = getModerationSettings();
@@ -211,6 +228,10 @@ app.use('/api', (req: Request, res: Response, next) => {
     pinRequired: true,
     error: 'অ্যাডমিন পিন লক সক্রিয় রয়েছে। অনুগ্রহ করে সঠিক পিন দিয়ে আনলক করুন।',
   });
+});
+
+app.get('/api/health', (_req: Request, res: Response) => {
+  res.status(200).json({ ok: true, status: 'healthy', port: PORT });
 });
 
 app.get('/api/auth/status', (req: Request, res: Response) => {
@@ -844,9 +865,7 @@ async function initializeExistingSession() {
   }
 }
 
-// Start existing sessions if credentials already exist
-initializeExistingSession();
-initCompanionBot(() => currentSock?.user?.id);
+// WhatsApp session startup runs asynchronously after HTTP server binds port (see server.listen below)
 
 /**
  * Format and validate international phone number
@@ -1456,12 +1475,74 @@ app.get('/api/groups', async (req: Request, res: Response) => {
         participants: g.participants?.length || 0,
         status: 'Active',
       }));
-      if (list.length > 0) {
-        botState.groups = list;
-      }
+      botState.groups = list;
     } catch (e) {}
   }
   res.json({ groups: botState.groups });
+});
+
+// 4b. Leave Any Connected WhatsApp Group from Server
+app.post('/api/groups/leave', async (req: Request, res: Response) => {
+  try {
+    const groupId = String(req.body?.groupId || '').trim();
+    if (!groupId || !/^[0-9A-Za-z._-]+@g\.us$/.test(groupId)) {
+      return res.status(400).json({
+        success: false,
+        error: 'সঠিক গ্রুপ আইডি (@g.us) পাওয়া যায়নি।',
+      });
+    }
+
+    if (!currentSock || botState.status !== 'connected') {
+      return res.status(400).json({
+        success: false,
+        error: 'বটের WhatsApp বর্তমানে কানেক্টেড নয়! আগে কানেক্ট করে চেষ্টা করুন।',
+      });
+    }
+
+    const groupName = resolveKnownGroupName(
+      groupId,
+      getCachedGroupMetadataSync(groupId)?.subject || botState.groups.find((g) => g.id === groupId)?.name
+    );
+
+    await currentSock.groupLeave(groupId);
+    botState.groups = botState.groups.filter((g) => g.id !== groupId);
+    await resolveAdminPermissionProblemsForGroup(groupId, groupName, currentSock).catch(() => {});
+
+    try {
+      const freshGroups = await currentSock.groupFetchAllParticipating();
+      botState.groups = Object.values(freshGroups).map((g) => ({
+        id: g.id,
+        name: g.subject,
+        participants: g.participants?.length || 0,
+        status: 'Active',
+      }));
+    } catch {}
+
+    addActivityLog({
+      groupId,
+      groupName,
+      senderJid: currentSock.user?.id || 'BOT',
+      senderPhone: currentSock.user?.id?.split(':')[0]?.split('@')[0] || 'BOT',
+      action: 'unlocked',
+      reason: 'অ্যাডমিন প্যানেল থেকে সার্ভার বট গ্রুপ লিভ নিয়েছে',
+      details: `${groupName} (${groupId})`,
+    });
+    appendDebugLog('GROUP_LEAVE', `Bot left group ${groupName} (${groupId}) via Admin Panel`);
+
+    res.json({
+      success: true,
+      leftGroupId: groupId,
+      leftGroupName: groupName,
+      groups: botState.groups,
+      message: `"${groupName}" গ্রুপ থেকে বট সফলভাবে লিভ নিয়েছে!`,
+    });
+  } catch (err: any) {
+    appendErrorLog('GROUP_LEAVE_FAILED', err?.message || String(err));
+    res.status(500).json({
+      success: false,
+      error: err?.message || 'গ্রুপ থেকে লিভ নেওয়া যায়নি! অনুগ্রহ করে আবার চেষ্টা করুন।',
+    });
+  }
 });
 
 // 5. Disconnect / Reset Session Endpoint
@@ -2001,9 +2082,67 @@ app.post('/api/companion/test', async (req: Request, res: Response) => {
   }
 });
 
+// Automatic Server Storage Monitor & Safe Cleanup API Endpoints (Protected by /api Admin PIN Middleware)
+app.get('/api/server/storage', async (_req: Request, res: Response) => {
+  try {
+    const overview = await getStorageCleanupOverview();
+    res.json({ success: true, ...overview });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Could not inspect server storage' });
+  }
+});
+
+app.post('/api/server/cleanup/run', async (req: Request, res: Response) => {
+  try {
+    const requestedMode = String(req.body?.mode || 'full').trim().toLowerCase();
+    const allowedModes: CleanupMode[] = ['cache', 'temp', 'logs', 'duplicates', 'full'];
+    const mode: CleanupMode = allowedModes.includes(requestedMode as CleanupMode)
+      ? (requestedMode as CleanupMode)
+      : 'full';
+    const report = await runCleanup(mode, 'manual', currentSock);
+    const overview = await getStorageCleanupOverview();
+    res.json({
+      success: true,
+      report,
+      overview,
+      message: report.summaryBn,
+    });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err?.message || 'Cleanup failed' });
+  }
+});
+
+app.post('/api/server/cleanup/settings', async (req: Request, res: Response) => {
+  try {
+    const body = req.body || {};
+    const updated = updateCleanupSettings({
+      autoCleanupEnabled: typeof body.autoCleanupEnabled === 'boolean' ? body.autoCleanupEnabled : undefined,
+      dailyTempCleanupEnabled:
+        typeof body.dailyTempCleanupEnabled === 'boolean' ? body.dailyTempCleanupEnabled : undefined,
+      preserveErrorLogs: typeof body.preserveErrorLogs === 'boolean' ? body.preserveErrorLogs : undefined,
+      cacheIntervalHours: body.cacheIntervalHours !== undefined ? Number(body.cacheIntervalHours) : undefined,
+      debugLogRetentionDays: body.debugLogRetentionDays !== undefined ? Number(body.debugLogRetentionDays) : undefined,
+    });
+    const overview = await getStorageCleanupOverview();
+    res.json({
+      success: true,
+      settings: updated,
+      overview,
+      message: 'সার্ভার অটো ক্লিনআপ ও স্টোরেজ মনিটর সেটিংস সেভ হয়েছে!',
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Could not save cleanup settings' });
+  }
+});
+
 // Vite middleware in dev or static files in production
 async function startServer() {
-  const isProd = process.env.NODE_ENV === 'production';
+  const distDir = path.join(__dirname, 'dist');
+  const distIndexPath = path.join(distDir, 'index.html');
+  const hasBuiltDist = fs.existsSync(distIndexPath);
+  const isProd =
+    process.env.NODE_ENV === 'production' ||
+    (Boolean(process.env.K_SERVICE) && !process.env.NGINX_PORT && hasBuiltDist);
 
   if (!isProd) {
     const { createServer: createViteServer } = await import('vite');
@@ -2013,9 +2152,12 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.join(__dirname, 'dist')));
-    app.get('*', (req: Request, res: Response) => {
-      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+    app.use(express.static(distDir));
+    app.get('*', (_req: Request, res: Response) => {
+      if (fs.existsSync(distIndexPath)) {
+        return res.sendFile(distIndexPath);
+      }
+      return res.status(200).send('WAGuard Server Running');
     });
   }
 
@@ -2034,6 +2176,7 @@ async function startServer() {
 
   const shutdown = (signal = 'SIGTERM') => {
     console.log(`Flushing pending moderation DB, diagnostics & sticker queues and closing server gracefully (${signal})...`);
+    stopCleanupScheduler();
     recordGracefulServerShutdown(signal);
     flushDiagnosticsSync();
     flushDatabaseSync();
@@ -2048,6 +2191,7 @@ async function startServer() {
   process.on('unhandledRejection', (reason: any) => {
     const msg = reason?.message || String(reason);
     console.error('[Unhandled Rejection Guard]:', msg);
+    appendErrorLog('UNHANDLED_REJECTION', msg);
     reportServerProblem(
       {
         category: 'unhandled_rejection',
@@ -2061,6 +2205,7 @@ async function startServer() {
   process.on('uncaughtException', (err: any) => {
     const msg = err?.message || String(err);
     console.error('[Uncaught Exception Guard]:', msg);
+    appendErrorLog('UNCAUGHT_EXCEPTION', msg);
     reportServerProblem(
       {
         category: 'uncaught_exception',
@@ -2074,6 +2219,21 @@ async function startServer() {
 
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server listening on port ${PORT}`);
+    appendDebugLog('SERVER', `Server listening on port ${PORT}`);
+    startRestrictedUsersMonitor(() => currentSock);
+    startGroupLockMonitor(() => currentSock);
+    startNightModeScheduler(() => currentSock);
+    initStickerQueue(() => currentSock);
+    startServerHealthMonitor(() => currentSock);
+    startCleanupScheduler(() => currentSock);
+    initializeExistingSession().catch((err: any) => {
+      console.error('[Startup Session Restore Warning]:', err?.message || err);
+    });
+    try {
+      initCompanionBot(() => currentSock?.user?.id);
+    } catch (err: any) {
+      console.error('[Startup Companion Init Warning]:', err?.message || err);
+    }
   });
 }
 

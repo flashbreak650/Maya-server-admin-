@@ -1052,3 +1052,26 @@ export function clearStickerQueueHistory(): { cleared: boolean } {
   scheduleSaveQueue(true);
   return { cleared: true };
 }
+
+export function pruneExpiredBurstWindows(maxAgeMs = 5 * 60 * 1000): number {
+  const cutoff = Date.now() - maxAgeMs;
+  let pruned = 0;
+  for (const [key, list] of burstWindowMap.entries()) {
+    const fresh = list.filter((entry) => entry.timestamp >= cutoff);
+    if (fresh.length === 0) {
+      burstWindowMap.delete(key);
+      pruned++;
+    } else if (fresh.length < list.length) {
+      burstWindowMap.set(key, fresh);
+      pruned += list.length - fresh.length;
+    }
+  }
+  const cacheCutoff = Date.now() - 2 * 60 * 60 * 1000;
+  for (const [gid, ts] of groupAdminRefreshAt.entries()) {
+    if (ts < cacheCutoff) {
+      groupAdminRefreshAt.delete(gid);
+      pruned++;
+    }
+  }
+  return pruned;
+}

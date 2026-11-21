@@ -16,6 +16,7 @@ import {
   Eye,
   EyeOff,
   Ghost,
+  HardDrive,
   Hash,
   Heart,
   KeyRound,
@@ -75,6 +76,7 @@ export type PageId =
   | 'maya'
   | 'companion'
   | 'integrations'
+  | 'storagecleanup'
   | 'pairing'
   | 'groups';
 
@@ -293,6 +295,8 @@ export function HomeFeatureHub({
   nightStatus,
   isConnected,
   companionOnline,
+  storageUsedPercent,
+  storageRecoveredLabel,
   searchQuery,
   setSearchQuery,
   onNavigate,
@@ -309,6 +313,8 @@ export function HomeFeatureHub({
   nightStatus: NightModeStatusView | null;
   isConnected: boolean;
   companionOnline?: boolean;
+  storageUsedPercent?: number;
+  storageRecoveredLabel?: string;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
   onNavigate: (page: PageId) => void;
@@ -698,6 +704,23 @@ export function HomeFeatureHub({
       iconText: 'text-emerald-700',
       icon: <Smartphone size={18} />,
       onClick: () => onNavigate('pairing'),
+    },
+    {
+      id: 'storagecleanup',
+      title: isBn ? 'সার্ভার স্টোরেজ ও অটো ক্লিনআপ' : 'Storage & Auto Cleanup',
+      desc: isBn ? '৩ ঘণ্টা ক্যাশ ক্লিন, টেম্প/ডুপ্লিকেট ও ৭ দিন লগ আর্কাইভ' : '3h cache sweep, daily temp & 7d log archive',
+      keywords: 'storage cleanup disk cache temp logs duplicate archive স্টোরেজ ক্লিনআপ ক্যাশ ডিস্ক লগ',
+      statusText:
+        storageUsedPercent !== undefined
+          ? `${storageUsedPercent.toFixed(1)}% · ${storageRecoveredLabel || (isBn ? 'নিরাপদ' : 'Safe')}`
+          : isBn
+          ? 'প্রতি ৩ ঘণ্টায় অটো'
+          : 'Auto 3h Active',
+      isOn: (storageUsedPercent ?? 0) < 85,
+      iconBg: 'bg-emerald-50',
+      iconText: 'text-emerald-700',
+      icon: <HardDrive size={18} />,
+      onClick: () => onNavigate('storagecleanup'),
     },
     {
       id: 'backup',
