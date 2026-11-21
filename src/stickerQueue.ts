@@ -4,16 +4,21 @@ import {
   addActivityLog,
   applyVerifiedAntiStickerViolation,
   checkPermissions,
+  collectKnownBotUsersSync,
   getCachedGroupMetadataSync,
   getGroupAdminJidsFromCachedMeta,
   getGroupMeta,
   getSettings,
   incrementMessagesChecked,
   incrementVerifiedDeletedStat,
+  isBotGroupAdminFromMeta,
   isUserRestricted,
   normalizeJid,
   recordStickerContactAndActivity,
+  rememberLidPnPair,
   reportServerProblem,
+  resolveAdminPermissionProblemsForGroup,
+  resolveServerProblem,
   restrictUser,
   safeSendMessage,
 } from './moderationEngine.ts';
@@ -371,35 +376,28 @@ function checkCachedSenderAdminSync(
   senderJid: string,
   senderAltJid?: string
 ): { known: boolean; isSenderAdmin: boolean; isBotAdmin: boolean; groupSubject: string; matchedSenderId?: string } {
-  if (!meta?.participants) {
+  if (!meta?.participants || !Array.isArray(meta.participants) || meta.participants.length === 0) {
     return { known: false, isSenderAdmin: false, isBotAdmin: false, groupSubject: meta?.subject || 'WhatsApp Group' };
   }
   const sock = sockGetterFn ? sockGetterFn() : null;
   const senderCands = new Set([cleanUserDigits(senderJid), cleanUserDigits(senderAltJid)].filter(Boolean));
-  const botCands = new Set(
-    [
-      sock?.user?.id,
-      sock?.user?.lid,
-      sock?.authState?.creds?.me?.id,
-      sock?.authState?.creds?.me?.lid,
-    ]
-      .filter(Boolean)
-      .map((j) => cleanUserDigits(String(j)))
-  );
+  const { botUsers } = collectKnownBotUsersSync(sock);
 
   let isSenderAdmin = false;
-  let isBotAdmin = false;
+  let isBotAdmin = isBotGroupAdminFromMeta(sock, meta);
   let matchedSenderId: string | undefined;
 
   for (const p of meta.participants) {
     const pAny = p as any;
-    const pCleans = [p.id, pAny.lid, pAny.phoneNumber].filter(Boolean).map((j) => cleanUserDigits(String(j)));
+    const pCleans = [p.id, pAny.jid, pAny.lid, pAny.phoneNumber, pAny.pn]
+      .filter(Boolean)
+      .map((j) => cleanUserDigits(String(j)));
     const isAdmin = p.admin === 'admin' || p.admin === 'superadmin' || Boolean(pAny.isAdmin) || Boolean(pAny.isSuperAdmin);
     if (pCleans.some((c) => senderCands.has(c))) {
       matchedSenderId = p.id;
       if (isAdmin) isSenderAdmin = true;
     }
-    if (isAdmin && pCleans.some((c) => botCands.has(c))) {
+    if (isAdmin && pCleans.some((c) => botUsers.has(c))) {
       isBotAdmin = true;
     }
   }
@@ -420,6 +418,9 @@ function checkCachedSenderAdminSync(
 export function handleIncomingStickerFastPath(sock: WASocket, msg: proto.IWebMessageInfo): boolean {
   const detected = inspectIncomingSticker(msg);
   if (!detected) return false;
+  if (detected.senderAltJid) {
+    rememberLidPnPair(detected.senderJid, detected.senderAltJid);
+  }
 
   const uniqueKey = makeUniqueKey(detected.remoteJid, detected.messageId);
   if (activeMap.has(uniqueKey) || completedKeys.has(uniqueKey)) {
@@ -615,7 +616,7 @@ async function notifyGroupAdminsNoDeletePermission(
 async function getVerifiedGroupPermsForWorker(
   sock: WASocket,
   item: StickerQueueItem
-): Promise<{ isSenderAdmin: boolean; isBotAdmin: boolean; groupSubject: string; matchedSenderId?: string }> {
+): Promise<{ isSenderAdmin: boolean; isBotAdmin: boolean; metaKnown: boolean; groupSubject: string; matchedSenderId?: string }> {
   // Single deduplicated group metadata check during concurrent sticker bursts
   const inflight = inFlightGroupMetaPromises.get(item.groupId);
   if (inflight) {
@@ -623,9 +624,10 @@ async function getVerifiedGroupPermsForWorker(
   }
 
   let perms = await checkPermissions(sock, item.groupId, item.senderJid, false, item.senderAltJid);
-  if (!perms.isBotAdmin) {
+  if (!perms.metaKnown || !perms.isBotAdmin) {
     const lastRefresh = groupAdminRefreshAt.get(item.groupId) || 0;
-    if (Date.now() - lastRefresh > 20000) {
+    const throttleMs = perms.metaKnown ? 20000 : 5000;
+    if (Date.now() - lastRefresh > throttleMs) {
       groupAdminRefreshAt.set(item.groupId, Date.now());
       const p = checkPermissions(sock, item.groupId, item.senderJid, true, item.senderAltJid);
       inFlightGroupMetaPromises.set(item.groupId, p);
@@ -731,8 +733,10 @@ async function processStickerTask(item: StickerQueueItem) {
       return;
     }
 
-    // Strict Bot Admin Delete Permission Verification (Requirement #10 & No Fake Delete)
-    if (!perms.isBotAdmin && !item.fromMe) {
+    // Strict Bot Admin Delete Permission Verification:
+    // ONLY refuse delete & trigger "No Admin Permission" notice when group metadata WAS verified (metaKnown === true)
+    // AND confirms bot is NOT admin (prevents false alerts when groupMetadata temporarily failed or during LID sync).
+    if (perms.metaKnown && !perms.isBotAdmin && !item.fromMe) {
       item.status = 'failed_no_permission';
       item.lastError = 'বট এই গ্রুপের অ্যাডমিন (Admin) না থাকায় স্টিকার ডিলিট করা সম্ভব হয়নি';
       item.lastAttemptAt = Date.now();
@@ -745,8 +749,9 @@ async function processStickerTask(item: StickerQueueItem) {
       return;
     }
 
-    // Clear stale permission warning if bot IS now admin
-    if (permissionDeniedGroups[item.groupId]) {
+    // Clear stale permission warning if bot IS now admin & send Boss thank-you recovery notice
+    const hadDeniedBefore = Boolean(permissionDeniedGroups[item.groupId]);
+    if (hadDeniedBefore) {
       delete permissionDeniedGroups[item.groupId];
     }
 
@@ -765,6 +770,23 @@ async function processStickerTask(item: StickerQueueItem) {
     pushHistoryRecord({ ...item });
     incrementVerifiedDeletedStat(item.policy === 'restricted_user');
     scheduleSaveQueue(false);
+
+    if (hadDeniedBefore) {
+      resolveServerProblem(`sticker_no_perm_${item.groupId}`, {
+        details: `"${item.groupName}" গ্রুপে বট এখন সঠিকভাবে স্টিকার ডিলিট করতে পারছে।`,
+        thanksNote: `ধন্যবাদ বস! "${item.groupName}" গ্রুপের স্টিকার ডিলিট পারমিশন ঠিক হয়ে গেছে এবং স্প্যাম স্টিকার মুছে ফেলা হয়েছে।`,
+        sock,
+        forceNotifyIfUnrecordedTitle: 'স্টিকার ডিলিট করার Admin Permission',
+      }).catch(() => {});
+    }
+    resolveAdminPermissionProblemsForGroup(item.groupId, item.groupName, sock).catch(() => {});
+    if (rateLimitBackoffUntil <= Date.now()) {
+      resolveServerProblem('sticker_rate_limit', {
+        details: `"${item.groupName}" গ্রুপে স্টিকার ডিলিট রেট-লিমিট কেটে গিয়ে স্বাভাবিক গতিতে চলছে।`,
+        thanksNote: 'ধন্যবাদ বস! স্টিকার মডারেটর এখন আবার পুরো গতিতে কাজ করছে।',
+        sock,
+      }).catch(() => {});
+    }
 
     if (item.policy === 'anti_sticker') {
       const canonicalSender = perms.matchedSenderId || normalizeJid(item.senderJid);

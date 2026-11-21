@@ -21,6 +21,7 @@ import {
   getCompanionMultimodalResponse,
 } from './aiEngine.ts';
 import { COMPANION_SESSIONS_DIR } from './storagePaths.ts';
+import { recordConnectionOpen, recordDisconnectEvent } from './connectionDiagnostics.ts';
 
 if (!fs.existsSync(COMPANION_SESSIONS_DIR)) {
   fs.mkdirSync(COMPANION_SESSIONS_DIR, { recursive: true });
@@ -577,6 +578,7 @@ function setupCompanionSocketEvents(sock: WASocket, socketToken: number) {
       companionState.pairingCode = '';
       companionState.qrCodeDataUrl = '';
       companionState.pairingStartedAt = 0;
+      recordConnectionOpen('companion', sock.user?.id);
 
       setTimeout(async () => {
         if (socketToken !== activeCompanionToken || sock !== companionSock) return;
@@ -610,6 +612,13 @@ function setupCompanionSocketEvents(sock: WASocket, socketToken: number) {
         companionState.pairingStartedAt = 0;
         companionState.user = null;
         wipeCompanionSessionsDir();
+        recordDisconnectEvent({
+          account: 'companion',
+          statusCode: 401,
+          errMsg,
+          autoReconnecting: false,
+          phoneNumber: companionState.phoneNumber,
+        });
         return;
       }
 
@@ -626,6 +635,13 @@ function setupCompanionSocketEvents(sock: WASocket, socketToken: number) {
         companionState.lastError = errMsg;
         companionState.pairingCode = '';
         companionState.pairingStartedAt = 0;
+        recordDisconnectEvent({
+          account: 'companion',
+          statusCode: statusCode || 405,
+          errMsg,
+          autoReconnecting: false,
+          phoneNumber: companionState.phoneNumber,
+        });
         return;
       }
 
@@ -636,6 +652,13 @@ function setupCompanionSocketEvents(sock: WASocket, socketToken: number) {
         companionState.stepMessage = 'অন্য জায়গায় একই সেশন চালু হওয়ায় সংযোগ বিচ্ছিন্ন হয়েছে।';
         companionState.lastConnectionStatus = 'Replaced by another session (440)';
         companionState.lastError = errMsg;
+        recordDisconnectEvent({
+          account: 'companion',
+          statusCode: 440,
+          errMsg,
+          autoReconnecting: false,
+          phoneNumber: companionState.phoneNumber,
+        });
         return;
       }
 
@@ -650,10 +673,27 @@ function setupCompanionSocketEvents(sock: WASocket, socketToken: number) {
           : `Reconnecting (${reconnectAttempts + 1})...`;
         companionState.lastError = null;
 
+        if (!isRestartRequired && reconnectAttempts === 0) {
+          recordDisconnectEvent({
+            account: 'companion',
+            statusCode,
+            errMsg,
+            autoReconnecting: true,
+            phoneNumber: companionState.phoneNumber,
+          });
+        }
+
         if (reconnectAttempts >= 35) {
           companionState.status = 'disconnected';
           companionState.step = 'error';
           companionState.stepMessage = 'নেটওয়ার্ক পাওয়া যায়নি। পুনরায় কানেক্ট করুন।';
+          recordDisconnectEvent({
+            account: 'companion',
+            statusCode: statusCode || 'TIMEOUT',
+            errMsg: `${errMsg} (reconnect paused after 35 attempts)`,
+            autoReconnecting: false,
+            phoneNumber: companionState.phoneNumber,
+          });
           return;
         }
         const delayMs = isRestartRequired ? 900 : Math.min(30000, 2500 * Math.pow(2, Math.min(4, reconnectAttempts)));
@@ -677,6 +717,13 @@ function setupCompanionSocketEvents(sock: WASocket, socketToken: number) {
       companionState.stepMessage = 'সংযোগ বিচ্ছিন্ন হয়েছে। পুনরায় নতুন কোড নিন।';
       companionState.lastConnectionStatus = `Disconnected (${errMsg})`;
       companionState.lastError = errMsg;
+      recordDisconnectEvent({
+        account: 'companion',
+        statusCode,
+        errMsg,
+        autoReconnecting: false,
+        phoneNumber: companionState.phoneNumber,
+      });
     }
   });
 
@@ -987,6 +1034,12 @@ export async function disconnectCompanionBot() {
   companionState.user = null;
   companionState.groups = [];
   companionState.lastError = null;
+  recordDisconnectEvent({
+    account: 'companion',
+    manual: true,
+    errMsg: 'Disconnected manually by admin',
+    autoReconnecting: false,
+  });
 }
 
 export function clearCompanionChatLogsAndMemory() {

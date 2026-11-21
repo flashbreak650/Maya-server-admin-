@@ -85,6 +85,19 @@ import {
 } from './components/FeaturePages.tsx';
 import { SecurityToolPage, SecurityToolId } from './components/SecurityToolPages.tsx';
 
+interface LatestDisconnectInfo {
+  id: string;
+  sourceLabelBn?: string;
+  sourceLabelEn?: string;
+  statusCode?: string | number;
+  titleBn: string;
+  titleEn: string;
+  causeBn: string;
+  causeEn: string;
+  solutionBn?: string;
+  solutionEn?: string;
+  resolvedAt?: number | null;
+}
 
 interface GroupItem {
   id: string;
@@ -105,6 +118,8 @@ interface LiveStatusData {
   remainingSeconds: number;
   user?: any;
   lastError?: string | null;
+  reconnectAttempts?: number;
+  latestDisconnect?: LatestDisconnectInfo | null;
 }
 
 interface ModerationSettings {
@@ -243,12 +258,12 @@ interface ActiveGroupLockItem {
 }
 
 export default function App() {
-  const [activePage, setActivePage] = useState<PageId>('home');
-  const [homeToolSearch, setHomeToolSearch] = useState('');
   const [isStaticHost] = useState(() => {
     const isCapacitor = !!(window as any).Capacitor?.isNativePlatform?.() || window.location.protocol === 'capacitor:';
     return isCapacitor || window.location.hostname.includes('github.io') || window.location.hostname.includes('pages.dev');
   });
+  const [activePage, setActivePage] = useState<PageId>('home');
+  const [homeToolSearch, setHomeToolSearch] = useState('');
   const [uiLang, setUiLang] = useState<'bn' | 'en'>((localStorage.getItem('wg_ui_lang') as 'bn' | 'en') || 'bn');
   const [toastMessage, setToastMessage] = useState('');
   const [showToast, setShowToast] = useState(false);
@@ -809,7 +824,11 @@ export default function App() {
       } catch {
         if (!res.ok) {
           if (res.status === 404 && isStaticHost && !baileysUrl) {
-             throw new Error(isBn ? 'ব্যাকএন্ড কানেক্ট করা নেই! ইনটিগ্রেশন পেজে গিয়ে সার্ভার URL সেভ করুন।' : 'Backend disconnected! Set your Server URL in Integrations.');
+            throw new Error(
+              isBn
+                ? 'ব্যাকএন্ড কানেক্ট করা নেই! ইনটিগ্রেশন পেজে গিয়ে সার্ভার URL সেভ করুন।'
+                : 'Backend disconnected! Set your Server URL in Integrations.'
+            );
           }
           throw new Error(`HTTP ${res.status}: Endpoint unavailable`);
         }
@@ -907,6 +926,8 @@ export default function App() {
         prev.qrCode !== merged.qrCode ||
         prev.phoneNumber !== merged.phoneNumber ||
         prev.lastError !== merged.lastError ||
+        prev.latestDisconnect?.id !== merged.latestDisconnect?.id ||
+        prev.latestDisconnect?.resolvedAt !== merged.latestDisconnect?.resolvedAt ||
         prev.user?.id !== merged.user?.id ||
         prev.user?.name !== merged.user?.name;
 
@@ -1362,6 +1383,7 @@ export default function App() {
     }
 
     setActivePage(page);
+
     if (page === 'home') loadDashboard();
     else if (page === 'security' || page.startsWith('sec_') || page === 'warnings' || page === 'blocks' || page === 'logs') loadModerationData();
     else if (page === 'memberblock') loadGroupMembers();
@@ -2449,6 +2471,23 @@ export default function App() {
                         <RefreshCw size={13} /> {t.syncStatus}
                       </button>
                     </div>
+
+                    {!liveStatus.online && (liveStatus.latestDisconnect || liveStatus.lastError) && (
+                      <div className="mt-3 p-2.5 rounded-xl bg-black/25 border border-white/20 text-left">
+                        <span className="text-[10.5px] font-extrabold text-amber-200 block">
+                          {isBn
+                            ? `⚠️ ডিসকানেক্ট কারণ (${liveStatus.latestDisconnect?.sourceLabelBn || 'বট'}):`
+                            : '⚠️ Disconnect Cause:'}
+                        </span>
+                        <div className="text-[11px] font-bold text-white mt-0.5 leading-snug">
+                          {liveStatus.latestDisconnect
+                            ? isBn
+                              ? liveStatus.latestDisconnect.titleBn
+                              : liveStatus.latestDisconnect.titleEn
+                            : liveStatus.lastError}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -4573,6 +4612,17 @@ export default function App() {
                       <span className="font-semibold text-slate-700">{isBn ? 'সর্বশেষ স্ট্যাটাস:' : 'Last Connection Status:'}</span>{' '}
                       {liveStatus.lastConnectionStatus || liveStatus.stepMessage}
                     </div>
+                    {liveStatus.latestDisconnect && !liveStatus.online && (
+                      <div className="mt-1.5 p-2 rounded-lg bg-rose-50 border border-rose-200 text-[10.5px] text-rose-900 space-y-1">
+                        <div className="font-extrabold">
+                          {isBn ? 'ডিসকানেক্টের কারণ: ' : 'Cause: '}
+                          {isBn ? liveStatus.latestDisconnect.titleBn : liveStatus.latestDisconnect.titleEn}
+                        </div>
+                        <p className="opacity-90 leading-relaxed">
+                          {isBn ? liveStatus.latestDisconnect.causeBn : liveStatus.latestDisconnect.causeEn}
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                   {/* Display generated code or QR */}
@@ -4840,8 +4890,8 @@ export default function App() {
                   >
                     <ArrowLeft size={13} className="text-emerald-700" /> {isBn ? 'হোম পেজ' : 'Home'}
                   </button>
-                  <h1>AI Control Center</h1>
-                  <p>Manage API key rotation, provider failover, and system health.</p>
+                  <h1>{isBn ? 'AI কন্ট্রোল সেন্টার' : 'AI Control Center'}</h1>
+                  <p>Manage Gemini, Groq & OpenRouter failover and server synchronization.</p>
                 </div>
               </div>
 

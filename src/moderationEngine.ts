@@ -1,9 +1,12 @@
 import fs from 'fs';
+import path from 'path';
 import { downloadMediaMessage, jidNormalizedUser, type proto, type WASocket } from '@whiskeysockets/baileys';
 import { getMayaMultimodalResponse, getMayaResponse, inspectImageSafetyWithAi } from './aiEngine.ts';
 import { DATA_DIR, MODERATION_DB_PATH } from './storagePaths.ts';
+import { recordWebServerProblemEvent } from './connectionDiagnostics.ts';
 
 const DB_PATH = MODERATION_DB_PATH;
+const ACTIVE_PROBLEMS_PATH = path.join(DATA_DIR, 'active_problems.json');
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -376,6 +379,13 @@ export function flushDatabaseSync() {
     const tmpPath = DB_PATH + '.tmp';
     fs.writeFileSync(tmpPath, JSON.stringify(db, null, 2), 'utf-8');
     fs.renameSync(tmpPath, DB_PATH);
+    if (typeof resolveServerProblem === 'function' && activeProblemsMap?.has('db_save_error')) {
+      resolveServerProblem('db_save_error', {
+        details: 'ডাটাবেজ ফাইল এখন স্বাভাবিকভাবে সেভ হচ্ছে।',
+        thanksNote: 'ধন্যবাদ বস! স্টোরেজ ও সার্ভার পারমিশন ঠিক হওয়ায় সব তথ্য নিরাপদে সংরক্ষিত হচ্ছে।',
+        sock: globalSocketGetter ? globalSocketGetter() : null,
+      }).catch(() => {});
+    }
   } catch (err: any) {
     console.error('Error saving moderation DB:', err.message);
     reportServerProblem({
@@ -736,12 +746,130 @@ export function rememberLidPnPair(jidA?: string | null, jidB?: string | null) {
   }
 }
 
+function expandIdSetWithLidMaps(users: Set<string>, normalized?: Set<string>) {
+  for (const id of Array.from(users)) {
+    const mappedPn = lidToPnUserMap.get(id);
+    if (mappedPn) {
+      users.add(mappedPn);
+      normalized?.add(`${mappedPn}@s.whatsapp.net`);
+    }
+    const mappedLid = pnToLidUserMap.get(id);
+    if (mappedLid) {
+      users.add(mappedLid);
+      normalized?.add(`${mappedLid}@lid`);
+    }
+    const normDigits = /^\d{10,15}$/.test(id) ? normalizePhoneDigits(id) : '';
+    if (normDigits && normDigits !== id) {
+      users.add(normDigits);
+      normalized?.add(`${normDigits}@s.whatsapp.net`);
+      const lidFromNorm = pnToLidUserMap.get(normDigits);
+      if (lidFromNorm) {
+        users.add(lidFromNorm);
+        normalized?.add(`${lidFromNorm}@lid`);
+      }
+    }
+  }
+}
+
+export function collectKnownBotUsersSync(sock?: WASocket | null): { botUsers: Set<string>; botNormalized: Set<string> } {
+  rememberLidPnPair(sock?.user?.id, sock?.user?.lid);
+  rememberLidPnPair(sock?.authState?.creds?.me?.id, sock?.authState?.creds?.me?.lid);
+
+  const botRawIds = [
+    sock?.user?.id,
+    sock?.user?.lid,
+    sock?.authState?.creds?.me?.id,
+    sock?.authState?.creds?.me?.lid,
+  ].filter(Boolean) as string[];
+
+  const botUsers = new Set<string>();
+  const botNormalized = new Set<string>();
+
+  for (const j of botRawIds) {
+    const cu = cleanJidUser(j);
+    if (cu) {
+      botUsers.add(cu);
+      if (!isLidJid(j)) {
+        const pnDigits = normalizePhoneDigits(cu);
+        if (pnDigits) botUsers.add(pnDigits);
+      }
+    }
+    const norm = normalizeJid(j);
+    if (norm) botNormalized.add(norm);
+  }
+
+  expandIdSetWithLidMaps(botUsers, botNormalized);
+  return { botUsers, botNormalized };
+}
+
+export async function resolveBotIdentitySet(sock?: WASocket | null): Promise<{ botUsers: Set<string>; botNormalized: Set<string> }> {
+  const { botUsers, botNormalized } = collectKnownBotUsersSync(sock);
+  if (!sock) return { botUsers, botNormalized };
+
+  const lidMappingApi = (sock as any)?.signalRepository?.lidMapping;
+  if (lidMappingApi) {
+    // 1. Resolve PN -> LID for bot's own phone numbers (handles Baileys v7 @lid groups where sock.user.lid wasn't populated yet)
+    if (typeof lidMappingApi.getLIDForPN === 'function') {
+      const hasLidAlready = Array.from(botUsers).some((u) => lidToPnUserMap.has(u)) || Boolean(sock.user?.lid || sock.authState?.creds?.me?.lid);
+      if (!hasLidAlready) {
+        const pnCandidates = [sock.user?.id, sock.authState?.creds?.me?.id].filter((j): j is string => Boolean(j && !isLidJid(j)));
+        for (const pnRaw of pnCandidates) {
+          const pnClean = normalizePhoneDigits(cleanJidUser(pnRaw)) || cleanJidUser(pnRaw);
+          if (!pnClean) continue;
+          try {
+            const lookedUpLid = await Promise.race([
+              lidMappingApi.getLIDForPN(`${pnClean}@s.whatsapp.net`),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), 1800)),
+            ]);
+            if (lookedUpLid) {
+              rememberLidPnPair(lookedUpLid, `${pnClean}@s.whatsapp.net`);
+              const lidUser = cleanJidUser(lookedUpLid);
+              if (lidUser) {
+                botUsers.add(lidUser);
+                botNormalized.add(normalizeJid(lookedUpLid));
+              }
+            }
+          } catch {}
+        }
+      }
+    }
+
+    // 2. Resolve LID -> PN if only LID was known
+    if (typeof lidMappingApi.getPNForLID === 'function') {
+      const lidCandidates = [sock.user?.lid, sock.authState?.creds?.me?.lid, sock.user?.id, sock.authState?.creds?.me?.id].filter(
+        (j): j is string => Boolean(j && isLidJid(j))
+      );
+      for (const lidRaw of lidCandidates) {
+        const lidClean = cleanJidUser(lidRaw);
+        if (!lidClean || lidToPnUserMap.has(lidClean)) continue;
+        try {
+          const lookedUpPn = await Promise.race([
+            lidMappingApi.getPNForLID(`${lidClean}@lid`),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+          ]);
+          if (lookedUpPn) {
+            rememberLidPnPair(`${lidClean}@lid`, lookedUpPn);
+            const pnClean = normalizePhoneDigits(cleanJidUser(lookedUpPn)) || cleanJidUser(lookedUpPn);
+            if (pnClean) {
+              botUsers.add(pnClean);
+              botNormalized.add(`${pnClean}@s.whatsapp.net`);
+            }
+          }
+        } catch {}
+      }
+    }
+  }
+
+  expandIdSetWithLidMaps(botUsers, botNormalized);
+  return { botUsers, botNormalized };
+}
+
 function learnGroupParticipantsLidPn(meta: any) {
   if (!meta || !Array.isArray(meta.participants)) return;
   for (const p of meta.participants) {
     if (!p) continue;
     const lidCand = p.lid || (isLidJid(p.id) ? p.id : '');
-    const pnCand = p.phoneNumber || (isPnJid(p.id) ? p.id : '');
+    const pnCand = p.phoneNumber || p.pn || (isPnJid(p.id) ? p.id : p.jid && isPnJid(p.jid) ? p.jid : '');
     if (lidCand && pnCand) {
       rememberLidPnPair(lidCand, pnCand);
     }
@@ -1527,6 +1655,17 @@ export async function safeSendMessage(
     if (shouldShowTyping) {
       sock.sendPresenceUpdate('paused', jid).catch(() => {});
     }
+    if (!options?.isRecoveryNotice) {
+      for (const transientCat of ['wa_send_429', 'wa_send_500', 'wa_send_502', 'wa_send_503', 'wa_send_504']) {
+        if (activeProblemsMap.has(transientCat)) {
+          resolveServerProblem(transientCat, {
+            details: 'WhatsApp মেসেজ ডেলিভারি ও সার্ভার রেসপন্স এখন সম্পূর্ণ স্বাভাবিক রয়েছে।',
+            thanksNote: 'ধন্যবাদ বস! সাময়িক সার্ভার জট কেটে গেছে এবং মেসেজ পাঠানো স্বাভাবিক হয়েছে।',
+            sock,
+          }).catch(() => {});
+        }
+      }
+    }
     return true;
   } catch (err: any) {
     if (shouldShowTyping) {
@@ -1824,7 +1963,88 @@ interface QueuedServerProblem {
   suggestion?: string;
   timestamp: number;
 }
+interface TrackedServerProblem {
+  category: string;
+  title: string;
+  details: string;
+  suggestion?: string;
+  reportedAt: number;
+  notifiedBoss: boolean;
+}
+interface QueuedServerRecovery {
+  category: string;
+  title: string;
+  details: string;
+  thanksNote: string;
+  reportedAt: number;
+  resolvedAt: number;
+}
+
 const pendingServerProblems: QueuedServerProblem[] = [];
+const activeProblemsMap = new Map<string, TrackedServerProblem>();
+const pendingServerRecoveries: QueuedServerRecovery[] = [];
+const lastServerRecoveryAlertAt = new Map<string, number>();
+
+function loadPersistedActiveProblems() {
+  try {
+    if (!fs.existsSync(ACTIVE_PROBLEMS_PATH)) return;
+    const raw = JSON.parse(fs.readFileSync(ACTIVE_PROBLEMS_PATH, 'utf-8'));
+    if (Array.isArray(raw?.activeProblems)) {
+      for (const p of raw.activeProblems) {
+        if (p?.category && p?.title) {
+          activeProblemsMap.set(String(p.category), {
+            category: String(p.category),
+            title: String(p.title),
+            details: String(p.details || ''),
+            suggestion: p.suggestion ? String(p.suggestion) : undefined,
+            reportedAt: Number(p.reportedAt || Date.now()),
+            notifiedBoss: Boolean(p.notifiedBoss),
+          });
+        }
+      }
+    }
+    if (Array.isArray(raw?.pendingRecoveries)) {
+      for (const r of raw.pendingRecoveries) {
+        if (r?.category && r?.title) {
+          pendingServerRecoveries.push({
+            category: String(r.category),
+            title: String(r.title),
+            details: String(r.details || ''),
+            thanksNote: String(r.thanksNote || 'ধন্যবাদ বস! সমস্যাটি এখন পুরোপুরি সমাধান হয়ে গেছে।'),
+            reportedAt: Number(r.reportedAt || Date.now()),
+            resolvedAt: Number(r.resolvedAt || Date.now()),
+          });
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn('[Server Health Monitor] Could not load active_problems.json:', err?.message || err);
+  }
+}
+
+function savePersistedActiveProblems() {
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const tmp = ACTIVE_PROBLEMS_PATH + '.tmp';
+    fs.writeFileSync(
+      tmp,
+      JSON.stringify(
+        {
+          activeProblems: Array.from(activeProblemsMap.values()),
+          pendingRecoveries: pendingServerRecoveries.slice(0, 20),
+        },
+        null,
+        2
+      ),
+      'utf-8'
+    );
+    fs.renameSync(tmp, ACTIVE_PROBLEMS_PATH);
+  } catch {}
+}
+
+loadPersistedActiveProblems();
 
 const FIGHT_QUARREL_PATTERNS: RegExp[] = [
   /(?:তোরে|তোর|তুই)\s*(?:দেখে নিব|দেখব|মারব|খাব|চুদ|ফাট|মেরে ফেলব|জবাই|পাছায়|বের হ)/iu,
@@ -1931,6 +2151,22 @@ function buildServerNoticeText(problem: QueuedServerProblem): string {
   );
 }
 
+function buildServerRecoveryText(recovery: QueuedServerRecovery): string {
+  const timeStr = new Date(recovery.resolvedAt).toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  return (
+    `✅ *[WAGuard সার্ভার ও সিস্টেম রিকভারি]*\n\n` +
+    `ধন্যবাদ বস! 🙏 সার্ভারে আগে যে সমস্যাটি ছিল তা এখন পুরোপুরি ঠিক হয়ে গেছে:\n\n` +
+    `✨ সমাধান হয়েছে: ${recovery.title}\n` +
+    `📝 বিবরণ: ${recovery.details}\n` +
+    `🕒 সময়: ${timeStr}\n\n` +
+    `🛡️ ${recovery.thanksNote}\n` +
+    `সব সিস্টেম এখন ১০০% স্বাভাবিকভাবে কাজ করছে! 💚`
+  );
+}
+
 async function deliverServerNotice(sock: WASocket, problem: QueuedServerProblem): Promise<boolean> {
   const settings = getSettings();
   if (settings.serverErrorNoticeEnabled === false) return false;
@@ -1957,6 +2193,11 @@ async function deliverServerNotice(sock: WASocket, problem: QueuedServerProblem)
   }
 
   if (deliveredAny) {
+    const tracked = activeProblemsMap.get(problem.category);
+    if (tracked) {
+      tracked.notifiedBoss = true;
+      savePersistedActiveProblems();
+    }
     addActivityLog({
       groupId: 'SYSTEM',
       groupName: 'Server Health Monitor',
@@ -1970,6 +2211,45 @@ async function deliverServerNotice(sock: WASocket, problem: QueuedServerProblem)
   return deliveredAny;
 }
 
+async function deliverServerRecoveryNotice(sock: WASocket, recovery: QueuedServerRecovery): Promise<boolean> {
+  const settings = getSettings();
+  if (settings.serverErrorNoticeEnabled === false) return false;
+  if (!sock?.user || !sock?.authState?.creds?.registered) return false;
+  const ws = (sock as any).ws;
+  if (ws && typeof ws.isOpen === 'boolean' && !ws.isOpen) return false;
+
+  const targetMode = settings.serverErrorNoticeTarget || 'boss_inbox';
+  const text = buildServerRecoveryText(recovery);
+  let deliveredAny = false;
+
+  if (targetMode === 'boss_inbox' || targetMode === 'both') {
+    const bossJid = resolveBossAdminJid();
+    const ok = await safeSendMessage(sock, bossJid, { text }, { isRecoveryNotice: true });
+    if (ok) deliveredAny = true;
+  }
+
+  if (targetMode === 'groups' || targetMode === 'both') {
+    const groupIds = Object.keys(groupMetaCache).slice(0, 5);
+    for (const gid of groupIds) {
+      const ok = await safeSendMessage(sock, gid, { text }, { isRecoveryNotice: true });
+      if (ok) deliveredAny = true;
+    }
+  }
+
+  if (deliveredAny) {
+    addActivityLog({
+      groupId: 'SYSTEM',
+      groupName: 'Server Health Monitor',
+      senderJid: resolveBossAdminJid(),
+      senderPhone: cleanJidUser(resolveBossAdminJid()),
+      action: 'replied',
+      reason: `সমস্যা সমাধান হওয়ায় বসকে ধন্যবাদ ও রিকভারি নোটিশ পাঠানো হয়েছে: ${recovery.title}`,
+      details: recovery.details,
+    });
+  }
+  return deliveredAny;
+}
+
 export async function reportServerProblem(
   params: { category: string; title: string; details: string; suggestion?: string; urgent?: boolean },
   sock?: WASocket | null
@@ -1978,12 +2258,34 @@ export async function reportServerProblem(
   if (settings.serverErrorNoticeEnabled === false) return false;
 
   const now = Date.now();
+  const prevTracked = activeProblemsMap.get(params.category);
+  activeProblemsMap.set(params.category, {
+    category: params.category,
+    title: params.title,
+    details: params.details,
+    suggestion: params.suggestion,
+    reportedAt: prevTracked?.reportedAt || now,
+    notifiedBoss: prevTracked?.notifiedBoss || false,
+  });
+  savePersistedActiveProblems();
+
   const lastAt = lastServerProblemAlertAt.get(params.category) || 0;
   const cooldownMs = params.urgent ? 2 * 60 * 1000 : 8 * 60 * 1000;
   if (now - lastAt < cooldownMs) {
     return false;
   }
   lastServerProblemAlertAt.set(params.category, now);
+
+  try {
+    recordWebServerProblemEvent({
+      category: params.category,
+      title: params.title,
+      details: params.details,
+      suggestion: params.suggestion,
+      account: params.category.startsWith('wa_') ? 'primary' : 'server',
+      source: params.category.startsWith('wa_') ? 'network' : 'web_server',
+    });
+  } catch {}
 
   const item: QueuedServerProblem = {
     category: params.category,
@@ -2005,13 +2307,107 @@ export async function reportServerProblem(
   return false;
 }
 
+export async function resolveServerProblem(
+  category: string,
+  opts?: {
+    details?: string;
+    thanksNote?: string;
+    sock?: WASocket | null;
+    forceNotifyIfUnrecordedTitle?: string;
+  }
+): Promise<boolean> {
+  const existing = activeProblemsMap.get(category);
+  const pendingIdx = pendingServerProblems.findIndex((p) => p.category === category);
+  if (pendingIdx >= 0) {
+    pendingServerProblems.splice(pendingIdx, 1);
+  }
+
+  if (!existing && !opts?.forceNotifyIfUnrecordedTitle) {
+    return false;
+  }
+
+  const wasNotified = Boolean(existing?.notifiedBoss || opts?.forceNotifyIfUnrecordedTitle);
+  const title = existing?.title || opts?.forceNotifyIfUnrecordedTitle || 'সার্ভার ও সিস্টেম সমস্যা';
+  const reportedAt = existing?.reportedAt || Date.now();
+
+  if (existing) {
+    activeProblemsMap.delete(category);
+    savePersistedActiveProblems();
+  }
+
+  if (!wasNotified) {
+    return false;
+  }
+
+  const settings = getSettings();
+  if (settings.serverErrorNoticeEnabled === false) return false;
+
+  const now = Date.now();
+  const lastRecAt = lastServerRecoveryAlertAt.get(category) || 0;
+  if (now - lastRecAt < 60 * 1000) {
+    return false;
+  }
+  lastServerRecoveryAlertAt.set(category, now);
+
+  const recovery: QueuedServerRecovery = {
+    category,
+    title,
+    details: opts?.details || 'সার্ভারের এই সমস্যাটি এখন সম্পূর্ণভাবে সমাধান হয়ে গেছে।',
+    thanksNote:
+      opts?.thanksNote ||
+      'ধন্যবাদ বস! আপনার সাপোর্ট ও সমাধানের জন্য বট আবার নির্বিঘ্নে কাজ চালিয়ে যাচ্ছে।',
+    reportedAt,
+    resolvedAt: now,
+  };
+
+  const targetSock = opts?.sock || (globalSocketGetter ? globalSocketGetter() : null);
+  if (targetSock) {
+    const sent = await deliverServerRecoveryNotice(targetSock, recovery);
+    if (sent) return true;
+  }
+
+  if (!pendingServerRecoveries.some((r) => r.category === category)) {
+    pendingServerRecoveries.push(recovery);
+    savePersistedActiveProblems();
+  }
+  return false;
+}
+
+export async function resolveAdminPermissionProblemsForGroup(
+  groupId: string,
+  groupName: string,
+  sock?: WASocket | null
+) {
+  const categories = [`sticker_no_perm_${groupId}`, `no_admin_${groupId}`, `sticker_perm_fail_${groupId}`];
+  for (const cat of categories) {
+    if (activeProblemsMap.has(cat)) {
+      await resolveServerProblem(cat, {
+        details: `"${groupName}" গ্রুপে বটের Admin Permission পাওয়া গেছে ও মডারেশন/স্টিকার ডিলিট সচল হয়েছে।`,
+        thanksNote: `ধন্যবাদ বস! "${groupName}" গ্রুপে অ্যাডমিন পারমিশন নিশ্চিত হওয়ায় স্বয়ংক্রিয় নিরাপত্তা এখন পুরোপুরি চালু।`,
+        sock,
+      });
+    }
+  }
+}
+
 export async function flushPendingServerNotices(sock: WASocket | null) {
-  if (!sock || pendingServerProblems.length === 0) return;
+  if (!sock) return;
   while (pendingServerProblems.length > 0) {
     const next = pendingServerProblems[0];
     const ok = await deliverServerNotice(sock, next);
     if (!ok) break;
     pendingServerProblems.shift();
+  }
+  let flushedRecovery = false;
+  while (pendingServerRecoveries.length > 0) {
+    const nextRec = pendingServerRecoveries[0];
+    const ok = await deliverServerRecoveryNotice(sock, nextRec);
+    if (!ok) break;
+    pendingServerRecoveries.shift();
+    flushedRecovery = true;
+  }
+  if (flushedRecovery) {
+    savePersistedActiveProblems();
   }
 }
 
@@ -2035,6 +2431,49 @@ export function startServerHealthMonitor(getSock: () => WASocket | null) {
           },
           sock
         );
+      } else if (memMb < 390 && activeProblemsMap.has('high_memory')) {
+        await resolveServerProblem('high_memory', {
+          details: `সার্ভারের মেমোরি (RAM) এখন স্বাভাবিক পর্যায়ে ফিরেছে (বর্তমান ব্যবহার: ${memMb} MB)।`,
+          thanksNote: 'ধন্যবাদ বস! সার্ভারের লোড কমে এখন একদম ফ্রি ও দ্রুতগতিতে চলছে।',
+          sock,
+        });
+      }
+
+      // Check runtime stability after crash/rejection alerts (> 2 minutes clean)
+      const now = Date.now();
+      for (const crashCat of ['unhandled_rejection', 'uncaught_exception']) {
+        const trackedCrash = activeProblemsMap.get(crashCat);
+        if (trackedCrash && now - trackedCrash.reportedAt > 2 * 60 * 1000) {
+          await resolveServerProblem(crashCat, {
+            details: 'সার্ভার কোনো নতুন ত্রুটি ছাড়াই একটানা স্থিতিশীলভাবে সচল রয়েছে।',
+            thanksNote: 'ধন্যবাদ বস! সার্ভার প্রসেস এখন পুরোপুরি সুস্থ ও নির্বিঘ্ন অবস্থায় আছে।',
+            sock,
+          });
+        }
+      }
+
+      // Check if previously disconnected or permission-blocked issues are now healthy
+      if (sock?.user && sock?.authState?.creds?.registered && ((sock as any).ws?.isOpen ?? true)) {
+        for (const connCat of ['wa_disconnect_drop', 'wa_extended_outage']) {
+          if (activeProblemsMap.has(connCat)) {
+            await resolveServerProblem(connCat, {
+              details: 'WhatsApp সংযোগ পুনরায় অনলাইনে ফিরেছে এবং স্থিতিশীলভাবে কাজ করছে।',
+              thanksNote: 'ধন্যবাদ বস! সার্ভার ও কানেকশন ঠিক থাকায় বট আবার পুরোপুরি অ্যাক্টিভ।',
+              sock,
+            });
+          }
+        }
+
+        for (const tracked of Array.from(activeProblemsMap.values())) {
+          const match = tracked.category.match(/^(?:sticker_no_perm_|no_admin_|sticker_perm_fail_)(.+)$/);
+          if (match) {
+            const gid = match[1];
+            const meta = groupMetaCache[gid]?.meta;
+            if (meta && isBotGroupAdminFromMeta(sock, meta)) {
+              await resolveAdminPermissionProblemsForGroup(gid, meta.subject || getKnownGroupSubjectFallback(gid), sock);
+            }
+          }
+        }
       }
     } catch {}
   }, 45000);
@@ -2057,33 +2496,104 @@ export async function sendTestBossAndServerNotice(sock: WASocket | null): Promis
 // -------------------------------------------------------------
 // GROUP ADMIN VERIFICATION
 // -------------------------------------------------------------
+const inFlightMetaFetches = new Map<string, Promise<any>>();
+let lastAllGroupsFallbackAt = 0;
+
+function getKnownGroupSubjectFallback(groupId: string): string {
+  const cachedSubj = groupMetaCache[groupId]?.meta?.subject;
+  if (cachedSubj) return cachedSubj;
+  for (const act of Object.values(db.memberActivity || {})) {
+    if (act.groupId === groupId && act.groupName && act.groupName !== 'WhatsApp Group') {
+      return act.groupName;
+    }
+  }
+  for (const warn of Object.values(db.warnings || {})) {
+    if (warn.groupId === groupId && warn.groupName && warn.groupName !== 'WhatsApp Group') {
+      return warn.groupName;
+    }
+  }
+  return 'WhatsApp Group';
+}
+
 export async function getGroupMeta(sock: WASocket, groupId: string, forceRefresh = false) {
   const cached = groupMetaCache[groupId];
   const now = Date.now();
   // Fast path: serve fresh cache within 5 minutes (0ms latency for instant sticker/profanity removal)
-  if (!forceRefresh && cached && now - cached.fetchedAt < 300000) {
+  if (!forceRefresh && cached?.meta?.participants?.length > 0 && now - cached.fetchedAt < 300000) {
     learnGroupParticipantsLidPn(cached.meta);
     return cached.meta;
   }
   // Stale-while-revalidate: if older cache exists, return immediately & refresh silently in background
-  if (!forceRefresh && cached) {
+  if (!forceRefresh && cached?.meta?.participants?.length > 0) {
     learnGroupParticipantsLidPn(cached.meta);
-    sock.groupMetadata(groupId)
-      .then((freshMeta) => {
-        groupMetaCache[groupId] = { meta: freshMeta, fetchedAt: Date.now() };
-        learnGroupParticipantsLidPn(freshMeta);
-      })
-      .catch(() => {});
+    if (!inFlightMetaFetches.has(groupId)) {
+      const p = sock.groupMetadata(groupId)
+        .then((freshMeta) => {
+          if (freshMeta) {
+            groupMetaCache[groupId] = { meta: freshMeta, fetchedAt: Date.now() };
+            learnGroupParticipantsLidPn(freshMeta);
+          }
+          return freshMeta;
+        })
+        .catch(() => null)
+        .finally(() => {
+          inFlightMetaFetches.delete(groupId);
+        });
+      inFlightMetaFetches.set(groupId, p);
+    }
     return cached.meta;
   }
-  try {
-    const meta = await sock.groupMetadata(groupId);
-    groupMetaCache[groupId] = { meta, fetchedAt: now };
-    learnGroupParticipantsLidPn(meta);
-    return meta;
-  } catch (err: any) {
-    console.error(`Failed to fetch metadata for group ${groupId}:`, err.message);
+
+  const existingFetch = inFlightMetaFetches.get(groupId);
+  if (existingFetch) {
+    const res = await existingFetch;
+    if (res) return res;
+  }
+
+  const fetchPromise = (async () => {
+    try {
+      const meta = await sock.groupMetadata(groupId);
+      if (meta) {
+        groupMetaCache[groupId] = { meta, fetchedAt: Date.now() };
+        learnGroupParticipantsLidPn(meta);
+        return meta;
+      }
+    } catch (err: any) {
+      // Quick retry once after short pause if no cache is present yet
+      if (!cached?.meta) {
+        await new Promise((r) => setTimeout(r, 350));
+        try {
+          const retryMeta = await sock.groupMetadata(groupId);
+          if (retryMeta) {
+            groupMetaCache[groupId] = { meta: retryMeta, fetchedAt: Date.now() };
+            learnGroupParticipantsLidPn(retryMeta);
+            return retryMeta;
+          }
+        } catch {}
+      }
+      console.error(`Failed to fetch metadata for group ${groupId}:`, err?.message || err);
+    }
+
+    // Fallback to groupFetchAllParticipating when single groupMetadata query fails
+    if (Date.now() - lastAllGroupsFallbackAt > 25000) {
+      lastAllGroupsFallbackAt = Date.now();
+      try {
+        const allGroups = await sock.groupFetchAllParticipating();
+        primeGroupMetaCache(allGroups);
+        if (groupMetaCache[groupId]?.meta) {
+          return groupMetaCache[groupId].meta;
+        }
+      } catch {}
+    }
+
     return cached ? cached.meta : null;
+  })();
+
+  inFlightMetaFetches.set(groupId, fetchPromise);
+  try {
+    return await fetchPromise;
+  } finally {
+    inFlightMetaFetches.delete(groupId);
   }
 }
 
@@ -2095,6 +2605,23 @@ export function primeGroupMetaCache(groupsMap: Record<string, any>) {
       groupMetaCache[groupId] = { meta, fetchedAt: now };
       learnGroupParticipantsLidPn(meta);
     }
+  }
+}
+
+export function upsertCachedGroupMeta(updates: any[]) {
+  if (!Array.isArray(updates)) return;
+  const now = Date.now();
+  for (const u of updates) {
+    const groupId = u?.id;
+    if (!groupId || !groupId.endsWith('@g.us')) continue;
+    const prevMeta = groupMetaCache[groupId]?.meta || {};
+    const mergedMeta = {
+      ...prevMeta,
+      ...u,
+      participants: Array.isArray(u.participants) && u.participants.length > 0 ? u.participants : prevMeta.participants,
+    };
+    groupMetaCache[groupId] = { meta: mergedMeta, fetchedAt: now };
+    learnGroupParticipantsLidPn(mergedMeta);
   }
 }
 
@@ -2157,6 +2684,21 @@ export async function handleGroupParticipantsUpdate(
 
     // Always invalidate cache when members or admin roles change so moderation stays accurate
     delete groupMetaCache[groupId];
+
+    if (update.action === 'promote') {
+      const hasPermAlert =
+        activeProblemsMap.has(`sticker_no_perm_${groupId}`) ||
+        activeProblemsMap.has(`no_admin_${groupId}`) ||
+        activeProblemsMap.has(`sticker_perm_fail_${groupId}`);
+      if (hasPermAlert) {
+        await resolveBotIdentitySet(sock).catch(() => {});
+        const freshMeta = await getGroupMeta(sock, groupId, true).catch(() => null);
+        if (freshMeta && isBotGroupAdminFromMeta(sock, freshMeta)) {
+          await resolveAdminPermissionProblemsForGroup(groupId, freshMeta.subject || getKnownGroupSubjectFallback(groupId), sock);
+        }
+      }
+      return;
+    }
 
     if (update.action !== 'add' || !Array.isArray(update.participants) || update.participants.length === 0) {
       return;
@@ -2262,14 +2804,25 @@ export async function checkPermissions(
 ): Promise<{
   isSenderAdmin: boolean;
   isBotAdmin: boolean;
+  metaKnown: boolean;
   groupSubject: string;
   matchedSenderId?: string;
 }> {
   try {
     const meta = await getGroupMeta(sock, groupId, forceRefresh);
-    if (!meta || !meta.participants) {
-      return { isSenderAdmin: false, isBotAdmin: false, groupSubject: 'WhatsApp Group' };
+    if (!meta || !Array.isArray(meta.participants) || meta.participants.length === 0) {
+      return {
+        isSenderAdmin: false,
+        isBotAdmin: false,
+        metaKnown: false,
+        groupSubject: meta?.subject || getKnownGroupSubjectFallback(groupId),
+      };
     }
+
+    learnGroupParticipantsLidPn(meta);
+
+    const lidMappingApi = (sock as any)?.signalRepository?.lidMapping;
+    const { botUsers, botNormalized } = await resolveBotIdentitySet(sock);
 
     const senderCandidates = new Set(
       [cleanJidUser(senderJid), cleanJidUser(senderAltJid)].filter(Boolean)
@@ -2277,30 +2830,44 @@ export async function checkPermissions(
     const senderNormalized = new Set(
       [senderJid ? normalizeJid(senderJid) : '', senderAltJid ? normalizeJid(senderAltJid) : ''].filter(Boolean)
     );
-
-    const botRawIds = [
-      sock.user?.id,
-      sock.user?.lid,
-      sock.authState?.creds?.me?.id,
-      sock.authState?.creds?.me?.lid,
-    ].filter(Boolean) as string[];
-    const botCandidates = new Set(botRawIds.map((j) => cleanJidUser(j)).filter(Boolean));
-    const botNormalized = new Set(botRawIds.map((j) => normalizeJid(j)).filter(Boolean));
+    if (isLidJid(senderJid) && lidMappingApi?.getPNForLID && !lidToPnUserMap.has(cleanJidUser(senderJid))) {
+      try {
+        const pn = await Promise.race([
+          lidMappingApi.getPNForLID(senderJid),
+          new Promise<null>((r) => setTimeout(() => r(null), 1000)),
+        ]);
+        if (pn) rememberLidPnPair(senderJid, pn);
+      } catch {}
+    }
+    expandIdSetWithLidMaps(senderCandidates, senderNormalized);
 
     let isSenderAdmin = false;
     let isBotAdmin = false;
     let matchedSenderId: string | undefined;
+    const unresolvedAdminLidParticipants: Array<{ id: string; p: any }> = [];
 
     for (const p of meta.participants) {
       const pAny = p as any;
-      const pAllJids = [p.id, pAny.lid, pAny.phoneNumber].filter(Boolean) as string[];
-      const pAllClean = pAllJids.map((j) => cleanJidUser(j)).filter(Boolean);
-      const pAllNorm = pAllJids.map((j) => normalizeJid(j)).filter(Boolean);
+      const pAllJids = [p.id, pAny.jid, pAny.lid, pAny.phoneNumber, pAny.pn].filter(Boolean) as string[];
+      const pCleanSet = new Set<string>();
+      const pNormSet = new Set<string>();
+      for (const j of pAllJids) {
+        const cu = cleanJidUser(j);
+        if (cu) pCleanSet.add(cu);
+        const norm = normalizeJid(j);
+        if (norm) pNormSet.add(norm);
+        if (!isLidJid(j)) {
+          const pnDigits = normalizePhoneDigits(cu);
+          if (pnDigits) pCleanSet.add(pnDigits);
+        }
+      }
+      expandIdSetWithLidMaps(pCleanSet, pNormSet);
+
       const isAdmin = p.admin === 'admin' || p.admin === 'superadmin' || Boolean(pAny.isAdmin) || Boolean(pAny.isSuperAdmin);
 
       const matchesSender =
-        pAllClean.some((c) => senderCandidates.has(c)) ||
-        pAllNorm.some((n) => senderNormalized.has(n));
+        Array.from(pCleanSet).some((c) => senderCandidates.has(c)) ||
+        Array.from(pNormSet).some((n) => senderNormalized.has(n));
 
       if (matchesSender) {
         matchedSenderId = p.id;
@@ -2310,27 +2877,73 @@ export async function checkPermissions(
       }
 
       const matchesBot =
-        pAllClean.some((c) => botCandidates.has(c)) ||
-        pAllNorm.some((n) => botNormalized.has(n));
+        Array.from(pCleanSet).some((c) => botUsers.has(c)) ||
+        Array.from(pNormSet).some((n) => botNormalized.has(n));
 
       if (matchesBot && isAdmin) {
         isBotAdmin = true;
+      } else if (isAdmin && !isBotAdmin && p.id && isLidJid(p.id) && !pAny.phoneNumber && !pAny.pn) {
+        unresolvedAdminLidParticipants.push({ id: p.id, p });
+      }
+    }
+
+    // Check group creator/owner metadata as additional proof of admin rights
+    if (!isBotAdmin) {
+      const ownerCands = [meta.owner, meta.ownerPn].filter(Boolean) as string[];
+      for (const ow of ownerCands) {
+        const cu = cleanJidUser(ow);
+        const nu = !isLidJid(ow) ? normalizePhoneDigits(cu) : '';
+        if (botUsers.has(cu) || (nu && botUsers.has(nu)) || botNormalized.has(normalizeJid(ow))) {
+          isBotAdmin = true;
+          break;
+        }
+      }
+    }
+
+    // Last-resort Baileys v7 check: resolve @lid -> @s.whatsapp.net ONLY for admin participants if bot wasn't matched yet
+    if (!isBotAdmin && unresolvedAdminLidParticipants.length > 0 && typeof lidMappingApi?.getPNForLID === 'function') {
+      for (const adminEntry of unresolvedAdminLidParticipants.slice(0, 15)) {
+        try {
+          const lookedUpPn = await Promise.race([
+            lidMappingApi.getPNForLID(adminEntry.id),
+            new Promise<null>((r) => setTimeout(() => r(null), 1000)),
+          ]);
+          if (lookedUpPn) {
+            rememberLidPnPair(adminEntry.id, lookedUpPn);
+            const pnClean = cleanJidUser(lookedUpPn);
+            const pnNorm = normalizePhoneDigits(pnClean);
+            if ((pnClean && botUsers.has(pnClean)) || (pnNorm && botUsers.has(pnNorm))) {
+              isBotAdmin = true;
+              break;
+            }
+          }
+        } catch {}
       }
     }
 
     console.log(
-      `[Admin Verification] Group: "${meta.subject}" (${meta.addressingMode || 'pn'}) | Bot IDs: ${Array.from(botCandidates).join(',')} | isBotAdmin: ${isBotAdmin} | isSenderAdmin: ${isSenderAdmin}`
+      `[Admin Verification] Group: "${meta.subject}" (${meta.addressingMode || 'pn'}) | Bot IDs: ${Array.from(botUsers).join(',')} | isBotAdmin: ${isBotAdmin} | isSenderAdmin: ${isSenderAdmin}`
     );
+
+    if (isBotAdmin) {
+      resolveAdminPermissionProblemsForGroup(groupId, meta.subject || getKnownGroupSubjectFallback(groupId), sock).catch(() => {});
+    }
 
     return {
       isSenderAdmin,
       isBotAdmin,
-      groupSubject: meta.subject || 'WhatsApp Group',
+      metaKnown: true,
+      groupSubject: meta.subject || getKnownGroupSubjectFallback(groupId),
       matchedSenderId,
     };
   } catch (err: any) {
     console.error('[checkPermissions error]:', err.message);
-    return { isSenderAdmin: false, isBotAdmin: false, groupSubject: 'WhatsApp Group' };
+    return {
+      isSenderAdmin: false,
+      isBotAdmin: false,
+      metaKnown: false,
+      groupSubject: getKnownGroupSubjectFallback(groupId),
+    };
   }
 }
 
@@ -2639,18 +3252,37 @@ export function getNightModeStatus() {
   };
 }
 
-function isBotGroupAdminFromMeta(sock: WASocket, meta: any): boolean {
-  if (!meta?.participants) return false;
-  const botIds = [sock.user?.id, sock.user?.lid, sock.authState?.creds?.me?.id, sock.authState?.creds?.me?.lid]
-    .filter(Boolean)
-    .map((j) => cleanJidUser(String(j)));
-  const botSet = new Set(botIds);
+export function isBotGroupAdminFromMeta(sock: WASocket | null | undefined, meta: any): boolean {
+  if (!meta) return false;
+  learnGroupParticipantsLidPn(meta);
+  const { botUsers, botNormalized } = collectKnownBotUsersSync(sock);
+
+  const ownerCands = [meta.owner, meta.ownerPn].filter(Boolean) as string[];
+  for (const ow of ownerCands) {
+    const cu = cleanJidUser(ow);
+    const nu = !isLidJid(ow) ? normalizePhoneDigits(cu) : '';
+    if (botUsers.has(cu) || (nu && botUsers.has(nu)) || botNormalized.has(normalizeJid(ow))) {
+      return true;
+    }
+  }
+
+  if (!Array.isArray(meta.participants)) return false;
   for (const p of meta.participants) {
     const pAny = p as any;
     const isAdmin = p.admin === 'admin' || p.admin === 'superadmin' || Boolean(pAny.isAdmin) || Boolean(pAny.isSuperAdmin);
     if (!isAdmin) continue;
-    const candidates = [p.id, pAny.lid, pAny.phoneNumber].filter(Boolean).map((j) => cleanJidUser(String(j)));
-    if (candidates.some((c) => botSet.has(c))) return true;
+    const rawJids = [p.id, pAny.jid, pAny.lid, pAny.phoneNumber, pAny.pn].filter(Boolean) as string[];
+    const pSet = new Set<string>();
+    for (const j of rawJids) {
+      const cu = cleanJidUser(j);
+      if (cu) pSet.add(cu);
+      if (!isLidJid(j)) {
+        const pn = normalizePhoneDigits(cu);
+        if (pn) pSet.add(pn);
+      }
+    }
+    expandIdSetWithLidMaps(pSet);
+    if (Array.from(pSet).some((c) => botUsers.has(c))) return true;
   }
   return false;
 }
@@ -2659,6 +3291,7 @@ export async function applyNightModeManually(sock: WASocket | null, lock: boolea
   if (!sock || !sock.authState?.creds?.registered) {
     return { affected: 0 };
   }
+  await resolveBotIdentitySet(sock).catch(() => {});
   const settings = getSettings();
   let affected = 0;
 
@@ -3043,6 +3676,7 @@ export async function getGroupMembersForBlockPage(
     };
   }
 
+  await resolveBotIdentitySet(sock).catch(() => {});
   const allGroups = await sock.groupFetchAllParticipating().catch(() => ({} as Record<string, any>));
   primeGroupMetaCache(allGroups);
 
@@ -3474,7 +4108,7 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
   const cleanPhone = (senderAltJid || senderJid).split('@')[0].split(':')[0];
 
   // 1. Verify Admin Permissions (supports both Baileys v7 @lid and @s.whatsapp.net)
-  const { isSenderAdmin, isBotAdmin, groupSubject, matchedSenderId } = await checkPermissions(
+  const { isSenderAdmin, isBotAdmin, metaKnown, groupSubject, matchedSenderId } = await checkPermissions(
     sock,
     remoteJid,
     senderJid,
@@ -3509,12 +4143,12 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
       const remainingSec = Math.round(restrictionCheck.remainingMs / 1000);
       console.log(`[Individual Mute ACTIVE] Intercepted message from restricted user @${cleanPhone} in "${groupSubject}". Auto-deleting message (${remainingSec}s remaining)...`);
 
-      const deleted = await deleteMessageSafely(sock, remoteJid, msg, matchedSenderId, isBotAdmin);
+      const deleted = await deleteMessageSafely(sock, remoteJid, msg, matchedSenderId, metaKnown ? isBotAdmin : undefined);
       if (deleted) {
         db.stats.deletedMessages++;
         db.stats.restrictedMessagesBlocked = (db.stats.restrictedMessagesBlocked || 0) + 1;
         saveDatabase();
-      } else if (!isBotAdmin) {
+      } else if (metaKnown && !isBotAdmin) {
         console.warn(`[Individual Mute Warn] Bot lacks admin delete permission in "${groupSubject}".`);
       }
 
@@ -3703,13 +4337,13 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
   // -------------------------------------------------------------
   if (violationType) {
     const noticeReason = publicViolationReason || violationDetails;
-    console.log(`[Moderation Triggered] ${violationType} in ${groupSubject} by @${cleanPhone} (isBotAdmin=${isBotAdmin})`);
+    console.log(`[Moderation Triggered] ${violationType} in ${groupSubject} by @${cleanPhone} (isBotAdmin=${isBotAdmin}, metaKnown=${metaKnown})`);
 
-    // Step 1: Real Message Delete Operation (PN + LID compatible & Admin permission verified)
-    const deleteSuccessful = await deleteMessageSafely(sock, remoteJid, msg, matchedSenderId, isBotAdmin);
+    // Step 1: Real Message Delete Operation (PN + LID compatible; allow attempt when metadata wasn't fetched)
+    const deleteSuccessful = await deleteMessageSafely(sock, remoteJid, msg, matchedSenderId, metaKnown ? isBotAdmin : undefined);
     if (deleteSuccessful) {
       db.stats.deletedMessages++;
-    } else if (!isBotAdmin) {
+    } else if (metaKnown && !isBotAdmin) {
       console.warn(`[Moderation Warn] Cannot delete message in "${groupSubject}" because bot is NOT Group Admin.`);
       reportServerProblem(
         {

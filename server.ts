@@ -22,7 +22,10 @@ import {
   handleGroupParticipantsUpdate,
   handleIncomingCall,
   primeGroupMetaCache,
+  rememberLidPnPair,
+  resolveBotIdentitySet,
   startGroupLockMonitor,
+  upsertCachedGroupMeta,
   startNightModeScheduler,
   startRestrictedUsersMonitor,
   getSettings as getModerationSettings,
@@ -57,6 +60,9 @@ import {
   startServerHealthMonitor,
   flushPendingServerNotices,
   reportServerProblem,
+  resolveAdminPermissionProblemsForGroup,
+  resolveServerProblem,
+  isBotGroupAdminFromMeta,
   sendTestBossAndServerNotice,
   flushDatabaseSync,
 } from './src/moderationEngine.ts';
@@ -86,7 +92,16 @@ import {
   PRIMARY_SESSIONS_DIR,
   isPersistentVolumeConfigured,
 } from './src/storagePaths.ts';
+import {
+  flushDiagnosticsSync,
+  getLatestDisconnectForAccount,
+  initConnectionDiagnosticsOnBoot,
+  recordConnectionOpen,
+  recordDisconnectEvent,
+  recordGracefulServerShutdown,
+} from './src/connectionDiagnostics.ts';
 
+initConnectionDiagnosticsOnBoot();
 startRestrictedUsersMonitor(() => currentSock);
 startGroupLockMonitor(() => currentSock);
 startNightModeScheduler(() => currentSock);
@@ -456,15 +471,35 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
       botState.pairingCode = '';
       botState.qrCodeDataUrl = '';
       botState.pairingStartedAt = 0;
+      recordConnectionOpen('primary', sock.user?.id);
       console.log('WhatsApp connection opened successfully for user:', sock.user?.id);
+      void resolveBotIdentitySet(sock).catch(() => {});
       notifyStickerQueueSocketReady();
 
       setTimeout(async () => {
         if (socketToken !== activeSocketToken || sock !== currentSock) return;
         try {
+          await resolveBotIdentitySet(sock).catch(() => {});
           const groups = await sock.groupFetchAllParticipating();
           primeGroupMetaCache(groups);
           notifyStickerQueueSocketReady();
+
+          await resolveServerProblem('wa_disconnect_drop', {
+            details: 'WhatsApp বট পুনরায় সফলভাবে সার্ভারের সাথে কানেক্ট হয়েছে।',
+            thanksNote: 'ধন্যবাদ বস! কানেকশন ফিরে আসায় সব গ্রুপের নিরাপত্তা আবার ১০০% চালু হয়েছে।',
+            sock,
+          });
+          await resolveServerProblem('wa_extended_outage', {
+            details: 'দীর্ঘ সংযোগ বিচ্ছিন্নতার পর WhatsApp সেশন আবার পুরোপুরি অনলাইনে ফিরেছে।',
+            thanksNote: 'ধন্যবাদ বস! সার্ভার সাপোর্ট ও নেটওয়ার্ক ঠিক হওয়ায় বট আবার কাজ শুরু করেছে।',
+            sock,
+          });
+          for (const g of Object.values(groups)) {
+            if (g?.id && isBotGroupAdminFromMeta(sock, g)) {
+              await resolveAdminPermissionProblemsForGroup(g.id, g.subject || 'WhatsApp Group', sock);
+            }
+          }
+
           await flushPendingServerNotices(sock);
           const groupList = Object.values(groups).map((g) => ({
             id: g.id,
@@ -478,7 +513,7 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
         } catch {
           // non-blocking
         }
-      }, 800);
+      }, 200);
     } else if (connection === 'close') {
       const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
       const errMsg = lastDisconnect?.error?.message || 'Connection closed';
@@ -510,6 +545,14 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
         botState.pairingStartedAt = 0;
         botState.user = null;
         wipePrimarySessionsDir('401 logged out / invalid creds');
+        recordDisconnectEvent({
+          account: 'primary',
+          statusCode: 401,
+          errMsg,
+          isPairing: Boolean(pairingInFlightPromise),
+          autoReconnecting: false,
+          phoneNumber: botState.phoneNumber,
+        });
         return;
       }
 
@@ -526,6 +569,14 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
         botState.lastError = errMsg;
         botState.pairingCode = '';
         botState.pairingStartedAt = 0;
+        recordDisconnectEvent({
+          account: 'primary',
+          statusCode: statusCode || 405,
+          errMsg,
+          isPairing: Boolean(pairingInFlightPromise),
+          autoReconnecting: false,
+          phoneNumber: botState.phoneNumber,
+        });
         return;
       }
 
@@ -537,6 +588,13 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
         botState.stepMessage = 'অন্য আরেকটি ডিভাইস/সার্ভারে একই সেশন চালু হওয়ায় সংযোগ বিচ্ছিন্ন হয়েছে।';
         botState.lastConnectionStatus = 'Replaced by another session (440)';
         botState.lastError = errMsg;
+        recordDisconnectEvent({
+          account: 'primary',
+          statusCode: 440,
+          errMsg,
+          autoReconnecting: false,
+          phoneNumber: botState.phoneNumber,
+        });
         return;
       }
 
@@ -552,11 +610,28 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
           : `Reconnecting (attempt ${reconnectAttempts + 1})...`;
         botState.lastError = null;
 
+        if (!isRestartRequired && reconnectAttempts === 0) {
+          recordDisconnectEvent({
+            account: 'primary',
+            statusCode,
+            errMsg,
+            autoReconnecting: true,
+            phoneNumber: botState.phoneNumber,
+          });
+        }
+
         if (reconnectAttempts >= 40) {
           botState.status = 'disconnected';
           botState.step = 'error';
           botState.stepMessage = 'দীর্ঘ সময় নেটওয়ার্ক সংযোগ পাওয়া যায়নি। ম্যানুয়ালি পুনরায় চেষ্টা করুন।';
           botState.lastConnectionStatus = 'Reconnect paused after extended outage';
+          recordDisconnectEvent({
+            account: 'primary',
+            statusCode: statusCode || 'TIMEOUT',
+            errMsg: `${errMsg} (paused after 40 reconnect attempts)`,
+            autoReconnecting: false,
+            phoneNumber: botState.phoneNumber,
+          });
           reportServerProblem({
             category: 'wa_extended_outage',
             title: 'WhatsApp দীর্ঘ সময় ডিসকানেক্ট ছিল',
@@ -599,6 +674,13 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
       botState.stepMessage = 'সংযোগ বিচ্ছিন্ন হয়েছে। পুনরায় কোড জেনারেট করুন।';
       botState.lastConnectionStatus = `Disconnected (${errMsg})`;
       botState.lastError = errMsg;
+      recordDisconnectEvent({
+        account: 'primary',
+        statusCode,
+        errMsg,
+        autoReconnecting: false,
+        phoneNumber: botState.phoneNumber,
+      });
     }
   });
 
@@ -623,9 +705,31 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
     updateContactNames(contacts as any[]);
   });
 
+  sock.ev.on('lid-mapping.update', (mapping: any) => {
+    if (socketToken !== activeSocketToken || sock !== currentSock) return;
+    if (mapping?.lid && mapping?.pn) {
+      rememberLidPnPair(mapping.lid, mapping.pn);
+    }
+  });
+
+  sock.ev.on('groups.upsert', (groups: any[]) => {
+    if (socketToken !== activeSocketToken || sock !== currentSock) return;
+    upsertCachedGroupMeta(groups);
+  });
+
+  sock.ev.on('groups.update', (updates: any[]) => {
+    if (socketToken !== activeSocketToken || sock !== currentSock) return;
+    upsertCachedGroupMeta(updates);
+  });
+
   sock.ev.on('messaging-history.set', (data: any) => {
     if (socketToken !== activeSocketToken || sock !== currentSock) return;
     if (Array.isArray(data?.contacts)) updateContactNames(data.contacts);
+    if (Array.isArray(data?.lidPnMappings)) {
+      for (const m of data.lidPnMappings) {
+        if (m?.lid && m?.pn) rememberLidPnPair(m.lid, m.pn);
+      }
+    }
   });
 
   sock.ev.on('call', async (calls) => {
@@ -931,6 +1035,14 @@ async function startRealPairingFlow(cleanPhone: string): Promise<{ pairingCode: 
               botState.stepMessage = friendly;
               botState.lastConnectionStatus = `Closed (${statusCode || 'Err'}): ${err?.message || 'Connection Failure'}`;
               botState.lastError = friendly;
+              recordDisconnectEvent({
+                account: 'primary',
+                statusCode,
+                errMsg: err?.message || 'Pairing Connection Failure',
+                isPairing: true,
+                autoReconnecting: false,
+                phoneNumber: cleanPhone,
+              });
               reject(new Error(friendly));
             }
           }
@@ -1044,6 +1156,8 @@ app.get('/api/whatsapp/status', (req: Request, res: Response) => {
     remainingSeconds,
     user: botState.user,
     lastError: botState.lastError,
+    reconnectAttempts,
+    latestDisconnect: getLatestDisconnectForAccount('primary'),
   });
 });
 
@@ -1064,6 +1178,8 @@ app.get('/api/dashboard', (req: Request, res: Response) => {
       step: botState.step,
       stepMessage: botState.stepMessage,
       lastConnectionStatus: botState.lastConnectionStatus,
+      reconnectAttempts,
+      latestDisconnect: getLatestDisconnectForAccount('primary'),
     },
     overview: {
       messagesChecked: modStats.messagesChecked || botState.messagesChecked,
@@ -1374,6 +1490,12 @@ app.post('/api/whatsapp/disconnect', async (req: Request, res: Response) => {
     botState.phoneNumber = '';
     botState.user = null;
     botState.lastError = null;
+    recordDisconnectEvent({
+      account: 'primary',
+      manual: true,
+      errMsg: 'Disconnected manually by user',
+      autoReconnecting: false,
+    });
     res.json({ success: true, message: 'Session disconnected and cleared' });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -1910,8 +2032,10 @@ async function startServer() {
     }
   });
 
-  const shutdown = () => {
-    console.log('Flushing pending moderation DB & sticker queues and closing server gracefully...');
+  const shutdown = (signal = 'SIGTERM') => {
+    console.log(`Flushing pending moderation DB, diagnostics & sticker queues and closing server gracefully (${signal})...`);
+    recordGracefulServerShutdown(signal);
+    flushDiagnosticsSync();
     flushDatabaseSync();
     flushStickerQueueSync();
     server.close(() => {
@@ -1919,8 +2043,8 @@ async function startServer() {
     });
   };
 
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('unhandledRejection', (reason: any) => {
     const msg = reason?.message || String(reason);
     console.error('[Unhandled Rejection Guard]:', msg);
