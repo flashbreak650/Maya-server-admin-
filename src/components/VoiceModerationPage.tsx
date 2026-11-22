@@ -198,12 +198,6 @@ function buildVoiceMediaUrl(pathOrUrl: string | undefined, apiBaseUrl: string): 
   return cleanBase ? `${cleanBase}${pathOrUrl}` : pathOrUrl;
 }
 
-function formatBytesShort(bytes: number): string {
-  if (!bytes || bytes <= 0) return '0 KB';
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 export function VoiceModerationPage({
   isBn,
   overview,
@@ -430,7 +424,6 @@ export function VoiceModerationPage({
   });
 
   const engineReady = Boolean(overview?.engine.offlineReady);
-  const groupVoiceClips = overview?.groupVoiceClips || [];
 
   return (
     <div className="space-y-4 pb-8">
@@ -1118,84 +1111,6 @@ export function VoiceModerationPage({
         </div>
       </div>
 
-      {/* Group Voice Clips Download Center */}
-      <div className="card p-4 space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
-          <div>
-            <h2 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
-              <Download size={16} className="text-emerald-700" />
-              <span>{isBn ? 'গ্রুপ ভয়েস মেসেজ ডাউনলোড (সংরক্ষিত অডিও)' : 'Group Voice Recordings Download'}</span>
-            </h2>
-            <p className="text-[11px] text-slate-500">
-              {isBn
-                ? 'গ্রুপের ইনকামিং ভয়েস নোট সরাসরি শুনুন এবং ১-ক্লিকে ডিভাইসে ডাউনলোড করুন'
-                : 'Listen to captured group voice clips and download them directly to your device'}
-            </p>
-          </div>
-          <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 tabular-nums">
-            {groupVoiceClips.length} {isBn ? 'টি ভয়েস ক্লিপ' : 'clips'}
-          </span>
-        </div>
-
-        {groupVoiceClips.length === 0 ? (
-          <div className="py-6 text-center text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl bg-slate-50/50">
-            {isBn
-              ? 'এখনো কোনো গ্রুপ ভয়েস নোট ইনবক্স মিডিয়ায় জমা হয়নি। গ্রুপে নতুন ভয়েস নোট এলে এখান থেকেও সরাসরি ডাউনলোড করতে পারবেন।'
-              : 'No captured group voice clips yet.'}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-            {groupVoiceClips.map((clip) => {
-              const streamUrl = buildVoiceMediaUrl(clip.mediaUrl, apiBaseUrl);
-              const dlUrl = buildVoiceMediaUrl(clip.downloadUrl, apiBaseUrl) || (streamUrl ? `${streamUrl}&download=1` : '');
-              return (
-                <div
-                  key={`${clip.groupId}_${clip.id}`}
-                  className="p-3 rounded-xl border border-slate-200 bg-slate-50/60 flex flex-col gap-2"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="text-xs font-extrabold text-slate-900 truncate">
-                        {clip.senderName || clip.senderPhone}
-                      </div>
-                      <div className="text-[10.5px] text-slate-500 truncate">
-                        {clip.groupName} · {clip.durationSec > 0 ? `${clip.durationSec}s` : ''} ·{' '}
-                        {formatBytesShort(clip.fileSize)}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {clip.isDeleted && (
-                        <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">
-                          {isBn ? 'ডিলিটেড' : 'Deleted'}
-                        </span>
-                      )}
-                      {dlUrl && (
-                        <a
-                          href={dlUrl}
-                          download={`voice_${clip.senderPhone || 'group'}_${clip.id}.ogg`}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold transition-colors"
-                        >
-                          <Download size={12} />
-                          <span>{isBn ? 'ডাউনলোড' : 'Download'}</span>
-                        </a>
-                      )}
-                    </div>
-                  </div>
-
-                  {streamUrl && (
-                    <audio controls preload="none" src={streamUrl} className="w-full h-8" />
-                  )}
-
-                  <div className="text-[10px] text-slate-400 tabular-nums">
-                    {new Date(clip.timestamp).toLocaleString()}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
       {/* Voice Moderation History & Admin Review Queue */}
       <div className="card p-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-slate-100 pb-3">
@@ -1334,7 +1249,7 @@ export function VoiceModerationPage({
                     </div>
                   )}
 
-                  {audioUrl && (
+                  {isPendingReview && audioUrl && (
                     <div className="flex flex-wrap items-center gap-2">
                       <audio controls preload="none" src={audioUrl} className="h-8 flex-1 min-w-[200px] max-w-sm" />
                       {audioDlUrl && (
