@@ -60,6 +60,7 @@ import {
   Hash,
   HardDrive,
   Inbox,
+  AudioLines,
 } from 'lucide-react';
 import { HELP_ITEMS } from './helpData.ts';
 import { HelpModal } from './components/HelpModal.tsx';
@@ -94,6 +95,10 @@ import {
 import {
   GroupInboxPage,
 } from './components/GroupInboxPage.tsx';
+import {
+  VoiceModerationPage,
+  type VoiceModerationOverview,
+} from './components/VoiceModerationPage.tsx';
 
 interface LatestDisconnectInfo {
   id: string;
@@ -217,6 +222,14 @@ interface ModerationSettings {
   companionCooldownSec?: number;
   companionAllowedGroups?: string[];
   companionCustomBio?: string;
+  voiceModerationEnabled?: boolean;
+  voiceDetectBangla?: boolean;
+  voiceDetectEnglish?: boolean;
+  voiceDetectBanglish?: boolean;
+  voiceProfanitySensitivity?: 'low' | 'medium' | 'high';
+  voiceAllowedWords?: string[];
+  voiceBlockedWords?: string[];
+  voiceWhisperModel?: 'tiny-q5_1' | 'base-q5_1' | 'small-q5_1';
 }
 
 export interface AiKey {
@@ -580,6 +593,14 @@ export default function App() {
     bossFightWindowMinutes: 5,
     serverErrorNoticeEnabled: true,
     serverErrorNoticeTarget: 'boss_inbox',
+    voiceModerationEnabled: true,
+    voiceDetectBangla: true,
+    voiceDetectEnglish: true,
+    voiceDetectBanglish: true,
+    voiceProfanitySensitivity: 'medium',
+    voiceAllowedWords: [],
+    voiceBlockedWords: [],
+    voiceWhisperModel: 'base-q5_1',
   });
   const [customBadwordsText, setCustomBadwordsText] = useState('');
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
@@ -742,6 +763,8 @@ export default function App() {
   const [storageOverview, setStorageOverview] = useState<StorageCleanupOverview | null>(null);
   const [isStorageLoading, setIsStorageLoading] = useState(false);
   const [cleanupRunningMode, setCleanupRunningMode] = useState<string | null>(null);
+  const [voiceOverview, setVoiceOverview] = useState<VoiceModerationOverview | null>(null);
+  const [isVoiceLoading, setIsVoiceLoading] = useState(false);
 
   // Configuration settings
   const [geminiKey, setGeminiKey] = useState(localStorage.getItem('wg_gemini_key') || '');
@@ -1054,6 +1077,67 @@ export default function App() {
     } catch (err: any) {
       showNotification((isBn ? 'সেভ ব্যর্থ: ' : 'Save failed: ') + err.message);
     }
+  };
+
+  const loadVoiceOverview = async () => {
+    setIsVoiceLoading(true);
+    try {
+      const res = await callApi('/api/voice-moderation/overview?limit=100');
+      if (res?.success) {
+        setVoiceOverview(res);
+      }
+    } catch {
+      // non-blocking
+    } finally {
+      setIsVoiceLoading(false);
+    }
+  };
+
+  const handleSaveVoiceSettings = async (patch: Record<string, any>) => {
+    try {
+      const res = await callApi('/api/voice-moderation/settings', 'POST', patch);
+      if (res?.overview) {
+        setVoiceOverview(res.overview);
+      }
+      setSettings((prev) => ({ ...prev, ...patch }));
+      showNotification(res?.message || (isBn ? 'ভয়েস অ্যান্টি-অ্যাবিউজ সেটিংস সেভ হয়েছে!' : 'Voice moderation settings saved!'));
+    } catch (err: any) {
+      showNotification((isBn ? 'সেভ ব্যর্থ: ' : 'Save failed: ') + err.message);
+    }
+  };
+
+  const handleEnsureVoiceModel = async (modelId: 'tiny-q5_1' | 'base-q5_1' | 'small-q5_1') => {
+    try {
+      const res = await callApi('/api/voice-moderation/model/ensure', 'POST', { modelId });
+      if (res?.overview) setVoiceOverview(res.overview);
+      showNotification(res?.message || (isBn ? 'মডেল প্রস্তুত করা হচ্ছে...' : 'Preparing offline model...'));
+    } catch (err: any) {
+      showNotification((isBn ? 'মডেল ডাউনলোড ব্যর্থ: ' : 'Model download failed: ') + err.message);
+    }
+  };
+
+  const handleRetryVoiceQueue = async () => {
+    try {
+      const res = await callApi('/api/voice-moderation/queue/retry', 'POST');
+      if (res?.overview) setVoiceOverview(res.overview);
+      showNotification(res?.message || (isBn ? 'কিউ পুনরায় চালু হয়েছে' : 'Queue retried'));
+    } catch (err: any) {
+      showNotification((isBn ? 'রিট্রাই ব্যর্থ: ' : 'Retry failed: ') + err.message);
+    }
+  };
+
+  const handleClearVoiceHistory = async () => {
+    try {
+      const res = await callApi('/api/voice-moderation/history/clear', 'POST');
+      if (res?.overview) setVoiceOverview(res.overview);
+      showNotification(res?.message || (isBn ? 'ভয়েস হিস্ট্রি ক্লিয়ার হয়েছে' : 'Voice history cleared'));
+    } catch (err: any) {
+      showNotification((isBn ? 'ক্লিয়ার ব্যর্থ: ' : 'Clear failed: ') + err.message);
+    }
+  };
+
+  const handleTestVoiceAudio = async (payload: any) => {
+    return callApi('/api/voice-moderation/test', 'POST', payload);
   };
 
   const loadNightMode = async () => {
@@ -1469,6 +1553,8 @@ export default function App() {
       loadModerationData();
     } else if (page === 'storagecleanup') {
       loadStorageOverview();
+    } else if (page === 'voicemod') {
+      loadVoiceOverview();
     }
   };
 
@@ -2398,6 +2484,9 @@ export default function App() {
           <button className={`nav ${activePage === 'aivision' ? 'active' : ''}`} onClick={() => navigateToPage('aivision')}>
             <ScanEye size={16} /> {isBn ? 'ভয়েস ও ছবি AI' : 'Voice & Vision'}
           </button>
+          <button className={`nav ${activePage === 'voicemod' ? 'active' : ''}`} onClick={() => navigateToPage('voicemod')}>
+            <AudioLines size={16} /> {isBn ? 'ভয়েস গালি গার্ড' : 'Voice Abuse AI'}
+          </button>
           <button className={`nav ${activePage === 'activity' ? 'active' : ''}`} onClick={() => navigateToPage('activity')}>
             <Trophy size={16} /> {isBn ? 'অ্যাক্টিভিটি র‍্যাংক' : 'Activity Rank'}
           </button>
@@ -2857,6 +2946,21 @@ export default function App() {
               onRefresh={loadStorageOverview}
               onRunCleanup={handleRunServerCleanup}
               onSaveSettings={handleSaveCleanupSettings}
+            />
+          )}
+
+          {activePage === 'voicemod' && (
+            <VoiceModerationPage
+              isBn={isBn}
+              overview={voiceOverview}
+              isLoading={isVoiceLoading}
+              onBack={() => navigateToPage('home')}
+              onRefresh={loadVoiceOverview}
+              onSaveSettings={handleSaveVoiceSettings}
+              onEnsureModel={handleEnsureVoiceModel}
+              onRetryQueue={handleRetryVoiceQueue}
+              onClearHistory={handleClearVoiceHistory}
+              onTestAudio={handleTestVoiceAudio}
             />
           )}
 

@@ -14,6 +14,8 @@ import {
   PRIMARY_SESSIONS_DIR,
   PROJECT_ROOT,
   STICKER_QUEUE_DB_PATH,
+  VOICE_MODERATION_DB_PATH,
+  VOICE_STT_MODELS_DIR,
   isPersistentVolumeConfigured,
 } from './storagePaths.ts';
 import { enforceInboxMediaStorageLimit } from './inboxStore.ts';
@@ -229,8 +231,12 @@ function getProtectedRoots(): string[] {
     path.resolve(DATA_DIR, 'active_problems.json.tmp'),
     path.resolve(CLEANUP_STATE_PATH),
     path.resolve(`${CLEANUP_STATE_PATH}.tmp`),
+    path.resolve(VOICE_MODERATION_DB_PATH),
+    path.resolve(`${VOICE_MODERATION_DB_PATH}.tmp`),
+    path.resolve(VOICE_STT_MODELS_DIR),
     path.resolve(INBOX_DIR),
     path.resolve(ERROR_LOGS_DIR),
+    path.resolve(PROJECT_ROOT, 'tools'),
     path.resolve(PROJECT_ROOT, 'src'),
     path.resolve(PROJECT_ROOT, 'node_modules'),
     path.resolve(PROJECT_ROOT, 'dist'),
@@ -266,6 +272,7 @@ export function isProtectedPath(targetPath: string): boolean {
     name.startsWith('connection_diagnostics') ||
     name.startsWith('active_problems') ||
     name.startsWith('cleanup_state') ||
+    name.startsWith('voice_moderation') ||
     name.startsWith('inbox_index') ||
     name === '.auth_secret' ||
     name.startsWith('.env') ||
@@ -603,6 +610,7 @@ export async function getStorageUsageSnapshot(): Promise<StorageUsageSnapshot> {
   for (const dbFile of [
     MODERATION_DB_PATH,
     STICKER_QUEUE_DB_PATH,
+    VOICE_MODERATION_DB_PATH,
     path.join(DATA_DIR, 'connection_diagnostics.json'),
     path.join(DATA_DIR, 'active_problems.json'),
     CLEANUP_STATE_PATH,

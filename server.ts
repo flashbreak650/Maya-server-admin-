@@ -131,6 +131,17 @@ import {
   type InboxGroupSummary,
   type InboxMessageRecord,
 } from './src/inboxStore.ts';
+import {
+  clearVoiceModerationHistory,
+  ensureWhisperModel,
+  flushVoiceModerationSync,
+  getVoiceModerationOverview,
+  initVoiceModeration,
+  retryFailedVoiceJobsNow,
+  testAudioBufferOffline,
+  WHISPER_MODELS,
+  type WhisperModelId,
+} from './src/voiceModeration.ts';
 
 initConnectionDiagnosticsOnBoot();
 
@@ -2306,6 +2317,134 @@ app.post('/api/server/cleanup/settings', async (req: Request, res: Response) => 
 });
 
 // -----------------------------------------------------------------------------
+// OFFLINE AI VOICE ANTI-ABUSE ENDPOINTS (Zero Paid API, Whisper.cpp)
+// -----------------------------------------------------------------------------
+
+app.get('/api/voice-moderation/overview', (req: Request, res: Response) => {
+  try {
+    const limit = Math.min(300, Math.max(10, Number(req.query.limit || 100)));
+    const overview = getVoiceModerationOverview(limit);
+    res.json({ success: true, ...overview });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Could not load voice moderation overview' });
+  }
+});
+
+app.post('/api/voice-moderation/settings', async (req: Request, res: Response) => {
+  try {
+    const body = req.body || {};
+    const patch: Record<string, any> = {};
+
+    if (typeof body.voiceModerationEnabled === 'boolean') patch.voiceModerationEnabled = body.voiceModerationEnabled;
+    if (typeof body.voiceDetectBangla === 'boolean') patch.voiceDetectBangla = body.voiceDetectBangla;
+    if (typeof body.voiceDetectEnglish === 'boolean') patch.voiceDetectEnglish = body.voiceDetectEnglish;
+    if (typeof body.voiceDetectBanglish === 'boolean') patch.voiceDetectBanglish = body.voiceDetectBanglish;
+    if (body.voiceProfanitySensitivity === 'low' || body.voiceProfanitySensitivity === 'medium' || body.voiceProfanitySensitivity === 'high') {
+      patch.voiceProfanitySensitivity = body.voiceProfanitySensitivity;
+    }
+    if (Array.isArray(body.voiceAllowedWords)) {
+      patch.voiceAllowedWords = body.voiceAllowedWords
+        .map((w: any) => String(w || '').trim())
+        .filter((w: string) => w.length >= 2)
+        .slice(0, 300);
+    }
+    if (Array.isArray(body.voiceBlockedWords)) {
+      patch.voiceBlockedWords = body.voiceBlockedWords
+        .map((w: any) => String(w || '').trim())
+        .filter((w: string) => w.length >= 2)
+        .slice(0, 300);
+    }
+    if (typeof body.voiceWhisperModel === 'string' && body.voiceWhisperModel in WHISPER_MODELS) {
+      patch.voiceWhisperModel = body.voiceWhisperModel as WhisperModelId;
+      ensureWhisperModel(body.voiceWhisperModel as WhisperModelId).catch(() => {});
+    }
+
+    updateModerationSettings(patch);
+    const overview = getVoiceModerationOverview(100);
+    res.json({
+      success: true,
+      overview,
+      message: 'অফলাইন ভয়েস এআই অ্যান্টি-অ্যাবিউজ সেটিংস সেভ হয়েছে!',
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Could not save voice moderation settings' });
+  }
+});
+
+app.post('/api/voice-moderation/model/ensure', async (req: Request, res: Response) => {
+  try {
+    const modelIdRaw = String(req.body?.modelId || 'base-q5_1');
+    if (!(modelIdRaw in WHISPER_MODELS)) {
+      return res.status(400).json({ success: false, error: 'অবৈধ মডেল আইডি।' });
+    }
+    const modelId = modelIdRaw as WhisperModelId;
+    ensureWhisperModel(modelId).catch(() => {});
+    res.json({
+      success: true,
+      overview: getVoiceModerationOverview(100),
+      message: `${WHISPER_MODELS[modelId].fileName} অফলাইন মডেল প্রস্তুত করা হচ্ছে...`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Model preparation failed' });
+  }
+});
+
+app.post('/api/voice-moderation/history/clear', (_req: Request, res: Response) => {
+  try {
+    clearVoiceModerationHistory();
+    res.json({
+      success: true,
+      overview: getVoiceModerationOverview(100),
+      message: 'ভয়েস মডারেশন হিস্ট্রি পরিষ্কার করা হয়েছে।',
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Could not clear voice history' });
+  }
+});
+
+app.post('/api/voice-moderation/queue/retry', (_req: Request, res: Response) => {
+  try {
+    const retried = retryFailedVoiceJobsNow();
+    res.json({
+      success: true,
+      retried,
+      overview: getVoiceModerationOverview(100),
+      message: retried > 0 ? `${retried}টি পেন্ডিং ভয়েস জব পুনরায় কিউ করা হয়েছে।` : 'কোনো রিট্রাইযোগ্য জব নেই।',
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Retry failed' });
+  }
+});
+
+app.post('/api/voice-moderation/test', async (req: Request, res: Response) => {
+  try {
+    const audioBase64 = String(req.body?.audioBase64 || '').trim();
+    const fileName = String(req.body?.fileName || 'voice_test.ogg');
+    const mimeType = String(req.body?.mimeType || 'audio/ogg');
+    if (!audioBase64) {
+      return res.status(400).json({ success: false, error: 'অডিও ফাইল বা রেকর্ডিং প্রদান করুন।' });
+    }
+
+    const rawBase64 = audioBase64.includes('base64,') ? audioBase64.split('base64,')[1] : audioBase64;
+    const buffer = Buffer.from(rawBase64, 'base64');
+    if (!buffer || buffer.length < 32 || buffer.length > 10 * 1024 * 1024) {
+      return res.status(400).json({ success: false, error: 'অডিও সাইজ ৩২ বাইট থেকে ১০ MB এর মধ্যে হতে হবে।' });
+    }
+
+    const result = await testAudioBufferOffline({
+      audioBuffer: buffer,
+      fileName,
+      mimeType,
+      overrideConfig: req.body?.config || undefined,
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Offline STT test failed' });
+  }
+});
+
+// -----------------------------------------------------------------------------
 // GROUP INBOX SYSTEM ENDPOINTS (Real-time Messages, Media Streaming & Limits)
 // -----------------------------------------------------------------------------
 
@@ -2674,6 +2813,7 @@ async function startServer() {
     flushDatabaseSync();
     flushStickerQueueSync();
     flushInboxStoreSync();
+    flushVoiceModerationSync();
     clearInterval(wsHeartbeat);
     try {
       inboxWss.close();
@@ -2723,6 +2863,7 @@ async function startServer() {
     initStickerQueue(() => currentSock);
     startServerHealthMonitor(() => currentSock);
     startCleanupScheduler(() => currentSock);
+    initVoiceModeration(() => currentSock);
     initializeExistingSession().catch((err: any) => {
       console.error('[Startup Session Restore Warning]:', err?.message || err);
     });

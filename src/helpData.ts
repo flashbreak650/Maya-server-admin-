@@ -311,5 +311,18 @@ export const HELP_ITEMS: Record<string, HelpDetails> = {
     onEn: 'Keeps the link between dashboard and bot engine active.',
     offBn: 'ড্যাশবোর্ড থেকে বট কন্ট্রোল করা যাবে না।',
     offEn: 'Dashboard cannot communicate with or control the bot.',
+  },
+
+  voiceModerationEnabled: {
+    id: 'voiceModerationEnabled',
+    titleBn: 'অফলাইন ভয়েস AI অ্যান্টি-অ্যাবিউজ',
+    titleEn: 'Offline Voice Anti-Abuse',
+    categoryBn: 'C. Moderation',
+    categoryEn: 'C. Moderation',
+    iconName: 'AudioLines',
+    onBn: 'পেইড API ছাড়াই Whisper.cpp দিয়ে ভয়েস মেসেজ শুনে বাংলা/ইংরেজি/বাংলিশ গালি থাকলে অটো ডিলিট করবে।',
+    onEn: 'Transcribes incoming voice notes locally via Whisper.cpp and deletes abusive messages without any paid AI API.',
+    offBn: 'ভয়েস মেসেজ অটো স্ক্যান ও ডিলিট বন্ধ থাকবে।',
+    offEn: 'Offline voice profanity scanning is disabled.',
   }
 };

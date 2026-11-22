@@ -143,6 +143,15 @@ export interface ModerationSettings {
   companionCooldownSec?: number;
   companionAllowedGroups?: string[];
   companionCustomBio?: string;
+  // Offline AI Voice Anti-Abuse System (Zero Paid API, Whisper.cpp)
+  voiceModerationEnabled?: boolean;
+  voiceDetectBangla?: boolean;
+  voiceDetectEnglish?: boolean;
+  voiceDetectBanglish?: boolean;
+  voiceProfanitySensitivity?: 'low' | 'medium' | 'high';
+  voiceAllowedWords?: string[];
+  voiceBlockedWords?: string[];
+  voiceWhisperModel?: 'tiny-q5_1' | 'base-q5_1' | 'small-q5_1';
 }
 
 export interface AiKey {
@@ -306,6 +315,14 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   companionCooldownSec: 6,
   companionAllowedGroups: [],
   companionCustomBio: '',
+  voiceModerationEnabled: true,
+  voiceDetectBangla: true,
+  voiceDetectEnglish: true,
+  voiceDetectBanglish: true,
+  voiceProfanitySensitivity: 'medium',
+  voiceAllowedWords: [],
+  voiceBlockedWords: [],
+  voiceWhisperModel: 'base-q5_1',
 };
 
 // In-memory runtime database
@@ -431,6 +448,8 @@ export function loadDatabase() {
           ...DEFAULT_SETTINGS,
           ...(data.settings || {}),
           keywordTriggers: Array.isArray(data.settings?.keywordTriggers) ? data.settings.keywordTriggers : [],
+          voiceAllowedWords: Array.isArray(data.settings?.voiceAllowedWords) ? data.settings.voiceAllowedWords : [],
+          voiceBlockedWords: Array.isArray(data.settings?.voiceBlockedWords) ? data.settings.voiceBlockedWords : [],
         },
         warnings: data.warnings || {},
         groupLocks: data.groupLocks || {},
@@ -3080,7 +3099,7 @@ export async function checkPermissions(
  * Bulletproof Baileys v7 Group Message Revoke (handles PN + LID addressing modes)
  * Strict Permission Check: Never falsely returns true when bot lacks Admin delete permissions.
  */
-async function deleteMessageSafely(
+export async function deleteMessageSafely(
   sock: WASocket,
   remoteJid: string,
   msg: proto.IWebMessageInfo,
@@ -3249,6 +3268,156 @@ export async function applyVerifiedAntiStickerViolation(
     action: warningCount >= 3 && settings.autoKick3Warnings ? 'kicked' : 'warned',
     reason: `Anti-Sticker (${actionMap[warningCount] || 'সতর্কতা'}) [Verified Deleted]`,
     details: 'স্টিকার পাঠানো নিষিদ্ধ (High-Priority Queue দ্বারা ডিলিট)',
+    warningCount,
+  });
+}
+
+export type VoiceModerationEnqueueFn = (params: {
+  sock: WASocket;
+  msg: proto.IWebMessageInfo;
+  groupId: string;
+  groupName: string;
+  senderJid: string;
+  senderAltJid?: string;
+  canonicalSender: string;
+  senderPhone: string;
+  senderName: string;
+  isSenderAdmin: boolean;
+  isBotAdmin: boolean;
+  metaKnown: boolean;
+}) => void;
+
+let registeredVoiceModerationEnqueue: VoiceModerationEnqueueFn | null = null;
+
+export function registerVoiceModerationHook(fn: VoiceModerationEnqueueFn) {
+  registeredVoiceModerationEnqueue = fn;
+}
+
+export async function applyVoiceAbusePenalty(
+  sock: WASocket,
+  params: {
+    groupId: string;
+    groupName: string;
+    senderJid: string;
+    canonicalSender: string;
+    senderAltJid?: string;
+    senderPhone: string;
+    deleteSuccessful: boolean;
+    isBotAdmin: boolean;
+    matchedWords: string[];
+    detectedLanguage: string;
+  }
+) {
+  const {
+    groupId,
+    groupName,
+    senderJid,
+    canonicalSender,
+    senderAltJid,
+    senderPhone,
+    deleteSuccessful,
+    isBotAdmin,
+    matchedWords,
+    detectedLanguage,
+  } = params;
+  const settings = getSettings();
+
+  if (deleteSuccessful) {
+    db.stats.deletedMessages++;
+  }
+
+  const warningKey = `${groupId}:${canonicalSender}`;
+  if (!db.warnings[warningKey]) {
+    db.warnings[warningKey] = {
+      count: 0,
+      lastViolation: Date.now(),
+      violations: [],
+      groupId,
+      groupName,
+      senderJid: canonicalSender,
+      senderPhone,
+    };
+  }
+
+  const noticeReason = 'ভয়েস মেসেজে অশালীন ভাষা বা গালি ব্যবহার নিষিদ্ধ';
+  db.warnings[warningKey].groupId = groupId;
+  db.warnings[warningKey].groupName = groupName;
+  db.warnings[warningKey].senderJid = canonicalSender;
+  db.warnings[warningKey].senderPhone = senderPhone;
+  db.warnings[warningKey].count++;
+  db.warnings[warningKey].lastViolation = Date.now();
+  db.warnings[warningKey].violations.push({
+    timestamp: Date.now(),
+    reason: noticeReason,
+  });
+  db.stats.warningsGiven++;
+  saveDatabase();
+
+  const warningCount = db.warnings[warningKey].count;
+
+  if (warningCount === 1 && !settings.silentModeration) {
+    await safeSendMessage(sock, groupId, {
+      text: `⚠️ [সতর্কবার্তা ১/৩ — Voice Guard]\nসদস্য @${senderPhone}, ${noticeReason}!\n${
+        deleteSuccessful
+          ? 'আপনার ভয়েস মেসেজটি মুছে দেওয়া হয়েছে।'
+          : !isBotAdmin
+            ? '⚠️ বটের অ্যাডমিন পারমিশন না থাকায় ভয়েস মেসেজটি মুছে ফেলা যায়নি।'
+            : '⚠️ ভয়েস মেসেজটি মুছে ফেলা সম্ভব হয়নি।'
+      }`,
+      mentions: [senderJid],
+    });
+  } else if (warningCount === 2 && !settings.silentModeration) {
+    await safeSendMessage(sock, groupId, {
+      text: `⚠️ [সতর্কবার্তা ২/৩ — Voice Guard]\nসদস্য @${senderPhone}, এটি আপনার দ্বিতীয় সতর্কতা (${noticeReason})!\nপরবর্তী নিয়মভঙ্গে আপনাকে গ্রুপ থেকে স্বয়ংক্রিয়ভাবে রিমুভ (Kick) করা হবে!`,
+      mentions: [senderJid],
+    });
+  } else if (warningCount >= 3 && settings.autoKick3Warnings) {
+    const freshPerms = await checkPermissions(sock, groupId, senderJid, true, senderAltJid);
+    if (!freshPerms.isSenderAdmin && freshPerms.isBotAdmin) {
+      const kickTargets: string[] = [];
+      for (const cand of [
+        freshPerms.matchedSenderId,
+        normalizeJid(senderJid),
+        senderAltJid ? normalizeJid(senderAltJid) : '',
+      ]) {
+        if (cand && !kickTargets.includes(cand)) kickTargets.push(cand);
+      }
+
+      if (!settings.silentModeration) {
+        await safeSendMessage(sock, groupId, {
+          text: `🚨 [চূড়ান্ত অ্যাকশন - ৩য় সতর্কতা — Voice Guard]\nসদস্য @${senderPhone} ৩ বার নিয়ম লঙ্ঘন করেছেন (${noticeReason})।\nনিরাপত্তার স্বার্থে তাকে গ্রুপ থেকে রিমুভ করা হচ্ছে!`,
+          mentions: [senderJid],
+        });
+      }
+
+      let kickedOk = false;
+      for (const targetJid of kickTargets) {
+        try {
+          const kickRes: any = await sock.groupParticipantsUpdate(groupId, [targetJid], 'remove');
+          const status = Array.isArray(kickRes) ? String(kickRes[0]?.status || '200') : '200';
+          if (status === '200' || status === '207') {
+            kickedOk = true;
+            break;
+          }
+        } catch {}
+      }
+      if (kickedOk) {
+        db.stats.kickedMembers++;
+        delete db.warnings[warningKey];
+        saveDatabase();
+      }
+    }
+  }
+
+  const actionMap: Record<number, string> = { 1: '১ম সতর্কতা', 2: '২য় সতর্কতা', 3: '৩য় সতর্কতা' };
+  addActivityLog({
+    groupId,
+    groupName,
+    senderJid,
+    senderPhone,
+    action: warningCount >= 3 && settings.autoKick3Warnings ? 'kicked' : deleteSuccessful ? 'deleted' : 'warned',
+    reason: `Offline Voice Anti-Abuse (${actionMap[warningCount] || 'সতর্কতা'})${deleteSuccessful ? '' : ' [Delete Failed]'}`,
+    details: `Language: ${detectedLanguage} | Matched: ${matchedWords.slice(0, 3).join(', ')}`,
     warningCount,
   });
 }
@@ -4459,6 +4628,29 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
         }
       }
     }
+  }
+
+  // Offline AI Voice Anti-Abuse Queue (100% Local Whisper.cpp, Zero Paid API)
+  if (
+    !violationType &&
+    realMsg.audioMessage &&
+    settings.voiceModerationEnabled !== false &&
+    registeredVoiceModerationEnqueue
+  ) {
+    registeredVoiceModerationEnqueue({
+      sock,
+      msg,
+      groupId: remoteJid,
+      groupName: groupSubject,
+      senderJid,
+      senderAltJid,
+      canonicalSender,
+      senderPhone: cleanPhone,
+      senderName: msg.pushName || cleanPhone || 'User',
+      isSenderAdmin,
+      isBotAdmin,
+      metaKnown,
+    });
   }
 
   // Track multi-person badword abuse / heated group quarrel (Works 100% locally WITHOUT AI API)

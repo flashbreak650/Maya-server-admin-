@@ -47,6 +47,10 @@ export const AUTH_SECRET_PATH = path.join(DATA_DIR, '.auth_secret');
 export const INBOX_DIR = path.join(DATA_DIR, 'group_inbox');
 export const INBOX_MEDIA_DIR = path.join(INBOX_DIR, 'media');
 export const INBOX_AVATARS_DIR = path.join(INBOX_DIR, 'avatars');
+export const VOICE_MODERATION_DB_PATH = path.join(DATA_DIR, 'voice_moderation.json');
+export const VOICE_STT_MODELS_DIR = path.join(DATA_DIR, 'voice_stt');
+export const VOICE_TEMP_AUDIO_DIR = path.join(DATA_DIR, 'temp_media', 'voice_stt');
+export const WHISPER_BINARY_PATH = path.join(PROJECT_ROOT, 'tools', 'whisper', 'whisper-cli');
 
 export function isPersistentVolumeConfigured(): boolean {
   return Boolean(

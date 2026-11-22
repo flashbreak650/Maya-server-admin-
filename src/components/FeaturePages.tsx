@@ -80,7 +80,8 @@ export type PageId =
   | 'storagecleanup'
   | 'pairing'
   | 'groups'
-  | 'inbox';
+  | 'inbox'
+  | 'voicemod';
 
 export interface CompanionRecentChatItem {
   id: string;
@@ -596,6 +597,25 @@ export function HomeFeatureHub({
       iconText: 'text-teal-700',
       icon: <ScanEye size={18} />,
       onClick: () => onNavigate('aivision'),
+    },
+    {
+      id: 'voicemod',
+      title: isBn ? 'অফলাইন ভয়েস AI অ্যান্টি-অ্যাবিউজ' : 'Offline Voice Anti-Abuse',
+      desc: isBn ? 'Whisper.cpp অফলাইনে ভয়েস শুনে বাংলা/ইংরেজি গালি ডিলিট' : 'Zero-API Whisper.cpp voice profanity guard',
+      keywords: 'voice anti abuse profanity offline whisper audio ভয়েস গালি অডিও অফলাইন',
+      statusText:
+        settings.voiceModerationEnabled !== false
+          ? isBn
+            ? 'অফলাইন AI চালু'
+            : 'Whisper ON'
+          : isBn
+          ? 'বন্ধ আছে'
+          : 'OFF',
+      isOn: settings.voiceModerationEnabled !== false,
+      iconBg: 'bg-emerald-50',
+      iconText: 'text-emerald-700',
+      icon: <AudioLines size={18} />,
+      onClick: () => onNavigate('voicemod'),
     },
     {
       id: 'activity',
