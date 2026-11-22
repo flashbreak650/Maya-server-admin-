@@ -93,8 +93,6 @@ import {
 } from './components/StorageCleanupPage.tsx';
 import {
   GroupInboxPage,
-  GroupListSection,
-  type InboxGroupSummary,
 } from './components/GroupInboxPage.tsx';
 
 interface LatestDisconnectInfo {
@@ -735,7 +733,6 @@ export default function App() {
 
   // Groups & Real-Time Group Inbox State
   const [groups, setGroups] = useState<GroupItem[]>([]);
-  const [inboxGroups, setInboxGroups] = useState<InboxGroupSummary[]>([]);
   const [inboxSelectedGroupId, setInboxSelectedGroupId] = useState<string | null>(null);
   const [inboxInitialDeletedOnly, setInboxInitialDeletedOnly] = useState<boolean>(false);
   const [isGroupsLoading, setIsGroupsLoading] = useState(false);
@@ -1814,17 +1811,9 @@ export default function App() {
   const loadGroups = async () => {
     setIsGroupsLoading(true);
     try {
-      const [data, inboxRes] = await Promise.all([
-        callApi('/api/groups'),
-        callApi('/api/inbox/groups').catch(() => null),
-      ]);
+      const data = await callApi('/api/groups');
       if (data.groups && Array.isArray(data.groups)) {
         setGroups(data.groups);
-      }
-      if (Array.isArray(inboxRes?.groups)) {
-        setInboxGroups(inboxRes.groups);
-      } else if (Array.isArray(data.inboxGroups)) {
-        setInboxGroups(data.inboxGroups);
       }
     } catch {
       // non-blocking
@@ -1849,9 +1838,6 @@ export default function App() {
       } else {
         setGroups((prev) => prev.filter((item) => item.id !== group.id));
       }
-      setInboxGroups((prev) =>
-        prev.map((item) => (item.id === group.id ? { ...item, connected: false } : item))
-      );
       setSelectedGroupForLeave(null);
       showNotification(
         res?.message ||
@@ -2636,66 +2622,6 @@ export default function App() {
                     {t.manageRulesBtn} <ArrowRight size={13} />
                   </button>
                 </div>
-              </div>
-
-              {/* Connected Groups Quick Inbox & Long-Press Context Card on Home Dashboard */}
-              <div className="card !mt-5">
-                <div className="card-head">
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3>{isBn ? 'কানেক্টেড WhatsApp গ্রুপ ও লাইভ ইনবক্স' : 'Connected WhatsApp Groups & Inbox'}</h3>
-                      <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg tabular-nums">
-                        {inboxGroups.length || groups.length} {isBn ? 'টি গ্রুপ' : 'groups'}
-                      </span>
-                    </div>
-                    <p>
-                      {isBn
-                        ? 'যেকোনো গ্রুপ কার্ডে Tap করলে Inbox খুলবে; Long Press করলে Context Menu দেখাবে।'
-                        : 'Tap any group card to open its Inbox; long press for Context Menu.'}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => navigateToPage('inbox')}
-                    className="btn soft"
-                  >
-                    <Inbox size={13} />
-                    <span>{isBn ? 'সব ইনবক্স দেখুন' : 'Open Inbox'}</span>
-                  </button>
-                </div>
-
-                <GroupListSection
-                  isBn={isBn}
-                  compact
-                  groups={
-                    inboxGroups.length > 0
-                      ? inboxGroups
-                      : groups.map((g) => ({
-                          id: g.id,
-                          name: g.name,
-                          participants: g.participants,
-                          totalStoredMessages: 0,
-                          deletedCount: 0,
-                          mediaCount: 0,
-                          importantCount: 0,
-                          connected: true,
-                        }))
-                  }
-                  apiBaseUrl={baileysUrl}
-                  isLoading={isGroupsLoading}
-                  isConnected={liveStatus.online}
-                  leavingGroupId={leavingGroupId}
-                  onRefresh={loadGroups}
-                  onOpenInbox={openGroupInbox}
-                  onLeaveGroup={async (g) => {
-                    await handleLeaveGroupFromServer({
-                      id: g.id,
-                      name: g.name,
-                      participants: g.participants,
-                      status: 'Active',
-                    });
-                  }}
-                />
               </div>
 
               {/* Every Feature & Security Tool Separate Button Cards Hub on Home Page */}
