@@ -3951,6 +3951,43 @@ export default function App() {
                   </label>
                 </div>
 
+                {/* Offline AI Voice Anti-Abuse */}
+                <div className="toggle-row">
+                  <div className="toggle-info">
+                    <h4>
+                      <span className="flex items-center gap-1.5 flex-wrap">
+                        <AudioLines size={14} className="text-emerald-700" />
+                        {isBn ? 'অফলাইন ভয়েস গালি গার্ড (Voice Anti-Abuse)' : 'Offline Voice Anti-Abuse (Whisper.cpp)'}
+                        <span className={`badge ${settings.voiceModerationEnabled !== false ? 'badge-green' : 'badge-amber'}`}>
+                          {settings.voiceModerationEnabled !== false ? 'ACTIVE' : 'OFF'}
+                        </span>
+                        {renderInfoBtn('voiceModerationEnabled')}
+                      </span>
+                    </h4>
+                    <p>
+                      {isBn
+                        ? 'পেইড API ছাড়াই Whisper.cpp দিয়ে ভয়েস মেসেজ শুনে বাংলা/ইংরেজি গালি থাকলে অটো ডিলিট করবে।'
+                        : 'Offline Whisper.cpp profanity filter for group voice messages (zero paid APIs).'}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => navigateToPage('voicemod')}
+                      className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-extrabold text-emerald-700 hover:text-emerald-800 cursor-pointer"
+                    >
+                      <span>{isBn ? 'ভয়েস সেটিংস, টেস্টার ও হিস্ট্রি খুলুন' : 'Open Voice Settings, Tester & History'}</span>
+                      <ArrowRight size={12} />
+                    </button>
+                  </div>
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.voiceModerationEnabled !== false}
+                      onChange={(e) => updateSettingToggle('voiceModerationEnabled', e.target.checked)}
+                    />
+                    <span className="slider"></span>
+                  </label>
+                </div>
+
                 {/* Silent Moderation */}
                 <div className="toggle-row">
                   <div className="toggle-info">

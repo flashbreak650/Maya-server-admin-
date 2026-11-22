@@ -1,6 +1,8 @@
 import React from 'react';
 import {
   ArrowLeft,
+  ArrowRight,
+  AudioLines,
   Ban,
   BellRing,
   Bot,
@@ -779,6 +781,42 @@ export function SecurityToolPage({
                 type="checkbox"
                 checked={Boolean(settings.aiBadwordDetection)}
                 onChange={(e) => onUpdateToggle('aiBadwordDetection', e.target.checked)}
+              />
+              <span className="slider"></span>
+            </label>
+          </div>
+
+          <div className="toggle-row">
+            <div className="toggle-info">
+              <h4>
+                <span className="flex items-center gap-1.5 flex-wrap">
+                  <AudioLines size={14} className="text-emerald-700" />
+                  {isBn ? 'অফলাইন ভয়েস গালি গার্ড (Voice Anti-Abuse)' : 'Offline Voice Anti-Abuse (Whisper.cpp)'}
+                  <span className={`badge ${settings.voiceModerationEnabled !== false ? 'badge-green' : 'badge-amber'}`}>
+                    {settings.voiceModerationEnabled !== false ? 'ACTIVE' : 'OFF'}
+                  </span>
+                  {renderInfoBtn('voiceModerationEnabled')}
+                </span>
+              </h4>
+              <p>
+                {isBn
+                  ? 'পেইড API ছাড়াই গ্রুপের ভয়েস মেসেজ শুনে বাংলা/ইংরেজি/বাংলিশ গালি থাকলে অটো ডিলিট করবে।'
+                  : 'Transcribes incoming group voice notes offline via Whisper.cpp and deletes profanity.'}
+              </p>
+              <button
+                type="button"
+                onClick={() => onNavigate('voicemod')}
+                className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-extrabold text-emerald-700 hover:text-emerald-800 cursor-pointer"
+              >
+                <span>{isBn ? 'ভয়েস সেটিংস, টেস্টার ও হিস্ট্রি খুলুন' : 'Open Voice Guard Settings & History'}</span>
+                <ArrowRight size={12} />
+              </button>
+            </div>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={settings.voiceModerationEnabled !== false}
+                onChange={(e) => onUpdateToggle('voiceModerationEnabled', e.target.checked)}
               />
               <span className="slider"></span>
             </label>

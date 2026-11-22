@@ -438,6 +438,25 @@ export function HomeFeatureHub({
       onClick: () => onNavigate('sec_badwords'),
     },
     {
+      id: 'voicemod',
+      title: isBn ? 'অফলাইন ভয়েস গালি গার্ড (Voice AI)' : 'Offline Voice Anti-Abuse',
+      desc: isBn ? 'ভয়েস মেসেজ শুনে বাংলা/ইংরেজি গালি অটো ডিলিট (API ছাড়া)' : 'Zero-API Whisper.cpp voice profanity guard',
+      keywords: 'voice anti abuse profanity offline whisper audio ভয়েস গালি অডিও অফলাইন চালু',
+      statusText:
+        settings.voiceModerationEnabled !== false
+          ? isBn
+            ? 'অফলাইন AI চালু'
+            : 'Whisper ON'
+          : isBn
+          ? 'বন্ধ আছে'
+          : 'OFF',
+      isOn: settings.voiceModerationEnabled !== false,
+      iconBg: 'bg-emerald-50',
+      iconText: 'text-emerald-700',
+      icon: <AudioLines size={18} />,
+      onClick: () => onNavigate('voicemod'),
+    },
+    {
       id: 'sec_mention',
       title: isBn ? 'বস ও অ্যাডমিন মেনশন রিপ্লাই' : 'Boss / Admin Mention Reply',
       desc: isBn ? 'বস (+8801632...) বা অ্যাডমিনকে @মেনশনে অটো উত্তর' : 'Auto-reply when Boss or admin is tagged',
@@ -597,25 +616,6 @@ export function HomeFeatureHub({
       iconText: 'text-teal-700',
       icon: <ScanEye size={18} />,
       onClick: () => onNavigate('aivision'),
-    },
-    {
-      id: 'voicemod',
-      title: isBn ? 'অফলাইন ভয়েস AI অ্যান্টি-অ্যাবিউজ' : 'Offline Voice Anti-Abuse',
-      desc: isBn ? 'Whisper.cpp অফলাইনে ভয়েস শুনে বাংলা/ইংরেজি গালি ডিলিট' : 'Zero-API Whisper.cpp voice profanity guard',
-      keywords: 'voice anti abuse profanity offline whisper audio ভয়েস গালি অডিও অফলাইন',
-      statusText:
-        settings.voiceModerationEnabled !== false
-          ? isBn
-            ? 'অফলাইন AI চালু'
-            : 'Whisper ON'
-          : isBn
-          ? 'বন্ধ আছে'
-          : 'OFF',
-      isOn: settings.voiceModerationEnabled !== false,
-      iconBg: 'bg-emerald-50',
-      iconText: 'text-emerald-700',
-      icon: <AudioLines size={18} />,
-      onClick: () => onNavigate('voicemod'),
     },
     {
       id: 'activity',
