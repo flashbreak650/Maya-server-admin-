@@ -4,6 +4,9 @@ import { WebSocketServer, type WebSocket } from 'ws';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import os from 'os';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import pino from 'pino';
@@ -139,12 +142,15 @@ import {
   flushVoiceModerationSync,
   getVoiceModerationOverview,
   initVoiceModeration,
+  resolveFfmpegBinaryPath,
   resolveVoiceReviewItem,
   retryFailedVoiceJobsNow,
   testAudioBufferOffline,
   WHISPER_MODELS,
   type WhisperModelId,
 } from './src/voiceModeration.ts';
+
+const execFileAsync = promisify(execFile);
 
 initConnectionDiagnosticsOnBoot();
 
@@ -234,7 +240,9 @@ function verifyAdminToken(token: string | undefined, activePin: string): boolean
 }
 
 function signMediaToken(resourceKey: string): string {
-  const exp = Date.now() + 6 * 60 * 60 * 1000; // 6 hours
+  // Quantize to 30-minute windows so repeated API loads keep identical URLs and never interrupt <audio>/<img> playback
+  const bucketMs = 30 * 60 * 1000;
+  const exp = Math.ceil(Date.now() / bucketMs) * bucketMs + 6 * 60 * 60 * 1000;
   const payload = `${exp}.${resourceKey}`;
   const sig = crypto.createHmac('sha256', AUTH_SECRET).update(payload).digest('hex');
   return `${exp}.${sig}`;
@@ -2649,7 +2657,7 @@ app.post('/api/inbox/messages/important', (req: Request, res: Response) => {
   }
 });
 
-app.get('/api/inbox/media/:groupId/:messageId', (req: Request, res: Response) => {
+app.get('/api/inbox/media/:groupId/:messageId', async (req: Request, res: Response) => {
   try {
     const groupId = decodeURIComponent(String(req.params.groupId || '')).trim();
     const messageId = decodeURIComponent(String(req.params.messageId || '')).trim();
@@ -2663,8 +2671,6 @@ app.get('/api/inbox/media/:groupId/:messageId', (req: Request, res: Response) =>
     }
 
     const { filePath, record } = found;
-    const stat = fs.statSync(filePath);
-    const totalSize = stat.size;
     const rawMime = (record.media?.mimeType || 'application/octet-stream').split(';')[0].trim().toLowerCase();
     const isActiveContent =
       rawMime.includes('html') ||
@@ -2673,11 +2679,69 @@ app.get('/api/inbox/media/:groupId/:messageId', (req: Request, res: Response) =>
       rawMime.includes('javascript') ||
       rawMime.includes('ecmascript');
     const forceDownload = req.query.download === '1' || req.query.download === 'true' || isActiveContent;
+    const requestedFormat = String(req.query.format || '').trim().toLowerCase();
 
     const fallbackPrefix =
       record.messageType === 'voice' || record.messageType === 'audio'
         ? `voice_${(record.senderPhone || 'group').replace(/[^0-9A-Za-z_-]/g, '')}_${messageId.slice(0, 8)}`
         : `waguard_${messageId.slice(0, 12)}`;
+
+    // Universal browser audio compatibility: transcode WhatsApp OGG/Opus -> MP3 when ?format=mp3 is requested
+    if (
+      requestedFormat === 'mp3' &&
+      (record.messageType === 'voice' || record.messageType === 'audio' || rawMime.startsWith('audio/'))
+    ) {
+      const ffmpegPath = resolveFfmpegBinaryPath();
+      if (ffmpegPath) {
+        const tmpOut = path.join(os.tmpdir(), `waguard_play_${crypto.randomBytes(8).toString('hex')}.mp3`);
+        try {
+          await execFileAsync(
+            ffmpegPath,
+            ['-y', '-i', filePath, '-vn', '-c:a', 'libmp3lame', '-b:a', '96k', '-ar', '24000', '-f', 'mp3', tmpOut],
+            { timeout: 15000 }
+          );
+          const mp3Buffer = await fs.promises.readFile(tmpOut);
+          await fs.promises.unlink(tmpOut).catch(() => {});
+
+          const totalSize = mp3Buffer.length;
+          const mp3Name = `${fallbackPrefix}.mp3`;
+          res.setHeader('X-Content-Type-Options', 'nosniff');
+          res.setHeader('Cache-Control', 'private, max-age=3600');
+          res.setHeader('Accept-Ranges', 'bytes');
+          res.setHeader('Content-Type', 'audio/mpeg');
+          res.setHeader(
+            'Content-Disposition',
+            forceDownload ? `attachment; filename="${mp3Name}"` : `inline; filename="${mp3Name}"`
+          );
+
+          const rangeHeader = req.headers.range;
+          if (rangeHeader && typeof rangeHeader === 'string' && rangeHeader.startsWith('bytes=')) {
+            const [startRaw, endRaw] = rangeHeader.replace(/^bytes=/, '').split('-');
+            const start = startRaw ? Number(startRaw) : 0;
+            const end = endRaw ? Math.min(totalSize - 1, Number(endRaw)) : totalSize - 1;
+            if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start >= totalSize || end < start) {
+              res.status(416).setHeader('Content-Range', `bytes */${totalSize}`).end();
+              return;
+            }
+            res.status(206);
+            res.setHeader('Content-Range', `bytes ${start}-${end}/${totalSize}`);
+            res.setHeader('Content-Length', String(end - start + 1));
+            res.end(mp3Buffer.subarray(start, end + 1));
+            return;
+          }
+
+          res.setHeader('Content-Length', String(totalSize));
+          res.end(mp3Buffer);
+          return;
+        } catch {
+          await fs.promises.unlink(tmpOut).catch(() => {});
+          // Fall through to raw file streaming if FFmpeg fails
+        }
+      }
+    }
+
+    const stat = fs.statSync(filePath);
+    const totalSize = stat.size;
     const safeDownloadName = (record.media?.fileName || `${fallbackPrefix}${path.extname(filePath) || '.ogg'}`)
       .replace(/["\r\n\\/]/g, '_');
 

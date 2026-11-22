@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowDown,
   ArrowLeft,
   Calendar,
   Camera,
@@ -277,6 +278,15 @@ function GroupAvatarBadge({
   );
 }
 
+function isLikelySafariBrowser(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  return /Safari/i.test(ua) && !/Chrome|Chromium|Edg|OPR|Firefox|Android/i.test(ua);
+}
+
+// Track active playing audio globally inside the page so playing a new note pauses the previous one
+let activeInboxAudioEl: HTMLAudioElement | null = null;
+
 function VoiceAudioPlayer({
   src,
   downloadUrl,
@@ -291,10 +301,21 @@ function VoiceAudioPlayer({
   fileName?: string;
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const autoPlayAfterFallbackRef = useRef(false);
   const [playing, setPlaying] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(declaredDurationSec || 0);
   const [speed, setSpeed] = useState<1 | 1.5 | 2>(1);
+  const [useMp3Fallback, setUseMp3Fallback] = useState<boolean>(() => isLikelySafariBrowser());
+  const [playError, setPlayError] = useState<string | null>(null);
+
+  const mp3Src = useMemo(() => {
+    if (!src) return '';
+    return src.includes('?') ? `${src}&format=mp3` : `${src}?format=mp3`;
+  }, [src]);
+
+  const effectiveSrc = useMp3Fallback ? mp3Src : src;
 
   useEffect(() => {
     const el = audioRef.current;
@@ -302,18 +323,72 @@ function VoiceAudioPlayer({
     el.playbackRate = speed;
   }, [speed]);
 
+  useEffect(() => {
+    if (!autoPlayAfterFallbackRef.current) return;
+    const el = audioRef.current;
+    if (!el || !effectiveSrc) return;
+    autoPlayAfterFallbackRef.current = false;
+    setIsBuffering(true);
+    try {
+      el.load();
+      el.playbackRate = speed;
+      const p = el.play();
+      if (p && typeof p.then === 'function') {
+        p.then(() => {
+          setPlaying(true);
+          setIsBuffering(false);
+          setPlayError(null);
+        }).catch(() => {
+          setPlaying(false);
+          setIsBuffering(false);
+          setPlayError('অডিও প্লে করা যায়নি — ডাউনলোড করে শুনুন');
+        });
+      }
+    } catch {
+      setPlaying(false);
+      setIsBuffering(false);
+      setPlayError('অডিও প্লে করা যায়নি');
+    }
+  }, [effectiveSrc, speed]);
+
+  const pauseOthers = (currentEl: HTMLAudioElement) => {
+    if (activeInboxAudioEl && activeInboxAudioEl !== currentEl && !activeInboxAudioEl.paused) {
+      try {
+        activeInboxAudioEl.pause();
+      } catch {}
+    }
+    activeInboxAudioEl = currentEl;
+  };
+
   const togglePlay = async () => {
     const el = audioRef.current;
     if (!el) return;
     if (el.paused) {
+      setPlayError(null);
+      pauseOthers(el);
+      setIsBuffering(true);
       try {
+        if (el.readyState === 0) {
+          el.load();
+        }
         el.playbackRate = speed;
         await el.play();
         setPlaying(true);
-      } catch {}
+        setIsBuffering(false);
+      } catch (err: any) {
+        if (!useMp3Fallback) {
+          autoPlayAfterFallbackRef.current = true;
+          setUseMp3Fallback(true);
+          return;
+        }
+        setPlaying(false);
+        setIsBuffering(false);
+        setPlayError(err?.name === 'NotAllowedError' ? 'ব্রাউজার অডিও ব্লক করেছে' : 'অডিও প্লে ব্যর্থ — ডাউনলোড করে শুনুন');
+      }
     } else {
       el.pause();
       setPlaying(false);
+      setIsBuffering(false);
     }
   };
 
@@ -321,7 +396,8 @@ function VoiceAudioPlayer({
     setSpeed((prev) => (prev === 1 ? 1.5 : prev === 1.5 ? 2 : 1));
   };
 
-  const maxSec = duration > 0 ? duration : 1;
+  const displayDuration = duration > 0 ? duration : declaredDurationSec || 0;
+  const maxSec = displayDuration > 0 ? displayDuration : 1;
   const effectiveDownloadUrl =
     downloadUrl || (src ? `${src}${src.includes('?') ? '&' : '?'}download=1` : '');
 
@@ -329,16 +405,41 @@ function VoiceAudioPlayer({
     <div className="p-2 rounded-xl bg-black/5 max-w-xs space-y-1">
       <audio
         ref={audioRef}
-        src={src}
-        preload="metadata"
+        src={effectiveSrc}
+        preload="none"
+        playsInline
         onLoadedMetadata={(e) => {
           const d = e.currentTarget.duration;
           if (Number.isFinite(d) && d > 0) setDuration(d);
         }}
+        onDurationChange={(e) => {
+          const d = e.currentTarget.duration;
+          if (Number.isFinite(d) && d > 0) setDuration(d);
+        }}
+        onPlaying={() => {
+          setIsBuffering(false);
+          setPlaying(true);
+          setPlayError(null);
+        }}
+        onPause={() => {
+          setPlaying(false);
+          setIsBuffering(false);
+        }}
         onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
         onEnded={() => {
           setPlaying(false);
+          setIsBuffering(false);
           setCurrentTime(0);
+        }}
+        onError={() => {
+          if (!useMp3Fallback) {
+            if (playing || isBuffering) autoPlayAfterFallbackRef.current = true;
+            setUseMp3Fallback(true);
+          } else {
+            setPlaying(false);
+            setIsBuffering(false);
+            setPlayError('অডিও লোড ব্যর্থ — ডাউনলোড করুন');
+          }
         }}
       />
 
@@ -346,16 +447,22 @@ function VoiceAudioPlayer({
         <button
           type="button"
           onClick={togglePlay}
-          className="w-9 h-9 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0 cursor-pointer"
+          className="w-9 h-9 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center shrink-0 cursor-pointer"
         >
-          {playing ? <Pause size={15} /> : <Play size={15} className="ml-0.5" />}
+          {isBuffering ? (
+            <Loader2 size={15} className="animate-spin" />
+          ) : playing ? (
+            <Pause size={15} />
+          ) : (
+            <Play size={15} className="ml-0.5" />
+          )}
         </button>
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between text-[10px] font-bold text-slate-600 mb-1">
             <span>{isVoice ? 'Voice Note' : fileName || 'Audio'}</span>
             <span className="tabular-nums">
-              {formatDurationClock(currentTime)} / {formatDurationClock(duration || declaredDurationSec)}
+              {formatDurationClock(currentTime)} / {formatDurationClock(displayDuration)}
             </span>
           </div>
           <input
@@ -394,6 +501,12 @@ function VoiceAudioPlayer({
           </a>
         )}
       </div>
+
+      {playError && (
+        <div className="text-[10px] font-semibold text-rose-700 px-1">
+          {playError}
+        </div>
+      )}
     </div>
   );
 }
@@ -453,6 +566,17 @@ export function GroupInboxPage({
   const messageStreamRef = useRef<HTMLDivElement | null>(null);
   const selectedGroupIdRef = useRef(selectedGroupId);
   const tabModeRef = useRef(tabMode);
+  const callApiRef = useRef(callApi);
+  const showNotificationRef = useRef(showNotification);
+  const hasMoreRef = useRef(hasMore);
+  const loadingOlderRef = useRef(loadingOlder);
+  const messagesLoadingRef = useRef(messagesLoading);
+  const nextCursorRef = useRef(nextCursor);
+  const isNearBottomRef = useRef(true);
+  const initialScrollKeyRef = useRef('');
+
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  const [unreadBelowCount, setUnreadBelowCount] = useState(0);
 
   useEffect(() => {
     selectedGroupIdRef.current = selectedGroupId;
@@ -463,6 +587,30 @@ export function GroupInboxPage({
   }, [tabMode]);
 
   useEffect(() => {
+    callApiRef.current = callApi;
+  }, [callApi]);
+
+  useEffect(() => {
+    showNotificationRef.current = showNotification;
+  }, [showNotification]);
+
+  useEffect(() => {
+    hasMoreRef.current = hasMore;
+  }, [hasMore]);
+
+  useEffect(() => {
+    loadingOlderRef.current = loadingOlder;
+  }, [loadingOlder]);
+
+  useEffect(() => {
+    messagesLoadingRef.current = messagesLoading;
+  }, [messagesLoading]);
+
+  useEffect(() => {
+    nextCursorRef.current = nextCursor;
+  }, [nextCursor]);
+
+  useEffect(() => {
     if (initialGroupId) setSelectedGroupId(initialGroupId);
     setTabMode(initialDeletedOnly ? 'deleted' : 'all');
   }, [initialGroupId, initialDeletedOnly]);
@@ -470,7 +618,7 @@ export function GroupInboxPage({
   const loadInboxGroups = useCallback(async () => {
     setGroupsLoading(true);
     try {
-      const res = await callApi('/api/inbox/groups');
+      const res = await callApiRef.current('/api/inbox/groups');
       if (Array.isArray(res?.groups)) {
         setGroups(res.groups);
         setSelectedGroupId((prev) => {
@@ -480,43 +628,61 @@ export function GroupInboxPage({
         });
       }
     } catch (err: any) {
-      showNotification(err.message);
+      showNotificationRef.current(err.message);
     } finally {
       setGroupsLoading(false);
     }
-  }, [callApi, initialGroupId, showNotification]);
+  }, [initialGroupId]);
 
   useEffect(() => {
     loadInboxGroups();
   }, [loadInboxGroups]);
 
   const loadMessages = useCallback(
-    async (groupId: string, opts?: { appendOlder?: boolean; cursor?: { beforeTimestamp: number; beforeId: string } | null }) => {
+    async (
+      groupId: string,
+      opts?: {
+        appendOlder?: boolean;
+        cursor?: { beforeTimestamp: number; beforeId: string } | null;
+        forceScrollBottom?: boolean;
+      }
+    ) => {
       if (!groupId) {
         setMessages([]);
         return;
       }
       const appendOlder = Boolean(opts?.appendOlder);
+      if (appendOlder && loadingOlderRef.current) return;
+
       const prevScrollHeight = messageStreamRef.current?.scrollHeight || 0;
       const prevScrollTop = messageStreamRef.current?.scrollTop || 0;
 
-      if (appendOlder) setLoadingOlder(true);
-      else setMessagesLoading(true);
+      if (appendOlder) {
+        loadingOlderRef.current = true;
+        setLoadingOlder(true);
+      } else {
+        messagesLoadingRef.current = true;
+        setMessagesLoading(true);
+      }
 
       try {
         const params = new URLSearchParams();
         params.set('limit', '40');
-        if (tabMode === 'deleted') params.set('deletedOnly', '1');
+        if (tabModeRef.current === 'deleted') params.set('deletedOnly', '1');
         if (appendOlder && opts?.cursor) {
           params.set('beforeTimestamp', String(opts.cursor.beforeTimestamp));
           params.set('beforeId', opts.cursor.beforeId);
         }
 
-        const res = await callApi(`/api/inbox/groups/${encodeURIComponent(groupId)}/messages?${params.toString()}`);
+        const res = await callApiRef.current(
+          `/api/inbox/groups/${encodeURIComponent(groupId)}/messages?${params.toString()}`
+        );
         const pageItems: InboxMessageRecord[] = Array.isArray(res?.messages) ? res.messages : [];
         setHasMore(Boolean(res?.hasMore));
+        hasMoreRef.current = Boolean(res?.hasMore);
         setTotalMatching(Number(res?.totalMatching || pageItems.length));
         setNextCursor(res?.nextCursor || null);
+        nextCursorRef.current = res?.nextCursor || null;
 
         if (appendOlder) {
           setMessages((prev) => {
@@ -527,31 +693,87 @@ export function GroupInboxPage({
             const el = messageStreamRef.current;
             if (el) {
               const delta = el.scrollHeight - prevScrollHeight;
-              el.scrollTop = prevScrollTop + delta;
+              el.scrollTop = Math.max(0, prevScrollTop + delta);
             }
           });
         } else {
+          const loadKey = `${groupId}:${tabModeRef.current}`;
+          const isInitialForGroup = initialScrollKeyRef.current !== loadKey;
           setMessages(pageItems);
-          requestAnimationFrame(() => {
-            const el = messageStreamRef.current;
-            if (el) el.scrollTop = el.scrollHeight;
-          });
+
+          if (isInitialForGroup || opts?.forceScrollBottom) {
+            initialScrollKeyRef.current = loadKey;
+            isNearBottomRef.current = true;
+            setShowJumpToBottom(false);
+            setUnreadBelowCount(0);
+            requestAnimationFrame(() => {
+              const el = messageStreamRef.current;
+              if (el) el.scrollTop = el.scrollHeight;
+            });
+          }
         }
       } catch (err: any) {
-        showNotification(err.message);
+        showNotificationRef.current(err.message);
       } finally {
-        setMessagesLoading(false);
-        setLoadingOlder(false);
+        if (appendOlder) {
+          loadingOlderRef.current = false;
+          setLoadingOlder(false);
+        } else {
+          messagesLoadingRef.current = false;
+          setMessagesLoading(false);
+        }
       }
     },
-    [callApi, showNotification, tabMode]
+    []
   );
 
+  // Load initial messages ONLY when selected group or tab mode actually changes
   useEffect(() => {
     if (!selectedGroupId) return;
-    const t = setTimeout(() => loadMessages(selectedGroupId), 100);
+    initialScrollKeyRef.current = '';
+    setShowJumpToBottom(false);
+    setUnreadBelowCount(0);
+    isNearBottomRef.current = true;
+    const t = setTimeout(() => loadMessages(selectedGroupId, { forceScrollBottom: true }), 80);
     return () => clearTimeout(t);
   }, [selectedGroupId, tabMode, loadMessages]);
+
+  const handleStreamScroll = useCallback(() => {
+    const el = messageStreamRef.current;
+    if (!el) return;
+
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const nearBottom = distanceFromBottom < 140;
+    isNearBottomRef.current = nearBottom;
+    setShowJumpToBottom(distanceFromBottom > 180);
+    if (nearBottom) {
+      setUnreadBelowCount(0);
+    }
+
+    // Automatically load older messages when scrolling near the top without jumping scroll position
+    if (
+      el.scrollTop <= 70 &&
+      hasMoreRef.current &&
+      !loadingOlderRef.current &&
+      !messagesLoadingRef.current &&
+      nextCursorRef.current &&
+      selectedGroupIdRef.current
+    ) {
+      loadMessages(selectedGroupIdRef.current, {
+        appendOlder: true,
+        cursor: nextCursorRef.current,
+      });
+    }
+  }, [loadMessages]);
+
+  const jumpToBottom = useCallback(() => {
+    const el = messageStreamRef.current;
+    if (!el) return;
+    isNearBottomRef.current = true;
+    setShowJumpToBottom(false);
+    setUnreadBelowCount(0);
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  }, []);
 
   // WebSocket
   useEffect(() => {
@@ -595,17 +817,27 @@ export function GroupInboxPage({
             payload.groupId === selectedGroupIdRef.current
           ) {
             const incoming = payload.message as InboxMessageRecord;
+            const isUpdateEvent = payload.type === 'inbox:message_updated';
+
             setMessages((prev) => {
               const idx = prev.findIndex((m) => m.id === incoming.id);
-              if (idx >= 0) return prev.map((m, i) => (i === idx ? incoming : m));
+              if (idx >= 0) {
+                // Keep exact scroll position when updating an existing message (e.g., media downloaded)
+                return prev.map((m, i) => (i === idx ? incoming : m));
+              }
               if (tabModeRef.current === 'deleted' && !incoming.isDeleted) return prev;
               const next = [...prev, incoming].sort((a, b) => a.timestamp - b.timestamp);
-              requestAnimationFrame(() => {
-                const el = messageStreamRef.current;
-                if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 200) {
-                  el.scrollTop = el.scrollHeight;
+
+              if (!isUpdateEvent) {
+                if (isNearBottomRef.current) {
+                  requestAnimationFrame(() => {
+                    const el = messageStreamRef.current;
+                    if (el) el.scrollTop = el.scrollHeight;
+                  });
+                } else {
+                  setUnreadBelowCount((c) => c + 1);
                 }
-              });
+              }
               return next;
             });
           }
@@ -638,14 +870,14 @@ export function GroupInboxPage({
     if (!text || !selectedGroupId || sendingMessage) return;
     setSendingMessage(true);
     try {
-      await callApi('/api/moderation/send', 'POST', {
+      await callApiRef.current('/api/moderation/send', 'POST', {
         groupId: selectedGroupId,
         text,
       });
       setComposerText('');
-      setTimeout(() => loadMessages(selectedGroupId), 350);
+      setTimeout(() => loadMessages(selectedGroupId, { forceScrollBottom: true }), 350);
     } catch (err: any) {
-      showNotification(err.message);
+      showNotificationRef.current(err.message);
     } finally {
       setSendingMessage(false);
     }
@@ -801,7 +1033,8 @@ export function GroupInboxPage({
             {/* 3. Chat Messages Scrollable Stream */}
             <div
               ref={messageStreamRef}
-              className="flex-1 overflow-y-auto p-4 space-y-3 z-10 custom-scrollbar"
+              onScroll={handleStreamScroll}
+              className="flex-1 overflow-y-auto p-4 space-y-3 z-10 custom-scrollbar relative"
             >
               {hasMore && (
                 <div className="flex justify-center pb-2">
@@ -912,15 +1145,29 @@ export function GroupInboxPage({
                           </div>
                         )}
 
-                        {(msg.messageType === 'voice' || msg.messageType === 'audio') && mediaUrl && (
+                        {(msg.messageType === 'voice' || msg.messageType === 'audio') && (
                           <div className="mb-1.5">
-                            <VoiceAudioPlayer
-                              src={mediaUrl}
-                              downloadUrl={downloadUrl}
-                              declaredDurationSec={msg.media?.durationSec}
-                              isVoice={msg.messageType === 'voice'}
-                              fileName={msg.media?.fileName}
-                            />
+                            {mediaUrl ? (
+                              <VoiceAudioPlayer
+                                src={mediaUrl}
+                                downloadUrl={downloadUrl}
+                                declaredDurationSec={msg.media?.durationSec}
+                                isVoice={msg.messageType === 'voice'}
+                                fileName={msg.media?.fileName}
+                              />
+                            ) : (
+                              <div className="p-2.5 rounded-xl bg-black/5 max-w-xs flex items-center gap-2 text-[11px] text-slate-600">
+                                <Mic size={14} className="text-emerald-700 shrink-0" />
+                                <span>
+                                  {msg.media?.status === 'pending'
+                                    ? isBn
+                                      ? 'ভয়েস অডিও ডাউনলোড হচ্ছে...'
+                                      : 'Downloading voice audio...'
+                                    : msg.media?.unavailableReason ||
+                                      (isBn ? 'ভয়েস অডিও পাওয়া যায়নি' : 'Voice audio unavailable')}
+                                </span>
+                              </div>
+                            )}
                           </div>
                         )}
 
@@ -957,6 +1204,25 @@ export function GroupInboxPage({
                 })
               )}
             </div>
+
+            {showJumpToBottom && (
+              <button
+                type="button"
+                onClick={jumpToBottom}
+                className="absolute right-4 bottom-20 z-30 inline-flex items-center gap-1.5 px-3 py-2 rounded-full bg-[#005c4b] hover:bg-emerald-800 text-white text-[11px] font-extrabold shadow-lg border border-white/20 cursor-pointer"
+              >
+                <ArrowDown size={14} />
+                <span>
+                  {unreadBelowCount > 0
+                    ? isBn
+                      ? `নিচে যান (${unreadBelowCount})`
+                      : `Jump down (${unreadBelowCount})`
+                    : isBn
+                      ? 'নিচে যান'
+                      : 'Latest'}
+                </span>
+              </button>
+            )}
 
             {/* 7. Bottom Message Composer */}
             <form onSubmit={handleSendMessage} className="p-2.5 bg-[#f0f2f5] border-t border-slate-300 flex items-center gap-2 z-20">
