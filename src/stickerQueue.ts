@@ -1053,11 +1053,38 @@ export function retryFailedStickerQueue(): { requeuedCount: number } {
   return { requeuedCount };
 }
 
-export function clearStickerQueueHistory(): { cleared: boolean } {
+export function clearStickerQueueHistory(): { cleared: boolean; removedCount: number } {
+  const removedCount = recentHistory.length + Object.keys(permissionDeniedGroups).length;
   recentHistory = [];
   permissionDeniedGroups = {};
   scheduleSaveQueue(true);
-  return { cleared: true };
+  return { cleared: true, removedCount };
+}
+
+export function pruneExpiredStickerHistory(maxAgeMs: number): number {
+  const cutoff = Date.now() - Math.max(60 * 1000, maxAgeMs);
+  let removed = 0;
+
+  if (recentHistory.length > 0) {
+    const before = recentHistory.length;
+    recentHistory = recentHistory.filter((item) => {
+      const ts = item.completedAt || item.lastAttemptAt || item.enqueuedAt || 0;
+      return ts >= cutoff;
+    });
+    removed += before - recentHistory.length;
+  }
+
+  for (const [gid, info] of Object.entries(permissionDeniedGroups)) {
+    if ((info?.detectedAt || 0) < cutoff) {
+      delete permissionDeniedGroups[gid];
+      removed++;
+    }
+  }
+
+  if (removed > 0) {
+    scheduleSaveQueue(true);
+  }
+  return removed;
 }
 
 export function pruneExpiredBurstWindows(maxAgeMs = 5 * 60 * 1000): number {

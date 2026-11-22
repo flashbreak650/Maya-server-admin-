@@ -105,6 +105,7 @@ import {
 import {
   appendDebugLog,
   appendErrorLog,
+  clearAllHistoriesNow,
   getStorageCleanupOverview,
   runCleanup,
   startCleanupScheduler,
@@ -2303,16 +2304,35 @@ app.post('/api/server/cleanup/settings', async (req: Request, res: Response) => 
       preserveErrorLogs: typeof body.preserveErrorLogs === 'boolean' ? body.preserveErrorLogs : undefined,
       cacheIntervalHours: body.cacheIntervalHours !== undefined ? Number(body.cacheIntervalHours) : undefined,
       debugLogRetentionDays: body.debugLogRetentionDays !== undefined ? Number(body.debugLogRetentionDays) : undefined,
+      autoHistoryCleanupEnabled:
+        typeof body.autoHistoryCleanupEnabled === 'boolean' ? body.autoHistoryCleanupEnabled : undefined,
+      historyRetentionHours:
+        body.historyRetentionHours !== undefined ? Number(body.historyRetentionHours) : undefined,
     });
     const overview = await getStorageCleanupOverview();
     res.json({
       success: true,
       settings: updated,
       overview,
-      message: 'সার্ভার অটো ক্লিনআপ ও স্টোরেজ মনিটর সেটিংস সেভ হয়েছে!',
+      message: 'সার্ভার অটো ক্লিনআপ ও হিস্ট্রি অটো-ক্লিয়ার সেটিংস সেভ হয়েছে!',
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || 'Could not save cleanup settings' });
+  }
+});
+
+app.post('/api/server/cleanup/clear-histories', async (_req: Request, res: Response) => {
+  try {
+    const cleared = clearAllHistoriesNow();
+    const overview = await getStorageCleanupOverview();
+    res.json({
+      success: true,
+      cleared,
+      overview,
+      message: `স্টিকার (${cleared.stickerHistoryCleared}), ওয়ার্নিং (${cleared.warningsCleared}) ও রিমুভ/অ্যাক্টিভিটি (${cleared.activityLogsCleared}) হিস্ট্রি ক্লিয়ার করা হয়েছে!`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Could not clear histories' });
   }
 });
 

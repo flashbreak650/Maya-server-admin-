@@ -1129,6 +1129,18 @@ export function clearVoiceModerationHistory(): boolean {
   return true;
 }
 
+export function pruneExpiredVoiceHistory(maxAgeMs: number): number {
+  const cutoff = Date.now() - Math.max(60 * 1000, maxAgeMs);
+  if (!Array.isArray(db.history) || db.history.length === 0) return 0;
+  const before = db.history.length;
+  db.history = db.history.filter((rec) => (rec?.timestamp || 0) >= cutoff);
+  const removed = before - db.history.length;
+  if (removed > 0) {
+    scheduleSaveDB();
+  }
+  return removed;
+}
+
 export async function testAudioBufferOffline(params: {
   audioBuffer: Buffer;
   fileName?: string;

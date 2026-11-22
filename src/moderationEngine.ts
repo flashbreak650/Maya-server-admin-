@@ -839,6 +839,68 @@ export function clearActivityLogs(): boolean {
   return true;
 }
 
+export function pruneExpiredModerationHistories(maxAgeMs: number): {
+  warningsCleared: number;
+  activityLogsCleared: number;
+  callLogsCleared: number;
+} {
+  const cutoff = Date.now() - Math.max(60 * 1000, maxAgeMs);
+  let warningsCleared = 0;
+  let activityLogsCleared = 0;
+  let callLogsCleared = 0;
+  let dirty = false;
+
+  if (db.warnings && typeof db.warnings === 'object') {
+    for (const [k, w] of Object.entries(db.warnings)) {
+      if (!w || (w.lastViolation || 0) < cutoff) {
+        delete db.warnings[k];
+        warningsCleared++;
+        dirty = true;
+      } else if (Array.isArray(w.violations)) {
+        const fresh = w.violations.filter((v) => (v?.timestamp || 0) >= cutoff);
+        if (fresh.length !== w.violations.length) {
+          w.violations = fresh;
+          dirty = true;
+        }
+      }
+    }
+  }
+
+  if (Array.isArray(db.activityLogs) && db.activityLogs.length > 0) {
+    const beforeLen = db.activityLogs.length;
+    db.activityLogs = db.activityLogs.filter((l) => (l?.timestamp || 0) >= cutoff);
+    activityLogsCleared = beforeLen - db.activityLogs.length;
+    if (activityLogsCleared > 0) dirty = true;
+  }
+
+  if (Array.isArray(db.callLogs) && db.callLogs.length > 0) {
+    const beforeCallLen = db.callLogs.length;
+    db.callLogs = db.callLogs.filter((c) => (c?.timestamp || 0) >= cutoff);
+    callLogsCleared = beforeCallLen - db.callLogs.length;
+    if (callLogsCleared > 0) dirty = true;
+  }
+
+  if (dirty) {
+    saveDatabase();
+  }
+  return { warningsCleared, activityLogsCleared, callLogsCleared };
+}
+
+export function clearAllModerationHistories(): {
+  warningsCleared: number;
+  activityLogsCleared: number;
+  callLogsCleared: number;
+} {
+  const warningsCleared = db.warnings ? Object.keys(db.warnings).length : 0;
+  const activityLogsCleared = Array.isArray(db.activityLogs) ? db.activityLogs.length : 0;
+  const callLogsCleared = Array.isArray(db.callLogs) ? db.callLogs.length : 0;
+  db.warnings = {};
+  db.activityLogs = [];
+  db.callLogs = [];
+  saveDatabase();
+  return { warningsCleared, activityLogsCleared, callLogsCleared };
+}
+
 export function addActivityLog(log: Omit<ActivityLog, 'id' | 'timestamp'>) {
   const newLog: ActivityLog = {
     ...log,

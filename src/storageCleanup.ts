@@ -20,12 +20,22 @@ import {
 } from './storagePaths.ts';
 import { enforceInboxMediaStorageLimit } from './inboxStore.ts';
 import {
+  clearAllModerationHistories,
+  pruneExpiredModerationHistories,
   pruneExpiredRuntimeCaches,
   reportServerProblem,
   resolveServerProblem,
 } from './moderationEngine.ts';
 import { pruneIdleConversationCaches } from './aiEngine.ts';
-import { pruneExpiredBurstWindows } from './stickerQueue.ts';
+import {
+  clearStickerQueueHistory,
+  pruneExpiredBurstWindows,
+  pruneExpiredStickerHistory,
+} from './stickerQueue.ts';
+import {
+  clearVoiceModerationHistory,
+  pruneExpiredVoiceHistory,
+} from './voiceModeration.ts';
 
 export type CleanupMode = 'cache' | 'temp' | 'logs' | 'duplicates' | 'full';
 export type StorageAlertLevel = 'normal' | 'notice_70' | 'warning_85' | 'critical_95';
@@ -52,6 +62,8 @@ export interface CleanupSettings {
   dailyTempCleanupEnabled: boolean;
   debugLogRetentionDays: number;
   preserveErrorLogs: boolean;
+  autoHistoryCleanupEnabled: boolean;
+  historyRetentionHours: number;
   alertThresholds: [number, number, number];
 }
 
@@ -102,6 +114,7 @@ interface PersistedCleanupState {
   lastCacheCleanupAt: number;
   lastDailyCleanupAt: number;
   lastLogMaintenanceAt: number;
+  lastHistoryCleanupAt?: number;
   totalRecoveredBytes: number;
   totalFilesCleaned: number;
   lastAlertLevel: StorageAlertLevel;
@@ -165,6 +178,8 @@ const DEFAULT_CLEANUP_SETTINGS: CleanupSettings = {
   dailyTempCleanupEnabled: true,
   debugLogRetentionDays: 7,
   preserveErrorLogs: true,
+  autoHistoryCleanupEnabled: true,
+  historyRetentionHours: 24,
   alertThresholds: [70, 85, 95],
 };
 
@@ -174,6 +189,7 @@ let cleanupState: PersistedCleanupState = {
   lastCacheCleanupAt: 0,
   lastDailyCleanupAt: 0,
   lastLogMaintenanceAt: 0,
+  lastHistoryCleanupAt: 0,
   totalRecoveredBytes: 0,
   totalFilesCleaned: 0,
   lastAlertLevel: 'normal',
@@ -339,6 +355,7 @@ function loadCleanupState() {
           lastCacheCleanupAt: Number(raw.lastCacheCleanupAt || 0),
           lastDailyCleanupAt: Number(raw.lastDailyCleanupAt || 0),
           lastLogMaintenanceAt: Number(raw.lastLogMaintenanceAt || 0),
+          lastHistoryCleanupAt: Number(raw.lastHistoryCleanupAt || 0),
           totalRecoveredBytes: Number(raw.totalRecoveredBytes || 0),
           totalFilesCleaned: Number(raw.totalFilesCleaned || 0),
           lastAlertLevel: (raw.lastAlertLevel as StorageAlertLevel) || 'normal',
@@ -1008,6 +1025,28 @@ export async function runCleanup(
       skippedProtectedCount += logRes.protectedSkipped;
     }
 
+    // 5. Auto-Clear Expired Sticker History, Warning History & Remove/Activity Logs (respects retention hours)
+    if (cleanupState.settings.autoHistoryCleanupEnabled !== false) {
+      const retentionMs = Math.max(1, Number(cleanupState.settings.historyRetentionHours || 24)) * 60 * 60 * 1000;
+      const modPruned = pruneExpiredModerationHistories(retentionMs);
+      const stickerPruned = pruneExpiredStickerHistory(retentionMs);
+      const voicePruned = pruneExpiredVoiceHistory(retentionMs);
+      const totalHistPruned =
+        modPruned.warningsCleared +
+        modPruned.activityLogsCleared +
+        modPruned.callLogsCleared +
+        stickerPruned +
+        voicePruned;
+      if (totalHistPruned > 0) {
+        cacheEntriesPruned += totalHistPruned;
+        cleanupState.lastHistoryCleanupAt = Date.now();
+        appendDebugLog(
+          'HISTORY_AUTO_CLEAR',
+          `Pruned warnings=${modPruned.warningsCleared}, logs=${modPruned.activityLogsCleared}, sticker=${stickerPruned}, voice=${voicePruned}`
+        );
+      }
+    }
+
     // Verify protected stores untouched count
     for (const pRoot of [
       MODERATION_DB_PATH,
@@ -1208,11 +1247,39 @@ export function updateCleanupSettings(patch: Partial<CleanupSettings>): CleanupS
     ...(patch.debugLogRetentionDays !== undefined
       ? { debugLogRetentionDays: Math.max(1, Math.min(30, Number(patch.debugLogRetentionDays) || 7)) }
       : {}),
+    ...(typeof patch.autoHistoryCleanupEnabled === 'boolean'
+      ? { autoHistoryCleanupEnabled: patch.autoHistoryCleanupEnabled }
+      : {}),
+    ...(patch.historyRetentionHours !== undefined
+      ? { historyRetentionHours: Math.max(1, Math.min(168, Number(patch.historyRetentionHours) || 24)) }
+      : {}),
     alertThresholds: [70, 85, 95],
   };
   cleanupState.settings = next;
   saveCleanupStateSync();
   return { ...next };
+}
+
+export function clearAllHistoriesNow() {
+  loadCleanupState();
+  const modRes = clearAllModerationHistories();
+  const stickerRes = clearStickerQueueHistory();
+  clearVoiceModerationHistory();
+  cleanupState.lastHistoryCleanupAt = Date.now();
+  saveCleanupStateSync();
+  appendDebugLog(
+    'HISTORY_MANUAL_CLEAR',
+    `Cleared all warnings=${modRes.warningsCleared}, logs=${modRes.activityLogsCleared}, sticker=${stickerRes.removedCount}`
+  );
+  return {
+    ...modRes,
+    stickerHistoryCleared: stickerRes.removedCount,
+    totalCleared:
+      modRes.warningsCleared +
+      modRes.activityLogsCleared +
+      modRes.callLogsCleared +
+      stickerRes.removedCount,
+  };
 }
 
 export async function getStorageCleanupOverview() {
@@ -1237,6 +1304,7 @@ export async function getStorageCleanupOverview() {
       lastCacheCleanupAt: cleanupState.lastCacheCleanupAt,
       lastDailyCleanupAt: cleanupState.lastDailyCleanupAt,
       lastLogMaintenanceAt: cleanupState.lastLogMaintenanceAt,
+      lastHistoryCleanupAt: cleanupState.lastHistoryCleanupAt || 0,
       nextCacheCleanupAt,
       nextDailyCleanupAt,
       totalRecoveredBytes: cleanupState.totalRecoveredBytes,
@@ -1282,7 +1350,26 @@ async function runScheduledTick(getSock: () => WASocket | null) {
     }
   }
 
-  // 4. Storage Monitor Threshold Check (every 15 min)
+  // 4. Auto-Clear Sticker History, Warning History & Remove/Activity Logs (every 1h check)
+  if (
+    cleanupState.settings.autoHistoryCleanupEnabled !== false &&
+    now - (cleanupState.lastHistoryCleanupAt || 0) >= 60 * 60 * 1000
+  ) {
+    const retentionMs = Math.max(1, Number(cleanupState.settings.historyRetentionHours || 24)) * 60 * 60 * 1000;
+    const modPruned = pruneExpiredModerationHistories(retentionMs);
+    const stickerPruned = pruneExpiredStickerHistory(retentionMs);
+    const voicePruned = pruneExpiredVoiceHistory(retentionMs);
+    cleanupState.lastHistoryCleanupAt = now;
+    saveCleanupStateSync();
+    if (modPruned.warningsCleared + modPruned.activityLogsCleared + stickerPruned + voicePruned > 0) {
+      appendDebugLog(
+        'HISTORY_AUTO_CLEAR',
+        `Scheduled auto-clear removed warnings=${modPruned.warningsCleared}, logs=${modPruned.activityLogsCleared}, sticker=${stickerPruned}, voice=${voicePruned}`
+      );
+    }
+  }
+
+  // 5. Storage Monitor Threshold Check (every 15 min)
   if (now - lastDiskAlertCheckAt >= 15 * 60 * 1000) {
     lastDiskAlertCheckAt = now;
     await evaluateStorageThresholdAlerts(sock).catch(() => {});

@@ -110,6 +110,8 @@ export interface StorageCleanupOverview {
     dailyTempCleanupEnabled: boolean;
     debugLogRetentionDays: number;
     preserveErrorLogs: boolean;
+    autoHistoryCleanupEnabled?: boolean;
+    historyRetentionHours?: number;
     alertThresholds: [number, number, number];
   };
   scheduler: {
@@ -119,6 +121,7 @@ export interface StorageCleanupOverview {
     lastCacheCleanupAt: number;
     lastDailyCleanupAt: number;
     lastLogMaintenanceAt: number;
+    lastHistoryCleanupAt?: number;
     nextCacheCleanupAt: number;
     nextDailyCleanupAt: number;
     totalRecoveredBytes: number;
@@ -181,7 +184,10 @@ interface StorageCleanupPageProps {
     preserveErrorLogs?: boolean;
     cacheIntervalHours?: number;
     debugLogRetentionDays?: number;
+    autoHistoryCleanupEnabled?: boolean;
+    historyRetentionHours?: number;
   }) => void;
+  onClearHistoriesNow?: () => void;
 }
 
 export function StorageCleanupPage({
@@ -193,12 +199,15 @@ export function StorageCleanupPage({
   onRefresh,
   onRunCleanup,
   onSaveSettings,
+  onClearHistoriesNow,
 }: StorageCleanupPageProps) {
   const [autoEnabled, setAutoEnabled] = React.useState(true);
   const [dailyTempEnabled, setDailyTempEnabled] = React.useState(true);
   const [preserveErrors, setPreserveErrors] = React.useState(true);
   const [cacheHours, setCacheHours] = React.useState(3);
   const [logRetentionDays, setLogRetentionDays] = React.useState(7);
+  const [autoHistoryClear, setAutoHistoryClear] = React.useState(true);
+  const [historyRetentionHours, setHistoryRetentionHours] = React.useState(24);
 
   React.useEffect(() => {
     if (overview?.settings) {
@@ -207,6 +216,8 @@ export function StorageCleanupPage({
       setPreserveErrors(Boolean(overview.settings.preserveErrorLogs));
       setCacheHours(Number(overview.settings.cacheIntervalHours || 3));
       setLogRetentionDays(Number(overview.settings.debugLogRetentionDays || 7));
+      setAutoHistoryClear(overview.settings.autoHistoryCleanupEnabled !== false);
+      setHistoryRetentionHours(Number(overview.settings.historyRetentionHours || 24));
     }
   }, [
     overview?.settings?.autoCleanupEnabled,
@@ -214,6 +225,8 @@ export function StorageCleanupPage({
     overview?.settings?.preserveErrorLogs,
     overview?.settings?.cacheIntervalHours,
     overview?.settings?.debugLogRetentionDays,
+    overview?.settings?.autoHistoryCleanupEnabled,
+    overview?.settings?.historyRetentionHours,
   ]);
 
   const snap = overview?.snapshot;
@@ -642,25 +655,70 @@ export function StorageCleanupPage({
                   </select>
                 </div>
               </div>
+
+              <div className="pt-2 border-t border-slate-100 space-y-2">
+                <label className="flex items-center justify-between gap-2 cursor-pointer">
+                  <span className="text-xs font-semibold text-slate-700">
+                    {isBn ? 'স্টিকার, ওয়ার্নিং ও রিমুভ হিস্ট্রি অটো-ক্লিয়ার' : 'Auto-Clear Sticker, Warning & Remove History'}
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={autoHistoryClear}
+                    onChange={(e) => setAutoHistoryClear(e.target.checked)}
+                    className="w-4 h-4 accent-[#087f55]"
+                  />
+                </label>
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                    {isBn ? 'হিস্ট্রি কতক্ষণ পর অটো ক্লিয়ার হবে' : 'Clear Histories Older Than'}
+                  </label>
+                  <select
+                    value={historyRetentionHours}
+                    onChange={(e) => setHistoryRetentionHours(Number(e.target.value))}
+                    className="w-full min-h-[38px] px-2.5 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-800"
+                  >
+                    <option value={1}>{isBn ? '১ ঘণ্টা পর' : '1 Hour'}</option>
+                    <option value={3}>{isBn ? '৩ ঘণ্টা পর' : '3 Hours'}</option>
+                    <option value={6}>{isBn ? '৬ ঘণ্টা পর' : '6 Hours'}</option>
+                    <option value={12}>{isBn ? '১২ ঘণ্টা পর' : '12 Hours'}</option>
+                    <option value={24}>{isBn ? '২৪ ঘণ্টা (ডিফল্ট)' : '24 Hours (Default)'}</option>
+                    <option value={72}>{isBn ? '৩ দিন পর' : '72 Hours'}</option>
+                  </select>
+                </div>
+              </div>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() =>
-              onSaveSettings({
-                autoCleanupEnabled: autoEnabled,
-                dailyTempCleanupEnabled: dailyTempEnabled,
-                preserveErrorLogs: preserveErrors,
-                cacheIntervalHours: cacheHours,
-                debugLogRetentionDays: logRetentionDays,
-              })
-            }
-            className="mt-4 w-full min-h-[40px] px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer"
-          >
-            <Save size={13} />
-            <span>{isBn ? 'শিডিউল সেটিংস সেভ করুন' : 'Save Scheduler Settings'}</span>
-          </button>
+          <div className="mt-4 space-y-2">
+            <button
+              type="button"
+              onClick={() =>
+                onSaveSettings({
+                  autoCleanupEnabled: autoEnabled,
+                  dailyTempCleanupEnabled: dailyTempEnabled,
+                  preserveErrorLogs: preserveErrors,
+                  cacheIntervalHours: cacheHours,
+                  debugLogRetentionDays: logRetentionDays,
+                  autoHistoryCleanupEnabled: autoHistoryClear,
+                  historyRetentionHours,
+                })
+              }
+              className="w-full min-h-[40px] px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <Save size={13} />
+              <span>{isBn ? 'শিডিউল সেটিংস সেভ করুন' : 'Save Scheduler Settings'}</span>
+            </button>
+            {onClearHistoriesNow && (
+              <button
+                type="button"
+                onClick={onClearHistoriesNow}
+                className="w-full min-h-[38px] px-4 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Trash2 size={13} />
+                <span>{isBn ? 'এখনই সব হিস্ট্রি ক্লিয়ার (স্টিকার + ওয়ার্নিং + রিমুভ)' : 'Clear Sticker, Warning & Remove History Now'}</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -672,8 +730,8 @@ export function StorageCleanupPage({
             {isBn ? 'বিশেষ ডাটা সুরক্ষা গ্যারান্টি: ' : 'Strict Data Protection Guarantee: '}
           </span>
           {isBn
-            ? 'ডাটাবেজ, WhatsApp সেশন ও ক্রেডেনশিয়াল, পেন্ডিং স্টিকার/মেসেজ কিউ, ওয়ার্নিং/ব্যান হিস্ট্রি, মেম্বার রেকর্ড, গ্রুপ সুরক্ষা সেটিংস এবং গুরুত্বপূর্ণ এরর লগ কখনোই অটোমেটিক ডিলিট করা হবে না।'
-            : 'Database records, WhatsApp auth credentials, pending queues, warning/ban histories, group protection rules, and important error logs are strictly protected from deletion.'}
+            ? 'ডাটাবেজ ফাইল, WhatsApp সেশন ও ক্রেডেনশিয়াল, পেন্ডিং মেসেজ কিউ, গ্রুপ সুরক্ষা সেটিংস এবং গুরুত্বপূর্ণ এরর লগ সুরক্ষিত রেখে শুধু নির্ধারিত মেয়াদের পুরোনো স্টিকার, ওয়ার্নিং ও রিমুভ হিস্ট্রি অটো-ক্লিয়ার করা হয়।'
+            : 'Core settings, WhatsApp auth credentials, pending queues, and important error logs stay protected while expired sticker, warning, and remove histories auto-clear on schedule.'}
         </div>
       </div>
 

@@ -1067,6 +1067,8 @@ export default function App() {
     preserveErrorLogs?: boolean;
     cacheIntervalHours?: number;
     debugLogRetentionDays?: number;
+    autoHistoryCleanupEnabled?: boolean;
+    historyRetentionHours?: number;
   }) => {
     try {
       const res = await callApi('/api/server/cleanup/settings', 'POST', patch);
@@ -1076,6 +1078,19 @@ export default function App() {
       showNotification(res?.message || (isBn ? 'অটো ক্লিনআপ সেটিংস সেভ হয়েছে!' : 'Cleanup settings saved!'));
     } catch (err: any) {
       showNotification((isBn ? 'সেভ ব্যর্থ: ' : 'Save failed: ') + err.message);
+    }
+  };
+
+  const handleClearAllHistoriesNow = async () => {
+    try {
+      const res = await callApi('/api/server/cleanup/clear-histories', 'POST');
+      if (res?.overview?.snapshot) {
+        setStorageOverview(res.overview);
+      }
+      await loadModerationData();
+      showNotification(res?.message || (isBn ? 'স্টিকার, ওয়ার্নিং ও রিমুভ হিস্ট্রি ক্লিয়ার হয়েছে!' : 'All histories cleared!'));
+    } catch (err: any) {
+      showNotification((isBn ? 'ক্লিয়ার ব্যর্থ: ' : 'Clear failed: ') + err.message);
     }
   };
 
@@ -2946,6 +2961,7 @@ export default function App() {
               onRefresh={loadStorageOverview}
               onRunCleanup={handleRunServerCleanup}
               onSaveSettings={handleSaveCleanupSettings}
+              onClearHistoriesNow={handleClearAllHistoriesNow}
             />
           )}
 
