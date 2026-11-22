@@ -223,6 +223,7 @@ interface ModerationSettings {
   companionAllowedGroups?: string[];
   companionCustomBio?: string;
   voiceModerationEnabled?: boolean;
+  voiceUseGeminiApi?: boolean;
   voiceDetectBangla?: boolean;
   voiceDetectSylheti?: boolean;
   voiceDetectEnglish?: boolean;
@@ -597,6 +598,7 @@ export default function App() {
     serverErrorNoticeEnabled: true,
     serverErrorNoticeTarget: 'boss_inbox',
     voiceModerationEnabled: true,
+    voiceUseGeminiApi: true,
     voiceDetectBangla: true,
     voiceDetectSylheti: true,
     voiceDetectEnglish: true,

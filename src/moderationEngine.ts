@@ -145,6 +145,7 @@ export interface ModerationSettings {
   companionCustomBio?: string;
   // Offline AI Voice Anti-Abuse System (Zero Paid API, Whisper.cpp)
   voiceModerationEnabled?: boolean;
+  voiceUseGeminiApi?: boolean;
   voiceDetectBangla?: boolean;
   voiceDetectSylheti?: boolean;
   voiceDetectEnglish?: boolean;
@@ -319,6 +320,7 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   companionAllowedGroups: [],
   companionCustomBio: '',
   voiceModerationEnabled: true,
+  voiceUseGeminiApi: true,
   voiceDetectBangla: true,
   voiceDetectSylheti: true,
   voiceDetectEnglish: true,

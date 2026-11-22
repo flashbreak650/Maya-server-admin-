@@ -2418,6 +2418,7 @@ app.post('/api/voice-moderation/settings', async (req: Request, res: Response) =
     const patch: Record<string, any> = {};
 
     if (typeof body.voiceModerationEnabled === 'boolean') patch.voiceModerationEnabled = body.voiceModerationEnabled;
+    if (typeof body.voiceUseGeminiApi === 'boolean') patch.voiceUseGeminiApi = body.voiceUseGeminiApi;
     if (typeof body.voiceDetectBangla === 'boolean') patch.voiceDetectBangla = body.voiceDetectBangla;
     if (typeof body.voiceDetectSylheti === 'boolean') patch.voiceDetectSylheti = body.voiceDetectSylheti;
     if (typeof body.voiceDetectEnglish === 'boolean') patch.voiceDetectEnglish = body.voiceDetectEnglish;

@@ -29,6 +29,7 @@ import {
   updateSettings,
 } from './moderationEngine.ts';
 import { markInboxMessageDeleted } from './inboxStore.ts';
+import { evaluateVoiceProfanityViaGeminiApi } from './aiEngine.ts';
 
 const execFileAsync = promisify(execFile);
 const silentBaileysLogger = pino({ level: 'silent' });
@@ -850,6 +851,28 @@ async function transcribeAndAnalyzeAudioBuffer(
           bestProb = bnPass.avgTokenProb;
           bestAnalysis = bnAnalysis;
           dialectPassUsed = bestAnalysis.dialectDetected === 'sylheti' ? 'bn_sylheti_pass' : 'dual_pass';
+        }
+      } catch {}
+    }
+
+    const voiceSettings = getSettings();
+    if (voiceSettings.voiceUseGeminiApi !== false && (bestAnalysis.cleanedTranscript || bestTranscript)) {
+      try {
+        const apiEval = await evaluateVoiceProfanityViaGeminiApi(bestAnalysis.cleanedTranscript || bestTranscript);
+        if (apiEval) {
+          bestAnalysis = {
+            cleanedTranscript: bestAnalysis.cleanedTranscript || bestTranscript,
+            isHallucinationOrEmpty: false,
+            isProfane: apiEval.isProfane,
+            needsReview: apiEval.needsReview,
+            confidenceScore: apiEval.confidenceScore,
+            matchedWords: apiEval.matchedWords,
+            matchedCategories: apiEval.matchedWords.length > 0 ? ['semantic'] : [],
+            semanticSignals: apiEval.semanticSignals,
+            dialectDetected: bestAnalysis.dialectDetected || 'standard_bn',
+            contextReason: apiEval.contextReason,
+            detectedScriptSummary: bestAnalysis.detectedScriptSummary || 'bn',
+          };
         }
       } catch {}
     }

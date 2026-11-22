@@ -1022,3 +1022,71 @@ export function pruneIdleConversationCaches(maxIdleMs = 6 * 60 * 60 * 1000): num
   return pruned;
 }
 
+export async function evaluateVoiceProfanityViaGeminiApi(transcript: string): Promise<{
+  isProfane: boolean;
+  needsReview: boolean;
+  confidenceScore: number;
+  matchedWords: string[];
+  semanticSignals: string[];
+  contextReason: string;
+} | null> {
+  if (!transcript || !transcript.trim()) return null;
+  const settings = getSettings();
+  const apiKey =
+    (settings.geminiApiKey && isValidGeminiKeyFormat(settings.geminiApiKey) ? settings.geminiApiKey : '') ||
+    (settings.aiKeys || []).find((k) => k.provider === 'gemini' && k.status === 'active' && isValidGeminiKeyFormat(k.key))?.key ||
+    process.env.GEMINI_API_KEY ||
+    '';
+
+  if (!apiKey || !isValidGeminiKeyFormat(apiKey)) return null;
+
+  const ai = new GoogleGenAI({
+    apiKey: apiKey.trim(),
+    httpOptions: { headers: { 'User-Agent': 'waguard-voice-eval' } },
+  });
+
+  const modelName = settings.geminiModel || 'gemini-3.8-flash';
+  const systemPrompt = `You are an expert AI Voice Moderation System for WhatsApp groups. Your task is to analyze transcribed voice text in Bengali, Sylheti, Banglish, or English.
+You must intelligently understand context, nuance, and slang.
+CRITICAL RULE: Good behavior, polite voice notes, everyday talk, jokes, or normal conversation (e.g., "কেমন আছেন", "পানি লাগবে", "ভালো কথা", "বালতি") MUST NOT be flagged as profane. Set isProfane to false and needsReview to false for them.
+Only flag isProfane: true if there is undeniable profanity, obscene slurs, sexual insults, severe personal attacks, or vulgar threats. If it's borderline or ambiguous, set needsReview to true.
+Return ONLY valid JSON (no markdown fences) with these keys:
+{
+  "isProfane": boolean,
+  "needsReview": boolean,
+  "confidenceScore": number (0 to 100),
+  "matchedWords": array of strings (slurs or obscene phrases found, or empty array),
+  "semanticSignals": array of strings (short Bengali descriptive reasons),
+  "contextReason": string (detailed explanation in Bengali)
+}`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: modelName,
+      contents: [{ role: 'user', parts: [{ text: `Transcript to evaluate:\n"${transcript}"` }] }],
+      config: {
+        systemInstruction: systemPrompt,
+        temperature: 0.1,
+      },
+    });
+
+    const rawText = response.text?.trim() || '';
+    if (!rawText) return null;
+
+    const cleanedJsonText = rawText.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/, '').trim();
+    const parsed = JSON.parse(cleanedJsonText);
+    if (parsed && typeof parsed === 'object') {
+      return {
+        isProfane: Boolean(parsed.isProfane),
+        needsReview: Boolean(parsed.needsReview),
+        confidenceScore: Math.min(100, Math.max(0, Number(parsed.confidenceScore || 85))),
+        matchedWords: Array.isArray(parsed.matchedWords) ? parsed.matchedWords.map(String) : [],
+        semanticSignals: Array.isArray(parsed.semanticSignals) ? parsed.semanticSignals.map(String) : ['Gemini API API সেমান্টিক বিশ্লেষণ'],
+        contextReason: String(parsed.contextReason || 'Gemini API দ্বারা বুদ্ধিদীপ্ত মূল্যায়ন সম্পন্ন হয়েছে'),
+      };
+    }
+  } catch {}
+  return null;
+}
+
+

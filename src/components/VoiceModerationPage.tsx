@@ -142,6 +142,7 @@ export interface VoiceModerationOverview {
     voiceAllowedWords: string[];
     voiceBlockedWords: string[];
     voiceWhisperModel: 'tiny-q5_1' | 'base-q5_1' | 'small-q5_1';
+    voiceUseGeminiApi?: boolean;
   };
   stats: {
     totalProcessed: number;
@@ -215,6 +216,7 @@ export function VoiceModerationPage({
   const s = overview?.settings;
 
   const [enabled, setEnabled] = useState(s?.voiceModerationEnabled ?? true);
+  const [useGeminiApi, setUseGeminiApi] = useState(s?.voiceUseGeminiApi ?? true);
   const [detectBangla, setDetectBangla] = useState(s?.voiceDetectBangla ?? true);
   const [detectSylheti, setDetectSylheti] = useState(s?.voiceDetectSylheti ?? true);
   const [detectEnglish, setDetectEnglish] = useState(s?.voiceDetectEnglish ?? true);
@@ -245,6 +247,7 @@ export function VoiceModerationPage({
   useEffect(() => {
     if (!overview?.settings) return;
     setEnabled(overview.settings.voiceModerationEnabled);
+    setUseGeminiApi(overview.settings.voiceUseGeminiApi ?? true);
     setDetectBangla(overview.settings.voiceDetectBangla);
     setDetectSylheti(overview.settings.voiceDetectSylheti ?? true);
     setDetectEnglish(overview.settings.voiceDetectEnglish);
@@ -272,6 +275,7 @@ export function VoiceModerationPage({
     try {
       await onSaveSettings({
         voiceModerationEnabled: enabled,
+        voiceUseGeminiApi: useGeminiApi,
         voiceDetectBangla: detectBangla,
         voiceDetectSylheti: detectSylheti,
         voiceDetectEnglish: detectEnglish,
@@ -575,6 +579,25 @@ export function VoiceModerationPage({
               </div>
               <label className="switch">
                 <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+                <span className="slider" />
+              </label>
+            </div>
+
+            {/* Gemini API Smart Voice Evaluation Switch */}
+            <div className="toggle-row pt-2 border-t border-slate-100">
+              <div>
+                <div className="text-xs font-extrabold text-emerald-950 flex items-center gap-1.5">
+                  <Sparkles size={14} className="text-emerald-700" />
+                  <span>{isBn ? 'Gemini API Smart Voice Evaluation (এআই API ভিত্তিক)' : 'Gemini API Smart Voice Evaluation'}</span>
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  {isBn
+                    ? 'সরাসরি Gemini API ব্যবহার করে গালি ও ভালো ব্যবহার বুদ্ধিমত্তার সাথে বুঝবে; ভালো/স্বাভাবিক ভয়েস কখনো ডিলিট করবে না।'
+                    : 'Uses Gemini API to intelligently understand context and profanity; never deletes polite or good voice messages.'}
+                </div>
+              </div>
+              <label className="switch">
+                <input type="checkbox" checked={useGeminiApi} onChange={(e) => setUseGeminiApi(e.target.checked)} />
                 <span className="slider" />
               </label>
             </div>
