@@ -146,12 +146,15 @@ export interface ModerationSettings {
   // Offline AI Voice Anti-Abuse System (Zero Paid API, Whisper.cpp)
   voiceModerationEnabled?: boolean;
   voiceDetectBangla?: boolean;
+  voiceDetectSylheti?: boolean;
   voiceDetectEnglish?: boolean;
   voiceDetectBanglish?: boolean;
   voiceProfanitySensitivity?: 'low' | 'medium' | 'high';
   voiceAllowedWords?: string[];
   voiceBlockedWords?: string[];
   voiceWhisperModel?: 'tiny-q5_1' | 'base-q5_1' | 'small-q5_1';
+  voiceReviewUnclearEnabled?: boolean;
+  voiceAutoSelectModel?: boolean;
 }
 
 export interface AiKey {
@@ -317,12 +320,15 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   companionCustomBio: '',
   voiceModerationEnabled: true,
   voiceDetectBangla: true,
+  voiceDetectSylheti: true,
   voiceDetectEnglish: true,
   voiceDetectBanglish: true,
   voiceProfanitySensitivity: 'medium',
   voiceAllowedWords: [],
   voiceBlockedWords: [],
   voiceWhisperModel: 'base-q5_1',
+  voiceReviewUnclearEnabled: true,
+  voiceAutoSelectModel: false,
 };
 
 // In-memory runtime database

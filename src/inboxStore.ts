@@ -1788,4 +1788,29 @@ export async function enforceInboxMediaStorageLimit(forcePrunePercent = 0): Prom
   return { filesRemoved, bytesFreed, protectedImportantSkipped };
 }
 
+export function getRecentGroupVoiceClips(limit = 40, filterGroupId?: string): InboxMessageRecord[] {
+  loadInboxIndex();
+  const capped = Math.max(1, Math.min(120, Number(limit || 40)));
+  const groupIds = filterGroupId
+    ? [filterGroupId]
+    : Object.keys(inboxIndex.groups);
+
+  const clips: InboxMessageRecord[] = [];
+  for (const gid of groupIds) {
+    const records = loadGroupMessages(gid);
+    for (const rec of records) {
+      if (
+        (rec.messageType === 'voice' || rec.messageType === 'audio') &&
+        rec.media?.status === 'saved' &&
+        rec.media.relPath
+      ) {
+        clips.push(rec);
+      }
+    }
+  }
+
+  clips.sort((a, b) => b.timestamp - a.timestamp);
+  return clips.slice(0, capped);
+}
+
 loadInboxIndex();

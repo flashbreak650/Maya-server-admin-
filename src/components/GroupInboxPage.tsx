@@ -322,6 +322,8 @@ function VoiceAudioPlayer({
   };
 
   const maxSec = duration > 0 ? duration : 1;
+  const effectiveDownloadUrl =
+    downloadUrl || (src ? `${src}${src.includes('?') ? '&' : '?'}download=1` : '');
 
   return (
     <div className="p-2 rounded-xl bg-black/5 max-w-xs space-y-1">
@@ -380,6 +382,17 @@ function VoiceAudioPlayer({
         >
           {speed}x
         </button>
+
+        {effectiveDownloadUrl && (
+          <a
+            href={effectiveDownloadUrl}
+            download={fileName || (isVoice ? 'voice_note.ogg' : 'audio_clip.ogg')}
+            title="Download voice audio"
+            className="w-7 h-7 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white flex items-center justify-center shrink-0 transition-colors"
+          >
+            <Download size={13} />
+          </a>
+        )}
       </div>
     </div>
   );

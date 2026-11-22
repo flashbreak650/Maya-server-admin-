@@ -224,8 +224,11 @@ interface ModerationSettings {
   companionCustomBio?: string;
   voiceModerationEnabled?: boolean;
   voiceDetectBangla?: boolean;
+  voiceDetectSylheti?: boolean;
   voiceDetectEnglish?: boolean;
   voiceDetectBanglish?: boolean;
+  voiceReviewUnclearEnabled?: boolean;
+  voiceAutoSelectModel?: boolean;
   voiceProfanitySensitivity?: 'low' | 'medium' | 'high';
   voiceAllowedWords?: string[];
   voiceBlockedWords?: string[];
@@ -595,8 +598,11 @@ export default function App() {
     serverErrorNoticeTarget: 'boss_inbox',
     voiceModerationEnabled: true,
     voiceDetectBangla: true,
+    voiceDetectSylheti: true,
     voiceDetectEnglish: true,
     voiceDetectBanglish: true,
+    voiceReviewUnclearEnabled: true,
+    voiceAutoSelectModel: false,
     voiceProfanitySensitivity: 'medium',
     voiceAllowedWords: [],
     voiceBlockedWords: [],
@@ -1153,6 +1159,23 @@ export default function App() {
 
   const handleTestVoiceAudio = async (payload: any) => {
     return callApi('/api/voice-moderation/test', 'POST', payload);
+  };
+
+  const handleResolveVoiceReview = async (
+    recordId: string,
+    decision: 'delete' | 'approve_clean' | 'dismiss',
+    addWord?: string
+  ) => {
+    try {
+      const res = await callApi(`/api/voice-moderation/review/${encodeURIComponent(recordId)}`, 'POST', {
+        decision,
+        addWord,
+      });
+      if (res?.overview) setVoiceOverview(res.overview);
+      showNotification(res?.message || (isBn ? 'রিভিউ সিদ্ধান্ত সম্পন্ন হয়েছে।' : 'Review action completed.'));
+    } catch (err: any) {
+      showNotification((isBn ? 'রিভিউ অ্যাকশন ব্যর্থ: ' : 'Review failed: ') + err.message);
+    }
   };
 
   const loadNightMode = async () => {
@@ -2970,6 +2993,7 @@ export default function App() {
               isBn={isBn}
               overview={voiceOverview}
               isLoading={isVoiceLoading}
+              apiBaseUrl={baileysUrl}
               onBack={() => navigateToPage('home')}
               onRefresh={loadVoiceOverview}
               onSaveSettings={handleSaveVoiceSettings}
@@ -2977,6 +3001,7 @@ export default function App() {
               onRetryQueue={handleRetryVoiceQueue}
               onClearHistory={handleClearVoiceHistory}
               onTestAudio={handleTestVoiceAudio}
+              onResolveReview={handleResolveVoiceReview}
             />
           )}
 

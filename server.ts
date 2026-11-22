@@ -120,6 +120,7 @@ import {
   getInboxGroupsList,
   getInboxSettings,
   getInboxStorageStats,
+  getRecentGroupVoiceClips,
   markGroupLeftInInbox,
   markInboxMessageDeleted,
   queryGroupInboxMessages,
@@ -138,6 +139,7 @@ import {
   flushVoiceModerationSync,
   getVoiceModerationOverview,
   initVoiceModeration,
+  resolveVoiceReviewItem,
   retryFailedVoiceJobsNow,
   testAudioBufferOffline,
   WHISPER_MODELS,
@@ -2351,10 +2353,51 @@ app.post('/api/server/cleanup/clear-histories', async (_req: Request, res: Respo
 // OFFLINE AI VOICE ANTI-ABUSE ENDPOINTS (Zero Paid API, Whisper.cpp)
 // -----------------------------------------------------------------------------
 
+function buildEnrichedVoiceOverview(limit = 100) {
+  const overview = getVoiceModerationOverview(limit);
+  const enrichedHistory = overview.history.map((rec) => {
+    if (rec.groupId && rec.messageId && resolveSafeInboxMediaFile(rec.groupId, rec.messageId)) {
+      const mt = signMediaToken(`media:${rec.groupId}:${rec.messageId}`);
+      const base = `/api/inbox/media/${encodeURIComponent(rec.groupId)}/${encodeURIComponent(rec.messageId)}?mt=${encodeURIComponent(mt)}`;
+      return {
+        ...rec,
+        voiceAudioUrl: base,
+        voiceDownloadUrl: `${base}&download=1`,
+      };
+    }
+    return rec;
+  });
+
+  const groupVoiceClips = getRecentGroupVoiceClips(35).map((msg) => {
+    const signed = attachSignedMediaUrls(msg);
+    return {
+      id: signed.id,
+      groupId: signed.groupId,
+      groupName: signed.groupName,
+      senderName: signed.senderName,
+      senderPhone: signed.senderPhone,
+      timestamp: signed.timestamp,
+      messageType: signed.messageType,
+      durationSec: signed.media?.durationSec || 0,
+      fileSize: signed.media?.fileSize || 0,
+      mimeType: signed.media?.mimeType || 'audio/ogg',
+      isDeleted: signed.isDeleted,
+      mediaUrl: signed.media?.mediaUrl || '',
+      downloadUrl: signed.media?.downloadUrl || '',
+    };
+  });
+
+  return {
+    ...overview,
+    history: enrichedHistory,
+    groupVoiceClips,
+  };
+}
+
 app.get('/api/voice-moderation/overview', (req: Request, res: Response) => {
   try {
     const limit = Math.min(300, Math.max(10, Number(req.query.limit || 100)));
-    const overview = getVoiceModerationOverview(limit);
+    const overview = buildEnrichedVoiceOverview(limit);
     res.json({ success: true, ...overview });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || 'Could not load voice moderation overview' });
@@ -2368,8 +2411,11 @@ app.post('/api/voice-moderation/settings', async (req: Request, res: Response) =
 
     if (typeof body.voiceModerationEnabled === 'boolean') patch.voiceModerationEnabled = body.voiceModerationEnabled;
     if (typeof body.voiceDetectBangla === 'boolean') patch.voiceDetectBangla = body.voiceDetectBangla;
+    if (typeof body.voiceDetectSylheti === 'boolean') patch.voiceDetectSylheti = body.voiceDetectSylheti;
     if (typeof body.voiceDetectEnglish === 'boolean') patch.voiceDetectEnglish = body.voiceDetectEnglish;
     if (typeof body.voiceDetectBanglish === 'boolean') patch.voiceDetectBanglish = body.voiceDetectBanglish;
+    if (typeof body.voiceReviewUnclearEnabled === 'boolean') patch.voiceReviewUnclearEnabled = body.voiceReviewUnclearEnabled;
+    if (typeof body.voiceAutoSelectModel === 'boolean') patch.voiceAutoSelectModel = body.voiceAutoSelectModel;
     if (body.voiceProfanitySensitivity === 'low' || body.voiceProfanitySensitivity === 'medium' || body.voiceProfanitySensitivity === 'high') {
       patch.voiceProfanitySensitivity = body.voiceProfanitySensitivity;
     }
@@ -2391,7 +2437,7 @@ app.post('/api/voice-moderation/settings', async (req: Request, res: Response) =
     }
 
     updateModerationSettings(patch);
-    const overview = getVoiceModerationOverview(100);
+    const overview = buildEnrichedVoiceOverview(100);
     res.json({
       success: true,
       overview,
@@ -2399,6 +2445,27 @@ app.post('/api/voice-moderation/settings', async (req: Request, res: Response) =
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || 'Could not save voice moderation settings' });
+  }
+});
+
+app.post('/api/voice-moderation/review/:recordId', async (req: Request, res: Response) => {
+  try {
+    const recordId = decodeURIComponent(String(req.params.recordId || '')).trim();
+    const decision = req.body?.decision;
+    if (!recordId || (decision !== 'delete' && decision !== 'approve_clean' && decision !== 'dismiss')) {
+      return res.status(400).json({ success: false, error: 'সঠিক recordId এবং decision প্রয়োজন।' });
+    }
+    const addWord = typeof req.body?.addWord === 'string' ? req.body.addWord : undefined;
+    const outcome = await resolveVoiceReviewItem(recordId, decision, { addWord });
+    const overview = buildEnrichedVoiceOverview(100);
+    res.json({
+      success: outcome.success,
+      message: outcome.message,
+      record: outcome.record,
+      overview,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Review action failed' });
   }
 });
 
@@ -2412,7 +2479,7 @@ app.post('/api/voice-moderation/model/ensure', async (req: Request, res: Respons
     ensureWhisperModel(modelId).catch(() => {});
     res.json({
       success: true,
-      overview: getVoiceModerationOverview(100),
+      overview: buildEnrichedVoiceOverview(100),
       message: `${WHISPER_MODELS[modelId].fileName} অফলাইন মডেল প্রস্তুত করা হচ্ছে...`,
     });
   } catch (err: any) {
@@ -2425,7 +2492,7 @@ app.post('/api/voice-moderation/history/clear', (_req: Request, res: Response) =
     clearVoiceModerationHistory();
     res.json({
       success: true,
-      overview: getVoiceModerationOverview(100),
+      overview: buildEnrichedVoiceOverview(100),
       message: 'ভয়েস মডারেশন হিস্ট্রি পরিষ্কার করা হয়েছে।',
     });
   } catch (err: any) {
@@ -2439,7 +2506,7 @@ app.post('/api/voice-moderation/queue/retry', (_req: Request, res: Response) => 
     res.json({
       success: true,
       retried,
-      overview: getVoiceModerationOverview(100),
+      overview: buildEnrichedVoiceOverview(100),
       message: retried > 0 ? `${retried}টি পেন্ডিং ভয়েস জব পুনরায় কিউ করা হয়েছে।` : 'কোনো রিট্রাইযোগ্য জব নেই।',
     });
   } catch (err: any) {
@@ -2607,7 +2674,11 @@ app.get('/api/inbox/media/:groupId/:messageId', (req: Request, res: Response) =>
       rawMime.includes('ecmascript');
     const forceDownload = req.query.download === '1' || req.query.download === 'true' || isActiveContent;
 
-    const safeDownloadName = (record.media?.fileName || `waguard_${messageId.slice(0, 12)}${path.extname(filePath)}`)
+    const fallbackPrefix =
+      record.messageType === 'voice' || record.messageType === 'audio'
+        ? `voice_${(record.senderPhone || 'group').replace(/[^0-9A-Za-z_-]/g, '')}_${messageId.slice(0, 8)}`
+        : `waguard_${messageId.slice(0, 12)}`;
+    const safeDownloadName = (record.media?.fileName || `${fallbackPrefix}${path.extname(filePath) || '.ogg'}`)
       .replace(/["\r\n\\/]/g, '_');
 
     res.setHeader('X-Content-Type-Options', 'nosniff');

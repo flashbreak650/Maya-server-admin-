@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import https from 'https';
 import http from 'http';
-import { execFile } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
 import pino from 'pino';
 import ffmpegStatic from 'ffmpeg-static';
@@ -26,6 +26,7 @@ import {
   getSettings,
   registerVoiceModerationHook,
   reportServerProblem,
+  updateSettings,
 } from './moderationEngine.ts';
 import { markInboxMessageDeleted } from './inboxStore.ts';
 
@@ -65,8 +66,8 @@ export const WHISPER_MODELS: Record<WhisperModelId, WhisperModelMeta> = {
     sizeBytesApprox: 59_700_000,
     sizeLabel: '57 MB',
     ramEstimateMb: 210,
-    labelBn: 'Base (q5_1) — ব্যালেন্সড ও প্রস্তাবিত (বাংলা + ইংরেজি)',
-    labelEn: 'Base (q5_1) — Balanced & Recommended (Bangla + English)',
+    labelBn: 'Base (q5_1) — ব্যালেন্সড ও প্রস্তাবিত (বাংলা + সিলেটি + ইংরেজি)',
+    labelEn: 'Base (q5_1) — Balanced & Recommended (Bangla + Sylheti + English)',
     recommended: true,
   },
   'small-q5_1': {
@@ -85,6 +86,7 @@ export const WHISPER_MODELS: Record<WhisperModelId, WhisperModelMeta> = {
 export type VoiceModerationOutcomeStatus =
   | 'profane_deleted'
   | 'clean'
+  | 'needs_review'
   | 'no_admin_permission'
   | 'delete_failed'
   | 'skipped_admin'
@@ -103,29 +105,52 @@ export interface VoiceModerationRecord {
   audioDurationSec: number;
   transcript: string;
   detectedLanguage: string;
+  dialectDetected?: string;
   scriptSummary: string;
   isProfane: boolean;
+  needsReview?: boolean;
+  reviewStatus?: 'pending' | 'approved_clean' | 'deleted_confirmed' | 'dismissed';
+  reviewReason?: string;
   confidenceScore: number;
+  avgTokenProb?: number;
   matchedWords: string[];
   matchedCategories: string[];
+  semanticSignals?: string[];
   contextReason: string;
-  action: 'deleted' | 'kept' | 'delete_failed' | 'error';
+  action: 'deleted' | 'kept' | 'delete_failed' | 'error' | 'review_queued';
   status: VoiceModerationOutcomeStatus;
   deletedFromWhatsapp: boolean;
   attempts: number;
   processingMs: number;
   modelUsed: string;
+  dialectPassUsed?: 'auto' | 'bn_sylheti_pass' | 'dual_pass';
   errorMessage?: string;
+}
+
+interface PendingVoiceReviewMeta {
+  recordId: string;
+  groupId: string;
+  groupName: string;
+  msgKey: proto.IMessageKey;
+  senderJid: string;
+  canonicalSender: string;
+  senderAltJid?: string;
+  senderPhone: string;
+  matchedWords: string[];
+  detectedLanguage: string;
+  createdAt: number;
 }
 
 interface VoiceModerationDB {
   history: VoiceModerationRecord[];
   processedIds: string[];
+  pendingReviews: Record<string, PendingVoiceReviewMeta>;
   stats: {
     totalProcessed: number;
     profaneDetected: number;
     deletedCount: number;
     cleanCount: number;
+    needsReviewCount: number;
     failedCount: number;
     skippedDuplicates: number;
     totalProcessingMs: number;
@@ -157,11 +182,13 @@ interface QueuedVoiceJob {
 const DEFAULT_DB: VoiceModerationDB = {
   history: [],
   processedIds: [],
+  pendingReviews: {},
   stats: {
     totalProcessed: 0,
     profaneDetected: 0,
     deletedCount: 0,
     cleanCount: 0,
+    needsReviewCount: 0,
     failedCount: 0,
     skippedDuplicates: 0,
     totalProcessingMs: 0,
@@ -179,6 +206,7 @@ let retrySweepTimer: ReturnType<typeof setInterval> | null = null;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let initialized = false;
 let socketGetterRef: (() => WASocket | null) | null = null;
+let cachedFfmpegVersion: string | null = null;
 
 const activeModelDownloads = new Map<WhisperModelId, Promise<boolean>>();
 const modelDownloadProgress = new Map<
@@ -199,14 +227,27 @@ function loadDB() {
   try {
     if (fs.existsSync(VOICE_MODERATION_DB_PATH)) {
       const raw = JSON.parse(fs.readFileSync(VOICE_MODERATION_DB_PATH, 'utf8'));
+      const loadedHistory: VoiceModerationRecord[] = Array.isArray(raw?.history) ? raw.history.slice(-300) : [];
+      const rawReviews =
+        raw?.pendingReviews && typeof raw.pendingReviews === 'object' ? raw.pendingReviews : {};
+      const validIds = new Set(loadedHistory.map((r) => r.id));
+      const trimmedReviews: Record<string, PendingVoiceReviewMeta> = {};
+      for (const [k, v] of Object.entries(rawReviews)) {
+        if (validIds.has(k) && v && typeof v === 'object') {
+          trimmedReviews[k] = v as PendingVoiceReviewMeta;
+        }
+      }
+
       db = {
-        history: Array.isArray(raw?.history) ? raw.history.slice(-300) : [],
+        history: loadedHistory,
         processedIds: Array.isArray(raw?.processedIds) ? raw.processedIds.slice(-5000) : [],
+        pendingReviews: trimmedReviews,
         stats: {
           totalProcessed: Number(raw?.stats?.totalProcessed || 0),
           profaneDetected: Number(raw?.stats?.profaneDetected || 0),
           deletedCount: Number(raw?.stats?.deletedCount || 0),
           cleanCount: Number(raw?.stats?.cleanCount || 0),
+          needsReviewCount: Number(raw?.stats?.needsReviewCount || 0),
           failedCount: Number(raw?.stats?.failedCount || 0),
           skippedDuplicates: Number(raw?.stats?.skippedDuplicates || 0),
           totalProcessingMs: Number(raw?.stats?.totalProcessingMs || 0),
@@ -258,7 +299,10 @@ function markProcessedId(dedupeKey: string) {
 function appendHistoryRecord(record: VoiceModerationRecord) {
   db.history.push(record);
   if (db.history.length > 300) {
-    db.history = db.history.slice(-300);
+    const dropped = db.history.splice(0, db.history.length - 300);
+    for (const d of dropped) {
+      if (db.pendingReviews[d.id]) delete db.pendingReviews[d.id];
+    }
   }
   db.stats.totalProcessed++;
   db.stats.totalProcessingMs += Math.max(0, record.processingMs);
@@ -266,6 +310,8 @@ function appendHistoryRecord(record: VoiceModerationRecord) {
     db.stats.profaneDetected++;
     if (record.deletedFromWhatsapp) db.stats.deletedCount++;
     else if (record.status === 'delete_failed' || record.status === 'no_admin_permission') db.stats.failedCount++;
+  } else if (record.status === 'needs_review') {
+    db.stats.needsReviewCount++;
   } else if (record.status === 'clean') {
     db.stats.cleanCount++;
   } else if (record.status === 'failed') {
@@ -275,18 +321,19 @@ function appendHistoryRecord(record: VoiceModerationRecord) {
 }
 
 export function resolveWhisperBinaryPath(): string | null {
-  const candidates = [
-    WHISPER_BINARY_PATH,
-    '/usr/local/bin/whisper-cli',
-    '/usr/bin/whisper-cli',
-  ];
+  const candidates = [WHISPER_BINARY_PATH, '/usr/local/bin/whisper-cli', '/usr/bin/whisper-cli'];
   for (const p of candidates) {
+    if (!p || !fs.existsSync(p)) continue;
     try {
-      if (p && fs.existsSync(p)) {
+      fs.accessSync(p, fs.constants.X_OK);
+      return p;
+    } catch {
+      try {
+        fs.chmodSync(p, 0o755);
         fs.accessSync(p, fs.constants.X_OK);
         return p;
-      }
-    } catch {}
+      } catch {}
+    }
   }
   return null;
 }
@@ -308,10 +355,45 @@ export function resolveFfmpegBinaryPath(): string | null {
   return null;
 }
 
+function getFfmpegVersionLabel(): string {
+  if (cachedFfmpegVersion !== null) return cachedFfmpegVersion;
+  const bin = resolveFfmpegBinaryPath();
+  if (!bin) {
+    cachedFfmpegVersion = 'Not found';
+    return cachedFfmpegVersion;
+  }
+  try {
+    const out = execFileSync(bin, ['-version'], { encoding: 'utf8', timeout: 3000 });
+    const firstLine = out.split(/\r?\n/)[0] || '';
+    const m = firstLine.match(/ffmpeg version\s+([^\s]+)/i);
+    cachedFfmpegVersion = m ? m[1] : 'Installed';
+  } catch {
+    cachedFfmpegVersion = 'Installed';
+  }
+  return cachedFfmpegVersion;
+}
+
+export function getRecommendedModelForHardware(): WhisperModelId {
+  const totalRamMb = Math.round(os.totalmem() / (1024 * 1024));
+  const cpuCores = Math.max(1, os.cpus()?.length || 2);
+  if (totalRamMb <= 1150) return 'tiny-q5_1';
+  if (totalRamMb >= 6000 && cpuCores >= 4) return 'small-q5_1';
+  return 'base-q5_1';
+}
+
 export function getActiveModelId(): WhisperModelId {
   const s = getSettings();
+  if (s.voiceAutoSelectModel) {
+    return getRecommendedModelForHardware();
+  }
   const id = s.voiceWhisperModel || 'base-q5_1';
-  return id in WHISPER_MODELS ? (id as WhisperModelId) : 'base-q5_1';
+  const chosen = id in WHISPER_MODELS ? (id as WhisperModelId) : 'base-q5_1';
+  // Safety guard: avoid OOM on constrained containers if someone selected small on <1GB total RAM
+  const totalRamMb = Math.round(os.totalmem() / (1024 * 1024));
+  if (chosen === 'small-q5_1' && totalRamMb < 1100) {
+    return 'tiny-q5_1';
+  }
+  return chosen;
 }
 
 export function getModelFilePath(modelId: WhisperModelId): string {
@@ -338,7 +420,7 @@ function downloadFileWithRedirects(url: string, destTmpPath: string, modelId: Wh
       url,
       {
         headers: {
-          'User-Agent': 'WAGuard-VoiceGuard/1.0',
+          'User-Agent': 'WAGuard-VoiceGuard/2.0',
         },
       },
       (res) => {
@@ -403,7 +485,9 @@ export async function ensureWhisperModel(modelId?: WhisperModelId): Promise<bool
     console.log(`[VoiceModeration] Downloading offline Whisper model ${meta.fileName} (${meta.sizeLabel})...`);
     try {
       if (fs.existsSync(tmpPath)) {
-        try { fs.unlinkSync(tmpPath); } catch {}
+        try {
+          fs.unlinkSync(tmpPath);
+        } catch {}
       }
       await downloadFileWithRedirects(meta.url, tmpPath, targetId);
       const stat = fs.statSync(tmpPath);
@@ -435,6 +519,8 @@ export function getHardwareSpecs() {
   const totalRamBytes = os.totalmem();
   const freeRamBytes = os.freemem();
   const cpuCores = Math.max(1, os.cpus()?.length || 2);
+  const processRssMb = Math.round(process.memoryUsage().rss / (1024 * 1024));
+  const cpuLoad1m = Number((os.loadavg?.()[0] || 0).toFixed(2));
   let diskFreeBytes = 0;
   let diskTotalBytes = 0;
   try {
@@ -448,9 +534,13 @@ export function getHardwareSpecs() {
     cpuCores,
     totalRamMb: Math.round(totalRamBytes / (1024 * 1024)),
     freeRamMb: Math.round(freeRamBytes / (1024 * 1024)),
+    processRssMb,
+    cpuLoad1m,
     diskFreeGb: Number((diskFreeBytes / (1024 * 1024 * 1024)).toFixed(1)),
     diskTotalGb: Number((diskTotalBytes / (1024 * 1024 * 1024)).toFixed(1)),
     platform: `${os.platform()}/${os.arch()}`,
+    ffmpegVersion: getFfmpegVersionLabel(),
+    recommendedModelId: getRecommendedModelForHardware(),
   };
 }
 
@@ -471,7 +561,6 @@ function getExtFromMimeOrName(mime?: string | null, fileName?: string | null): s
 function inspectWav16kPcm(wavPath: string): { durationSec: number; rms: number; isLikelySilence: boolean } {
   try {
     const buf = fs.readFileSync(wavPath);
-    // Find 'data' chunk offset safely (standard WAV is 44 bytes, ffmpeg sometimes inserts LIST/INFO chunks)
     let dataOffset = 44;
     let dataSize = Math.max(0, buf.length - 44);
     let idx = 12;
@@ -501,7 +590,7 @@ function inspectWav16kPcm(wavPath: string): { durationSec: number; rms: number; 
       counted++;
     }
     const rms = Math.sqrt(sumSq / Math.max(1, counted));
-    const isLikelySilence = durationSec < 0.35 || rms < 0.0022;
+    const isLikelySilence = durationSec < 0.35 || rms < 0.0018;
     return { durationSec, rms: Number(rms.toFixed(5)), isLikelySilence };
   } catch {
     return { durationSec: 0, rms: 0.05, isLikelySilence: false };
@@ -513,16 +602,18 @@ async function runWhisperOnWav(
   modelPath: string,
   wavPath: string,
   outPrefix: string,
-  language: 'auto' | 'bn' | 'en'
+  language: 'auto' | 'bn' | 'en',
+  promptHint?: string
 ): Promise<{ transcript: string; language: string; avgTokenProb?: number }> {
-  const cpuCount = Math.min(4, Math.max(1, os.cpus()?.length || 2));
+  const cpuCores = Math.max(1, os.cpus()?.length || 2);
+  const threads = cpuCores <= 2 ? cpuCores : Math.min(4, cpuCores - 1);
   const args = [
     '-m',
     modelPath,
     '-l',
     language,
     '-t',
-    String(cpuCount),
+    String(threads),
     '-bs',
     '1',
     '-bo',
@@ -532,11 +623,14 @@ async function runWhisperOnWav(
     '-of',
     outPrefix,
     '-np',
-    wavPath,
   ];
+  if (promptHint) {
+    args.push('--prompt', promptHint);
+  }
+  args.push(wavPath);
 
   await execFileAsync(whisperBin, args, {
-    timeout: 55000,
+    timeout: 60000,
     maxBuffer: 4 * 1024 * 1024,
   });
 
@@ -553,7 +647,6 @@ async function runWhisperOnWav(
     .join(' ')
     .trim();
 
-  // Compute average token probability if present in detailed output
   let probSum = 0;
   let probCount = 0;
   for (const seg of segments) {
@@ -577,21 +670,58 @@ async function runWhisperOnWav(
 
 function getEffectiveProfanityConfig(override?: Partial<{
   detectBangla: boolean;
+  detectSylheti: boolean;
   detectEnglish: boolean;
   detectBanglish: boolean;
   sensitivity: ProfanitySensitivity;
   allowedWords: string[];
   blockedWords: string[];
+  reviewUnclearEnabled: boolean;
 }>) {
   const s = getSettings();
   return {
     detectBangla: override?.detectBangla ?? s.voiceDetectBangla !== false,
+    detectSylheti: override?.detectSylheti ?? s.voiceDetectSylheti !== false,
     detectEnglish: override?.detectEnglish ?? s.voiceDetectEnglish !== false,
     detectBanglish: override?.detectBanglish ?? s.voiceDetectBanglish !== false,
     sensitivity: (override?.sensitivity || s.voiceProfanitySensitivity || 'medium') as ProfanitySensitivity,
     allowedWords: override?.allowedWords ?? (Array.isArray(s.voiceAllowedWords) ? s.voiceAllowedWords : []),
     blockedWords: override?.blockedWords ?? (Array.isArray(s.voiceBlockedWords) ? s.voiceBlockedWords : []),
+    reviewUnclearEnabled: override?.reviewUnclearEnabled ?? s.voiceReviewUnclearEnabled !== false,
   };
+}
+
+async function convertAudioToConditionedWav(ffmpegBin: string, inputPath: string, wavPath: string) {
+  // Normalize volume & filter background rumble/hiss for clearer Bangla/Sylheti recognition
+  try {
+    await execFileAsync(
+      ffmpegBin,
+      [
+        '-y',
+        '-i',
+        inputPath,
+        '-af',
+        'highpass=f=85,lowpass=f=7600,loudnorm=I=-16:TP=-1.5:LRA=11',
+        '-ar',
+        '16000',
+        '-ac',
+        '1',
+        '-c:a',
+        'pcm_s16le',
+        '-t',
+        '90',
+        wavPath,
+      ],
+      { timeout: 28000, maxBuffer: 2 * 1024 * 1024 }
+    );
+    if (fs.existsSync(wavPath) && fs.statSync(wavPath).size > 100) return;
+  } catch {}
+
+  await execFileAsync(
+    ffmpegBin,
+    ['-y', '-i', inputPath, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', '-t', '90', wavPath],
+    { timeout: 25000, maxBuffer: 2 * 1024 * 1024 }
+  );
 }
 
 async function transcribeAndAnalyzeAudioBuffer(
@@ -606,6 +736,7 @@ async function transcribeAndAnalyzeAudioBuffer(
   avgTokenProb?: number;
   analysis: VoiceProfanityAnalysis;
   modelUsed: WhisperModelId;
+  dialectPassUsed: 'auto' | 'bn_sylheti_pass' | 'dual_pass';
 }> {
   const ffmpegBin = resolveFfmpegBinaryPath();
   if (!ffmpegBin) {
@@ -620,7 +751,6 @@ async function transcribeAndAnalyzeAudioBuffer(
   if (!isModelReady(modelId)) {
     const ok = await ensureWhisperModel(modelId);
     if (!ok) {
-      // Fallback to any ready local model on disk before failing
       const fallbackId = (['base-q5_1', 'tiny-q5_1', 'small-q5_1'] as WhisperModelId[]).find((id) => isModelReady(id));
       if (!fallbackId) {
         throw new Error(`অফলাইন Whisper মডেল (${WHISPER_MODELS[modelId].fileName}) প্রস্তুত নয় বা ডাউনলোড ব্যর্থ হয়েছে`);
@@ -641,11 +771,7 @@ async function transcribeAndAnalyzeAudioBuffer(
 
   try {
     fs.writeFileSync(inputPath, audioBuffer);
-    await execFileAsync(
-      ffmpegBin,
-      ['-y', '-i', inputPath, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', '-t', '90', wavPath],
-      { timeout: 25000, maxBuffer: 2 * 1024 * 1024 }
-    );
+    await convertAudioToConditionedWav(ffmpegBin, inputPath, wavPath);
 
     const wavStats = inspectWav16kPcm(wavPath);
     const profanityConfig = getEffectiveProfanityConfig(overrideConfig);
@@ -659,13 +785,17 @@ async function transcribeAndAnalyzeAudioBuffer(
           cleanedTranscript: '',
           isHallucinationOrEmpty: true,
           isProfane: false,
+          needsReview: false,
           confidenceScore: 0,
           matchedWords: [],
           matchedCategories: [],
+          semanticSignals: [],
+          dialectDetected: 'unknown',
           contextReason: 'নীরব বা অত্যন্ত স্বল্প দৈর্ঘ্যের অডিও — পরিষ্কার হিসেবে রাখা হয়েছে',
           detectedScriptSummary: 'unknown',
         },
         modelUsed: modelId,
+        dialectPassUsed: 'auto',
       };
     }
 
@@ -673,28 +803,53 @@ async function transcribeAndAnalyzeAudioBuffer(
     let bestTranscript = firstPass.transcript;
     let bestLanguage = firstPass.language;
     let bestProb = firstPass.avgTokenProb;
-    let bestAnalysis = analyzeVoiceTranscriptProfanity(bestTranscript, profanityConfig, bestProb);
+    let bestAnalysis = analyzeVoiceTranscriptProfanity(bestTranscript, profanityConfig, {
+      avgTokenProb: bestProb,
+      durationSec: wavStats.durationSec,
+      rms: wavStats.rms,
+    });
+    let dialectPassUsed: 'auto' | 'bn_sylheti_pass' | 'dual_pass' = 'auto';
 
-    // Whisper base sometimes classifies short noisy Bangla speech as Hindi/Urdu/Arabic or hallucinates;
-    // run a targeted Bangla forced-language check if Bangla detection is enabled and auto output was Hindi/Urdu/Arabic/empty.
-    const needsBanglaCheck =
-      profanityConfig.detectBangla &&
-      !bestAnalysis.isProfane &&
-      (['hi', 'ur', 'ar', 'ne', 'pa', 'sd', 'auto', 'unknown'].includes(bestLanguage) ||
-        bestAnalysis.isHallucinationOrEmpty);
+    // Dedicated Bangla & Sylheti dialect pass when auto-detect chose another language, low prob, or empty on real voice
+    const bnOrSylhetiEnabled = profanityConfig.detectBangla || profanityConfig.detectSylheti !== false;
+    const autoNotConfidentBn =
+      bestLanguage !== 'bn' ||
+      (typeof bestProb === 'number' && bestProb < 0.65) ||
+      bestAnalysis.isHallucinationOrEmpty;
 
-    if (needsBanglaCheck) {
+    if (bnOrSylhetiEnabled && !bestAnalysis.isProfane && autoNotConfidentBn) {
       try {
-        const bnPass = await runWhisperOnWav(whisperBin, modelPath, wavPath, outPrefixBn, 'bn');
-        const bnAnalysis = analyzeVoiceTranscriptProfanity(bnPass.transcript, profanityConfig, bnPass.avgTokenProb);
-        if (
-          bnAnalysis.isProfane ||
-          (bestAnalysis.isHallucinationOrEmpty && !bnAnalysis.isHallucinationOrEmpty && bnAnalysis.cleanedTranscript.length >= 2)
-        ) {
+        const bnPass = await runWhisperOnWav(
+          whisperBin,
+          modelPath,
+          wavPath,
+          outPrefixBn,
+          'bn',
+          'বাংলা এবং সিলেটি কথোপকথন।'
+        );
+        const bnAnalysis = analyzeVoiceTranscriptProfanity(bnPass.transcript, profanityConfig, {
+          avgTokenProb: bnPass.avgTokenProb,
+          durationSec: wavStats.durationSec,
+          rms: wavStats.rms,
+        });
+
+        dialectPassUsed = 'dual_pass';
+
+        const bnMoreInformative =
+          !bnAnalysis.isHallucinationOrEmpty &&
+          (bestAnalysis.isHallucinationOrEmpty ||
+            bnAnalysis.isProfane ||
+            (bnAnalysis.needsReview && !bestAnalysis.needsReview) ||
+            (['hi', 'ur', 'ar', 'ne', 'pa', 'sd', 'as', 'auto', 'unknown'].includes(bestLanguage) &&
+              bnAnalysis.cleanedTranscript.length >= 2) ||
+            (bnAnalysis.dialectDetected === 'sylheti' && bnAnalysis.confidenceScore >= bestAnalysis.confidenceScore));
+
+        if (bnMoreInformative) {
           bestTranscript = bnPass.transcript;
           bestLanguage = 'bn';
           bestProb = bnPass.avgTokenProb;
           bestAnalysis = bnAnalysis;
+          dialectPassUsed = bestAnalysis.dialectDetected === 'sylheti' ? 'bn_sylheti_pass' : 'dual_pass';
         }
       } catch {}
     }
@@ -706,9 +861,10 @@ async function transcribeAndAnalyzeAudioBuffer(
       avgTokenProb: bestProb,
       analysis: bestAnalysis,
       modelUsed: modelId,
+      dialectPassUsed,
     };
   } finally {
-    // Requirement #12: Always remove temporary audio/json files immediately after processing
+    // Always remove temporary audio/json conversion files immediately after processing
     for (const f of filesToCleanup) {
       try {
         if (fs.existsSync(f)) fs.unlinkSync(f);
@@ -738,6 +894,17 @@ function getTempVoiceFolderStats(): { fileCount: number; bytes: number } {
   }
 }
 
+async function waitForMemoryHeadroom() {
+  for (let i = 0; i < 3; i++) {
+    const freeMb = os.freemem() / (1024 * 1024);
+    if (freeMb >= 140) return;
+    try {
+      (global as any).gc?.();
+    } catch {}
+    await new Promise((r) => setTimeout(r, 800));
+  }
+}
+
 async function processVoiceJob(job: QueuedVoiceJob) {
   const startedAt = Date.now();
   const activeSock = socketGetterRef?.() || job.sock;
@@ -749,6 +916,8 @@ async function processVoiceJob(job: QueuedVoiceJob) {
     if (!activeSock || !activeSock.authState?.creds?.registered) {
       throw new Error('WhatsApp সকেট সংযুক্ত নয়');
     }
+
+    await waitForMemoryHeadroom();
 
     const mediaBuf = (await downloadMediaMessage(
       job.msg as any,
@@ -769,6 +938,61 @@ async function processVoiceJob(job: QueuedVoiceJob) {
     const audioDurationSec = sttResult.durationSec > 0 ? sttResult.durationSec : durationHint;
     const processingMs = Date.now() - startedAt;
 
+    // 1. Uncertain / Unclear Audio -> Route safely to Admin Review Queue (do NOT falsely delete!)
+    if (!sttResult.analysis.isProfane && sttResult.analysis.needsReview) {
+      markProcessedId(job.dedupeKey);
+      if (job.msg.key?.id) {
+        db.pendingReviews[job.id] = {
+          recordId: job.id,
+          groupId: job.groupId,
+          groupName: job.groupName,
+          msgKey: job.msg.key,
+          senderJid: job.senderJid,
+          canonicalSender: job.canonicalSender,
+          senderAltJid: job.senderAltJid,
+          senderPhone: job.senderPhone,
+          matchedWords: sttResult.analysis.matchedWords,
+          detectedLanguage: sttResult.detectedLanguage,
+          createdAt: Date.now(),
+        };
+      }
+      appendHistoryRecord({
+        id: job.id,
+        dedupeKey: job.dedupeKey,
+        messageId: job.msg.key?.id || job.id,
+        groupId: job.groupId,
+        groupName: job.groupName,
+        senderJid: job.senderJid,
+        senderPhone: job.senderPhone,
+        senderName: job.senderName,
+        timestamp: Date.now(),
+        audioDurationSec,
+        transcript: sttResult.transcript || '[অস্পষ্ট কণ্ঠস্বর — অ্যাডমিন রিভিউ প্রয়োজন]',
+        detectedLanguage: sttResult.detectedLanguage,
+        dialectDetected: sttResult.analysis.dialectDetected,
+        scriptSummary: sttResult.analysis.detectedScriptSummary,
+        isProfane: false,
+        needsReview: true,
+        reviewStatus: 'pending',
+        reviewReason: sttResult.analysis.reviewReason,
+        confidenceScore: sttResult.analysis.confidenceScore,
+        avgTokenProb: sttResult.avgTokenProb,
+        matchedWords: sttResult.analysis.matchedWords,
+        matchedCategories: sttResult.analysis.matchedCategories,
+        semanticSignals: sttResult.analysis.semanticSignals,
+        contextReason: sttResult.analysis.contextReason,
+        action: 'review_queued',
+        status: 'needs_review',
+        deletedFromWhatsapp: false,
+        attempts: job.attempts + 1,
+        processingMs,
+        modelUsed: sttResult.modelUsed,
+        dialectPassUsed: sttResult.dialectPassUsed,
+      });
+      return;
+    }
+
+    // 2. Clean / Safe Speech -> Keep intact
     if (!sttResult.analysis.isProfane) {
       markProcessedId(job.dedupeKey);
       appendHistoryRecord({
@@ -782,13 +1006,17 @@ async function processVoiceJob(job: QueuedVoiceJob) {
         senderName: job.senderName,
         timestamp: Date.now(),
         audioDurationSec,
-        transcript: sttResult.transcript || '[নীরব / অস্পষ্ট অডিও]',
+        transcript: sttResult.transcript || '[নীরব / সাধারণ অডিও]',
         detectedLanguage: sttResult.detectedLanguage,
+        dialectDetected: sttResult.analysis.dialectDetected,
         scriptSummary: sttResult.analysis.detectedScriptSummary,
         isProfane: false,
+        needsReview: false,
         confidenceScore: sttResult.analysis.confidenceScore,
+        avgTokenProb: sttResult.avgTokenProb,
         matchedWords: [],
         matchedCategories: [],
+        semanticSignals: sttResult.analysis.semanticSignals,
         contextReason: sttResult.analysis.contextReason,
         action: 'kept',
         status: 'clean',
@@ -796,11 +1024,12 @@ async function processVoiceJob(job: QueuedVoiceJob) {
         attempts: job.attempts + 1,
         processingMs,
         modelUsed: sttResult.modelUsed,
+        dialectPassUsed: sttResult.dialectPassUsed,
       });
       return;
     }
 
-    // Profanity confirmed! Perform fresh permission verification before deleting
+    // 3. Profanity Confirmed! Perform fresh permission check before deleting
     const freshPerms = await checkPermissions(
       activeSock,
       job.groupId,
@@ -825,11 +1054,15 @@ async function processVoiceJob(job: QueuedVoiceJob) {
         audioDurationSec,
         transcript: sttResult.transcript,
         detectedLanguage: sttResult.detectedLanguage,
+        dialectDetected: sttResult.analysis.dialectDetected,
         scriptSummary: sttResult.analysis.detectedScriptSummary,
         isProfane: true,
+        needsReview: false,
         confidenceScore: sttResult.analysis.confidenceScore,
+        avgTokenProb: sttResult.avgTokenProb,
         matchedWords: sttResult.analysis.matchedWords,
         matchedCategories: sttResult.analysis.matchedCategories,
+        semanticSignals: sttResult.analysis.semanticSignals,
         contextReason: `${sttResult.analysis.contextReason} · Admin Shield সক্রিয় থাকায় অক্ষত রাখা হয়েছে`,
         action: 'kept',
         status: 'skipped_admin',
@@ -837,6 +1070,7 @@ async function processVoiceJob(job: QueuedVoiceJob) {
         attempts: job.attempts + 1,
         processingMs,
         modelUsed: sttResult.modelUsed,
+        dialectPassUsed: sttResult.dialectPassUsed,
       });
       return;
     }
@@ -857,11 +1091,15 @@ async function processVoiceJob(job: QueuedVoiceJob) {
         audioDurationSec,
         transcript: sttResult.transcript,
         detectedLanguage: sttResult.detectedLanguage,
+        dialectDetected: sttResult.analysis.dialectDetected,
         scriptSummary: sttResult.analysis.detectedScriptSummary,
         isProfane: true,
+        needsReview: false,
         confidenceScore: sttResult.analysis.confidenceScore,
+        avgTokenProb: sttResult.avgTokenProb,
         matchedWords: sttResult.analysis.matchedWords,
         matchedCategories: sttResult.analysis.matchedCategories,
+        semanticSignals: sttResult.analysis.semanticSignals,
         contextReason: `${sttResult.analysis.contextReason} · বটের Admin পারমিশন না থাকায় ডিলিট সম্ভব হয়নি`,
         action: 'delete_failed',
         status: 'no_admin_permission',
@@ -869,6 +1107,8 @@ async function processVoiceJob(job: QueuedVoiceJob) {
         attempts: job.attempts + 1,
         processingMs,
         modelUsed: sttResult.modelUsed,
+        dialectPassUsed: sttResult.dialectPassUsed,
+        errorMessage: 'বট গ্রুপের Admin নয়',
       });
       reportServerProblem(
         {
@@ -895,7 +1135,7 @@ async function processVoiceJob(job: QueuedVoiceJob) {
         job.groupId,
         job.msg.key.id,
         'waguard_voice_ai',
-        `অফলাইন ভয়েস এআই দ্বারা অশালীন ভাষা শনাক্ত হওয়ায় মুছে ফেলা হয়েছে (${sttResult.analysis.matchedWords.slice(0, 3).join(', ')})`
+        `অফলাইন ভয়েস এআই দ্বারা অশালীন বক্তব্য শনাক্ত হওয়ায় মুছে ফেলা হয়েছে (${sttResult.analysis.matchedWords.slice(0, 3).join(', ')})`
       ).catch(() => {});
     }
 
@@ -926,11 +1166,15 @@ async function processVoiceJob(job: QueuedVoiceJob) {
       audioDurationSec,
       transcript: sttResult.transcript,
       detectedLanguage: sttResult.detectedLanguage,
+      dialectDetected: sttResult.analysis.dialectDetected,
       scriptSummary: sttResult.analysis.detectedScriptSummary,
       isProfane: true,
+      needsReview: false,
       confidenceScore: sttResult.analysis.confidenceScore,
+      avgTokenProb: sttResult.avgTokenProb,
       matchedWords: sttResult.analysis.matchedWords,
       matchedCategories: sttResult.analysis.matchedCategories,
+      semanticSignals: sttResult.analysis.semanticSignals,
       contextReason: sttResult.analysis.contextReason,
       action: deleteSuccessful ? 'deleted' : 'delete_failed',
       status: deleteSuccessful ? 'profane_deleted' : 'delete_failed',
@@ -938,6 +1182,8 @@ async function processVoiceJob(job: QueuedVoiceJob) {
       attempts: job.attempts + 1,
       processingMs,
       modelUsed: sttResult.modelUsed,
+      dialectPassUsed: sttResult.dialectPassUsed,
+      errorMessage: deleteSuccessful ? undefined : 'WhatsApp মেসেজ ডিলিট ব্যর্থ (টাইম লিমিট বা কী/কানেকশন সমস্যা)',
     });
   } catch (err: any) {
     const errMsg = err?.message || String(err);
@@ -967,11 +1213,14 @@ async function processVoiceJob(job: QueuedVoiceJob) {
       audioDurationSec: durationHint,
       transcript: '',
       detectedLanguage: 'unknown',
+      dialectDetected: 'unknown',
       scriptSummary: 'unknown',
       isProfane: false,
+      needsReview: false,
       confidenceScore: 0,
       matchedWords: [],
       matchedCategories: [],
+      semanticSignals: [],
       contextReason: `প্রসেসিং ব্যর্থ: ${errMsg}`,
       action: 'error',
       status: 'failed',
@@ -999,7 +1248,6 @@ async function runQueueWorker() {
       } finally {
         activeJob = null;
       }
-      // Small yield between serial transcriptions to keep Baileys heartbeat & HTTP server snappy
       await new Promise((r) => setTimeout(r, 80));
     }
   } finally {
@@ -1035,8 +1283,7 @@ function enqueueIncomingVoiceMessage(params: {
     return;
   }
 
-  // Flood guard to prevent unbounded memory growth under mass voice spam
-  if (pendingQueue.length >= 25) {
+  if (pendingQueue.length >= 35) {
     console.warn(`[VoiceModeration] Queue saturated (${pendingQueue.length}), skipping overflow clip ${dedupeKey}`);
     return;
   }
@@ -1068,6 +1315,126 @@ function enqueueIncomingVoiceMessage(params: {
   });
 }
 
+export async function resolveVoiceReviewItem(
+  recordId: string,
+  decision: 'delete' | 'approve_clean' | 'dismiss',
+  extra?: { addWord?: string }
+): Promise<{ success: boolean; message: string; record?: VoiceModerationRecord }> {
+  const rec = db.history.find((r) => r.id === recordId);
+  if (!rec) {
+    return { success: false, message: 'রিভিউ রেকর্ডটি খুঁজে পাওয়া যায়নি।' };
+  }
+
+  if (decision === 'approve_clean') {
+    rec.needsReview = false;
+    rec.reviewStatus = 'approved_clean';
+    rec.status = 'clean';
+    rec.action = 'kept';
+    rec.contextReason = 'অ্যাডমিন রিভিউ দ্বারা নিরাপদ হিসেবে অনুমোদিত';
+    db.stats.cleanCount++;
+    delete db.pendingReviews[recordId];
+
+    if (extra?.addWord && extra.addWord.trim().length >= 2) {
+      const s = getSettings();
+      const cur = Array.isArray(s.voiceAllowedWords) ? s.voiceAllowedWords : [];
+      const w = extra.addWord.trim();
+      if (!cur.some((x) => x.toLowerCase() === w.toLowerCase())) {
+        updateSettings({ voiceAllowedWords: [...cur, w] });
+      }
+    }
+    flushVoiceModerationSync();
+    return { success: true, message: 'নিরাপদ হিসেবে অনুমোদন করা হয়েছে।', record: rec };
+  }
+
+  if (decision === 'dismiss') {
+    rec.needsReview = false;
+    rec.reviewStatus = 'dismissed';
+    delete db.pendingReviews[recordId];
+    flushVoiceModerationSync();
+    return { success: true, message: 'রিভিউ কিউ থেকে সরানো হয়েছে।', record: rec };
+  }
+
+  // decision === 'delete' -> Execute real WhatsApp deletion using stored original message key
+  const meta = db.pendingReviews[recordId];
+  const sock = socketGetterRef?.();
+  if (!sock || !sock.authState?.creds?.registered) {
+    return { success: false, message: 'WhatsApp সকেট সংযুক্ত না থাকায় ডিলিট করা যাচ্ছে না।' };
+  }
+  if (!meta?.msgKey?.id) {
+    return { success: false, message: 'মূল WhatsApp Message Key পাওয়া যায়নি (পুরোনো মেসেজ)।' };
+  }
+
+  const perms = await checkPermissions(sock, meta.groupId, meta.senderJid, true, meta.senderAltJid);
+  if (!perms.isBotAdmin) {
+    rec.status = 'no_admin_permission';
+    rec.action = 'delete_failed';
+    rec.needsReview = false;
+    rec.reviewStatus = 'deleted_confirmed';
+    rec.errorMessage = 'বট গ্রুপের Admin না থাকায় ডিলিট করা যায়নি';
+    rec.contextReason = 'অ্যাডমিন ডিলিট নির্দেশ দিলেও বট গ্রুপ Admin নয়';
+    delete db.pendingReviews[recordId];
+    flushVoiceModerationSync();
+    return { success: false, message: 'বটের গ্রুপ অ্যাডমিন পারমিশন না থাকায় ডিলিট করা যায়নি।', record: rec };
+  }
+
+  const syntheticMsg = { key: meta.msgKey } as proto.IWebMessageInfo;
+  const ok = await deleteMessageSafely(sock, meta.groupId, syntheticMsg, perms.matchedSenderId, perms.isBotAdmin);
+
+  rec.needsReview = false;
+  rec.reviewStatus = 'deleted_confirmed';
+  rec.isProfane = true;
+  if (ok) {
+    rec.status = 'profane_deleted';
+    rec.action = 'deleted';
+    rec.deletedFromWhatsapp = true;
+    rec.contextReason = 'অ্যাডমিন রিভিউ থেকে নিশ্চিত করে WhatsApp থেকে ডিলিট করা হয়েছে';
+    db.stats.profaneDetected++;
+    db.stats.deletedCount++;
+    markInboxMessageDeleted(
+      meta.groupId,
+      meta.msgKey.id,
+      'waguard_voice_ai',
+      'অ্যাডমিন রিভিউ দ্বারা অশালীন ভয়েস নোট মুছে ফেলা হয়েছে'
+    ).catch(() => {});
+    await applyVoiceAbusePenalty(sock, {
+      groupId: meta.groupId,
+      groupName: perms.groupSubject || meta.groupName,
+      senderJid: meta.senderJid,
+      canonicalSender: meta.canonicalSender,
+      senderAltJid: meta.senderAltJid,
+      senderPhone: meta.senderPhone,
+      deleteSuccessful: true,
+      isBotAdmin: true,
+      matchedWords: rec.matchedWords,
+      detectedLanguage: rec.detectedLanguage,
+    });
+  } else {
+    rec.status = 'delete_failed';
+    rec.action = 'delete_failed';
+    rec.deletedFromWhatsapp = false;
+    rec.errorMessage = 'WhatsApp ডিলিট প্রত্যাখ্যান করেছে (সম্ভবত মেসেজটি খুব পুরোনো বা আগেই মুছে ফেলা হয়েছে)';
+    rec.contextReason = rec.errorMessage;
+    db.stats.failedCount++;
+  }
+
+  if (extra?.addWord && extra.addWord.trim().length >= 2) {
+    const s = getSettings();
+    const cur = Array.isArray(s.voiceBlockedWords) ? s.voiceBlockedWords : [];
+    const w = extra.addWord.trim();
+    if (!cur.some((x) => x.toLowerCase() === w.toLowerCase())) {
+      updateSettings({ voiceBlockedWords: [...cur, w] });
+    }
+  }
+
+  delete db.pendingReviews[recordId];
+  flushVoiceModerationSync();
+  return {
+    success: ok,
+    message: ok ? 'মূল WhatsApp ভয়েস মেসেজটি ডিলিট করা হয়েছে!' : rec.errorMessage || 'ডিলিট ব্যর্থ হয়েছে।',
+    record: rec,
+  };
+}
+
 export function initVoiceModeration(socketGetter: () => WASocket | null) {
   socketGetterRef = socketGetter;
   if (!initialized) {
@@ -1075,7 +1442,6 @@ export function initVoiceModeration(socketGetter: () => WASocket | null) {
     loadDB();
     registerVoiceModerationHook(enqueueIncomingVoiceMessage);
 
-    // Ensure selected quantized Whisper model is present (non-blocking background check)
     const activeModel = getActiveModelId();
     if (!isModelReady(activeModel)) {
       ensureWhisperModel(activeModel).catch(() => {});
@@ -1116,11 +1482,13 @@ export function retryFailedVoiceJobsNow(): number {
 
 export function clearVoiceModerationHistory(): boolean {
   db.history = [];
+  db.pendingReviews = {};
   db.stats = {
     totalProcessed: 0,
     profaneDetected: 0,
     deletedCount: 0,
     cleanCount: 0,
+    needsReviewCount: 0,
     failedCount: 0,
     skippedDuplicates: 0,
     totalProcessingMs: 0,
@@ -1133,7 +1501,13 @@ export function pruneExpiredVoiceHistory(maxAgeMs: number): number {
   const cutoff = Date.now() - Math.max(60 * 1000, maxAgeMs);
   if (!Array.isArray(db.history) || db.history.length === 0) return 0;
   const before = db.history.length;
-  db.history = db.history.filter((rec) => (rec?.timestamp || 0) >= cutoff);
+  db.history = db.history.filter((rec) => {
+    const keep = (rec?.timestamp || 0) >= cutoff;
+    if (!keep && db.pendingReviews[rec.id]) {
+      delete db.pendingReviews[rec.id];
+    }
+    return keep;
+  });
   const removed = before - db.history.length;
   if (removed > 0) {
     scheduleSaveDB();
@@ -1147,11 +1521,13 @@ export async function testAudioBufferOffline(params: {
   mimeType?: string;
   overrideConfig?: {
     detectBangla?: boolean;
+    detectSylheti?: boolean;
     detectEnglish?: boolean;
     detectBanglish?: boolean;
     sensitivity?: ProfanitySensitivity;
     allowedWords?: string[];
     blockedWords?: string[];
+    reviewUnclearEnabled?: boolean;
   };
 }) {
   const startedAt = Date.now();
@@ -1169,6 +1545,7 @@ export async function testAudioBufferOffline(params: {
     detectedLanguage: res.detectedLanguage,
     avgTokenProb: res.avgTokenProb,
     modelUsed: res.modelUsed,
+    dialectPassUsed: res.dialectPassUsed,
     processingMs: Date.now() - startedAt,
     analysis: res.analysis,
   };
@@ -1205,6 +1582,10 @@ export function getVoiceModerationOverview(historyLimit = 100) {
   const avgProcessingMs =
     db.stats.totalProcessed > 0 ? Math.round(db.stats.totalProcessingMs / db.stats.totalProcessed) : 0;
 
+  const pendingReviewCount = db.history.filter(
+    (r) => r.status === 'needs_review' && (!r.reviewStatus || r.reviewStatus === 'pending')
+  ).length;
+
   return {
     engine: {
       offlineReady: Boolean(whisperBin && ffmpegBin && isModelReady(activeModelId)),
@@ -1224,23 +1605,31 @@ export function getVoiceModerationOverview(historyLimit = 100) {
       activeGroupName: activeJob?.groupName || null,
       pendingCount: pendingQueue.length,
       retryingCount: failedRetryQueue.length,
+      pendingReviewCount,
       isProcessing: Boolean(activeJob),
     },
     settings: {
       voiceModerationEnabled: settings.voiceModerationEnabled !== false,
       voiceDetectBangla: settings.voiceDetectBangla !== false,
+      voiceDetectSylheti: settings.voiceDetectSylheti !== false,
       voiceDetectEnglish: settings.voiceDetectEnglish !== false,
       voiceDetectBanglish: settings.voiceDetectBanglish !== false,
       voiceProfanitySensitivity: (settings.voiceProfanitySensitivity || 'medium') as ProfanitySensitivity,
       voiceAllowedWords: Array.isArray(settings.voiceAllowedWords) ? settings.voiceAllowedWords : [],
       voiceBlockedWords: Array.isArray(settings.voiceBlockedWords) ? settings.voiceBlockedWords : [],
-      voiceWhisperModel: activeModelId,
+      voiceWhisperModel: (settings.voiceWhisperModel || activeModelId) as WhisperModelId,
+      voiceReviewUnclearEnabled: settings.voiceReviewUnclearEnabled !== false,
+      voiceAutoSelectModel: Boolean(settings.voiceAutoSelectModel),
     },
     stats: {
       ...db.stats,
+      pendingReviewCount,
       avgProcessingMs,
       dedupeTrackedCount: processedSet.size,
     },
-    history: db.history.slice(-historyLimit).reverse(),
+    history: db.history.slice(-historyLimit).reverse().map((rec) => ({
+      ...rec,
+      canDeleteFromReview: Boolean(db.pendingReviews[rec.id]),
+    })),
   };
 }

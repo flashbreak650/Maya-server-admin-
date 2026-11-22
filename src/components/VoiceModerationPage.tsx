@@ -8,6 +8,7 @@ import {
   Clock,
   Cpu,
   Download,
+  Eye,
   FileAudio,
   Languages,
   Mic,
@@ -39,19 +40,49 @@ export interface VoiceModerationRecordView {
   audioDurationSec: number;
   transcript: string;
   detectedLanguage: string;
+  dialectDetected?: string;
   scriptSummary: string;
   isProfane: boolean;
+  needsReview?: boolean;
+  reviewStatus?: 'pending' | 'approved_clean' | 'deleted_by_admin' | 'dismissed';
+  canDeleteFromReview?: boolean;
   confidenceScore: number;
   matchedWords: string[];
   matchedCategories: string[];
+  semanticSignals?: string[];
   contextReason: string;
-  action: 'deleted' | 'kept' | 'delete_failed' | 'error';
-  status: 'profane_deleted' | 'clean' | 'no_admin_permission' | 'delete_failed' | 'skipped_admin' | 'failed';
+  action: 'deleted' | 'kept' | 'review_queued' | 'delete_failed' | 'error';
+  status:
+    | 'profane_deleted'
+    | 'clean'
+    | 'needs_review'
+    | 'no_admin_permission'
+    | 'delete_failed'
+    | 'skipped_admin'
+    | 'failed';
   deletedFromWhatsapp: boolean;
   attempts: number;
   processingMs: number;
   modelUsed: string;
   errorMessage?: string;
+  voiceAudioUrl?: string;
+  voiceDownloadUrl?: string;
+}
+
+export interface GroupVoiceClipView {
+  id: string;
+  groupId: string;
+  groupName: string;
+  senderName: string;
+  senderPhone: string;
+  timestamp: number;
+  messageType: string;
+  durationSec: number;
+  fileSize: number;
+  mimeType: string;
+  isDeleted?: boolean;
+  mediaUrl: string;
+  downloadUrl: string;
 }
 
 export interface VoiceModerationOverview {
@@ -70,9 +101,13 @@ export interface VoiceModerationOverview {
     cpuCores: number;
     totalRamMb: number;
     freeRamMb: number;
+    processRssMb?: number;
+    cpuLoad1m?: number;
     diskFreeGb: number;
     diskTotalGb: number;
     platform: string;
+    ffmpegVersion?: string;
+    recommendedModelId?: 'tiny-q5_1' | 'base-q5_1' | 'small-q5_1';
   };
   models: Array<{
     id: 'tiny-q5_1' | 'base-q5_1' | 'small-q5_1';
@@ -98,8 +133,11 @@ export interface VoiceModerationOverview {
   settings: {
     voiceModerationEnabled: boolean;
     voiceDetectBangla: boolean;
+    voiceDetectSylheti?: boolean;
     voiceDetectEnglish: boolean;
     voiceDetectBanglish: boolean;
+    voiceReviewUnclearEnabled?: boolean;
+    voiceAutoSelectModel?: boolean;
     voiceProfanitySensitivity: 'low' | 'medium' | 'high';
     voiceAllowedWords: string[];
     voiceBlockedWords: string[];
@@ -110,18 +148,21 @@ export interface VoiceModerationOverview {
     profaneDetected: number;
     deletedCount: number;
     cleanCount: number;
+    reviewPendingCount?: number;
     failedCount: number;
     skippedDuplicates: number;
     avgProcessingMs: number;
     dedupeTrackedCount: number;
   };
   history: VoiceModerationRecordView[];
+  groupVoiceClips?: GroupVoiceClipView[];
 }
 
 interface VoiceModerationPageProps {
   isBn: boolean;
   overview: VoiceModerationOverview | null;
   isLoading: boolean;
+  apiBaseUrl: string;
   onBack: () => void;
   onRefresh: () => Promise<void> | void;
   onSaveSettings: (patch: Partial<VoiceModerationOverview['settings']>) => Promise<void>;
@@ -134,19 +175,40 @@ interface VoiceModerationPageProps {
     mimeType: string;
     config?: {
       detectBangla: boolean;
+      detectSylheti?: boolean;
       detectEnglish: boolean;
       detectBanglish: boolean;
+      reviewUnclearEnabled?: boolean;
       sensitivity: 'low' | 'medium' | 'high';
       allowedWords: string[];
       blockedWords: string[];
     };
   }) => Promise<any>;
+  onResolveReview?: (
+    recordId: string,
+    decision: 'delete' | 'approve_clean' | 'dismiss',
+    addWord?: string
+  ) => Promise<void>;
+}
+
+function buildVoiceMediaUrl(pathOrUrl: string | undefined, apiBaseUrl: string): string {
+  if (!pathOrUrl) return '';
+  if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) return pathOrUrl;
+  const cleanBase = (apiBaseUrl || '').trim().replace(/\/+$/, '');
+  return cleanBase ? `${cleanBase}${pathOrUrl}` : pathOrUrl;
+}
+
+function formatBytesShort(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0 KB';
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function VoiceModerationPage({
   isBn,
   overview,
   isLoading,
+  apiBaseUrl,
   onBack,
   onRefresh,
   onSaveSettings,
@@ -154,13 +216,17 @@ export function VoiceModerationPage({
   onRetryQueue,
   onClearHistory,
   onTestAudio,
+  onResolveReview,
 }: VoiceModerationPageProps) {
   const s = overview?.settings;
 
   const [enabled, setEnabled] = useState(s?.voiceModerationEnabled ?? true);
   const [detectBangla, setDetectBangla] = useState(s?.voiceDetectBangla ?? true);
+  const [detectSylheti, setDetectSylheti] = useState(s?.voiceDetectSylheti ?? true);
   const [detectEnglish, setDetectEnglish] = useState(s?.voiceDetectEnglish ?? true);
   const [detectBanglish, setDetectBanglish] = useState(s?.voiceDetectBanglish ?? true);
+  const [reviewUnclearEnabled, setReviewUnclearEnabled] = useState(s?.voiceReviewUnclearEnabled ?? true);
+  const [autoSelectModel, setAutoSelectModel] = useState(s?.voiceAutoSelectModel ?? false);
   const [sensitivity, setSensitivity] = useState<'low' | 'medium' | 'high'>(s?.voiceProfanitySensitivity || 'medium');
   const [modelId, setModelId] = useState<'tiny-q5_1' | 'base-q5_1' | 'small-q5_1'>(s?.voiceWhisperModel || 'base-q5_1');
   const [allowedWords, setAllowedWords] = useState<string[]>(s?.voiceAllowedWords || []);
@@ -169,8 +235,9 @@ export function VoiceModerationPage({
   const [newBlockedWord, setNewBlockedWord] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
-  const [historyFilter, setHistoryFilter] = useState<'all' | 'deleted' | 'clean' | 'failed'>('all');
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'review' | 'deleted' | 'clean' | 'failed'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [resolvingReviewId, setResolvingReviewId] = useState<string | null>(null);
 
   // Audio Test Lab State
   const [isTestingAudio, setIsTestingAudio] = useState(false);
@@ -185,8 +252,11 @@ export function VoiceModerationPage({
     if (!overview?.settings) return;
     setEnabled(overview.settings.voiceModerationEnabled);
     setDetectBangla(overview.settings.voiceDetectBangla);
+    setDetectSylheti(overview.settings.voiceDetectSylheti ?? true);
     setDetectEnglish(overview.settings.voiceDetectEnglish);
     setDetectBanglish(overview.settings.voiceDetectBanglish);
+    setReviewUnclearEnabled(overview.settings.voiceReviewUnclearEnabled ?? true);
+    setAutoSelectModel(overview.settings.voiceAutoSelectModel ?? false);
     setSensitivity(overview.settings.voiceProfanitySensitivity);
     setModelId(overview.settings.voiceWhisperModel);
     setAllowedWords(overview.settings.voiceAllowedWords || []);
@@ -209,8 +279,11 @@ export function VoiceModerationPage({
       await onSaveSettings({
         voiceModerationEnabled: enabled,
         voiceDetectBangla: detectBangla,
+        voiceDetectSylheti: detectSylheti,
         voiceDetectEnglish: detectEnglish,
         voiceDetectBanglish: detectBanglish,
+        voiceReviewUnclearEnabled: reviewUnclearEnabled,
+        voiceAutoSelectModel: autoSelectModel,
         voiceProfanitySensitivity: sensitivity,
         voiceWhisperModel: modelId,
         voiceAllowedWords: allowedWords,
@@ -256,8 +329,10 @@ export function VoiceModerationPage({
         mimeType,
         config: {
           detectBangla,
+          detectSylheti,
           detectEnglish,
           detectBanglish,
+          reviewUnclearEnabled,
           sensitivity,
           allowedWords,
           blockedWords,
@@ -316,7 +391,26 @@ export function VoiceModerationPage({
     }
   };
 
+  const triggerReviewAction = async (
+    recordId: string,
+    decision: 'delete' | 'approve_clean' | 'dismiss',
+    addWord?: string
+  ) => {
+    if (!onResolveReview) return;
+    setResolvingReviewId(recordId);
+    try {
+      await onResolveReview(recordId, decision, addWord);
+    } finally {
+      setResolvingReviewId(null);
+    }
+  };
+
+  const reviewPendingCount =
+    overview?.stats.reviewPendingCount ??
+    (overview?.history || []).filter((item) => item.status === 'needs_review' && item.reviewStatus === 'pending').length;
+
   const filteredHistory = (overview?.history || []).filter((item) => {
+    if (historyFilter === 'review' && item.status !== 'needs_review') return false;
     if (historyFilter === 'deleted' && item.status !== 'profane_deleted') return false;
     if (historyFilter === 'clean' && item.status !== 'clean' && item.status !== 'skipped_admin') return false;
     if (
@@ -329,13 +423,14 @@ export function VoiceModerationPage({
     }
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
-      const hay = `${item.groupName} ${item.senderName} ${item.senderPhone} ${item.transcript} ${item.matchedWords.join(' ')}`.toLowerCase();
+      const hay = `${item.groupName} ${item.senderName} ${item.senderPhone} ${item.transcript} ${item.dialectDetected || ''} ${item.matchedWords.join(' ')}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
   });
 
   const engineReady = Boolean(overview?.engine.offlineReady);
+  const groupVoiceClips = overview?.groupVoiceClips || [];
 
   return (
     <div className="space-y-4 pb-8">
@@ -353,12 +448,12 @@ export function VoiceModerationPage({
           <div>
             <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
               <AudioLines size={19} className="text-emerald-700" />
-              <span>{isBn ? 'অফলাইন ভয়েস AI অ্যান্টি-অ্যাবিউজ' : 'Offline AI Voice Anti-Abuse'}</span>
+              <span>{isBn ? 'অফলাইন ভয়েস AI অ্যান্টি-অ্যাবিউজ v2' : 'Offline AI Voice Anti-Abuse v2'}</span>
             </h1>
             <p className="text-[11px] sm:text-xs text-slate-500">
               {isBn
-                ? 'Whisper.cpp ওপেন-সোর্স অফলাইন মডেল · পেইড API বা কী ছাড়াই গ্রুপ ভয়েস মেসেজে গালি শনাক্ত ও ডিলিট'
-                : 'Local Whisper.cpp STT · Zero Paid APIs · Auto-deletes abusive WhatsApp voice notes'}
+                ? 'Whisper.cpp + সেমান্টিক + ফোনেটিক + সিলেটি ডায়ালেক্ট বিশ্লেষণ · পেইড API ছাড়াই অশ্লীল ভয়েস শনাক্ত ও ডিলিট'
+                : 'Whisper.cpp + Semantic & Phonetic + Sylheti Dialect Analysis · Zero Paid APIs'}
             </p>
           </div>
         </div>
@@ -412,8 +507,8 @@ export function VoiceModerationPage({
           </div>
           <div className="text-[11px] text-slate-500 mt-0.5 tabular-nums">
             {isBn
-              ? `${overview?.stats.profaneDetected ?? 0}টি শনাক্ত হয়েছে`
-              : `${overview?.stats.profaneDetected ?? 0} flagged total`}
+              ? `${overview?.stats.profaneDetected ?? 0}টি শনাক্ত · রিভিউ ${reviewPendingCount}`
+              : `${overview?.stats.profaneDetected ?? 0} flagged · ${reviewPendingCount} review`}
           </div>
         </div>
 
@@ -426,7 +521,7 @@ export function VoiceModerationPage({
             {overview?.stats.cleanCount ?? 0}
           </div>
           <div className="text-[11px] text-slate-500 mt-0.5">
-            {isBn ? 'নিরাপদ ভয়েস নোট অক্ষত' : 'Safe clips untouched'}
+            {isBn ? 'ফলস-পজিটিভ মুক্ত নিরাপদ ক্লিপ' : 'False-positive shielded'}
           </div>
         </div>
 
@@ -481,7 +576,7 @@ export function VoiceModerationPage({
                 </div>
                 <div className="text-[11px] text-slate-500">
                   {isBn
-                    ? 'গ্রুপে ইনকামিং ভয়েস মেসেজ অফলাইনে শুনে গালি থাকলে অটো ডিলিট করবে'
+                    ? 'গ্রুপে ইনকামিং ভয়েস মেসেজ অফলাইনে শুনে গালি ও কনটেক্সট বুঝে অটো ডিলিট করবে'
                     : 'Automatically transcribes group voice notes offline and deletes abusive audio'}
                 </div>
               </div>
@@ -491,22 +586,54 @@ export function VoiceModerationPage({
               </label>
             </div>
 
-            {/* Language Toggles */}
+            {/* Language & Dialect Toggles */}
             <div className="pt-2 border-t border-slate-100 space-y-2.5">
               <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-800">
                 <Languages size={15} className="text-emerald-700" />
-                <span>{isBn ? 'শনাক্তকরণ ভাষা নির্বাচন' : 'Language Detection Modules'}</span>
+                <span>{isBn ? 'ভাষা ও আঞ্চলিক ডায়ালেক্ট শনাক্তকরণ' : 'Language & Dialect Modules'}</span>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <label className="flex items-center justify-between gap-2 p-2.5 rounded-xl border border-slate-200 bg-slate-50/70 cursor-pointer">
                   <div>
                     <div className="text-xs font-bold text-slate-900">{isBn ? 'বাংলা (Bangla)' : 'Bangla Detection'}</div>
-                    <div className="text-[10px] text-slate-500">{isBn ? 'বাংলা লিপি ও গালি' : 'Bengali script slurs'}</div>
+                    <div className="text-[10px] text-slate-500">
+                      {isBn ? 'শুদ্ধ বাংলা ও কনটেক্সট ফ্রেম' : 'Bengali script & semantic frames'}
+                    </div>
                   </div>
                   <input
                     type="checkbox"
                     checked={detectBangla}
                     onChange={(e) => setDetectBangla(e.target.checked)}
+                    className="w-4 h-4 accent-emerald-700"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between gap-2 p-2.5 rounded-xl border border-emerald-200 bg-emerald-50/40 cursor-pointer">
+                  <div>
+                    <div className="text-xs font-bold text-emerald-950">
+                      {isBn ? 'সিলেটি আঞ্চলিক (Sylheti)' : 'Sylheti Dialect Detection'}
+                    </div>
+                    <div className="text-[10px] text-emerald-700">
+                      {isBn ? 'সিলেটি উচ্চারণ ও ফোনেটিক ম্যাচ' : 'Sylheti phonetic shifts & slurs'}
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={detectSylheti}
+                    onChange={(e) => setDetectSylheti(e.target.checked)}
+                    className="w-4 h-4 accent-emerald-700"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between gap-2 p-2.5 rounded-xl border border-slate-200 bg-slate-50/70 cursor-pointer">
+                  <div>
+                    <div className="text-xs font-bold text-slate-900">{isBn ? 'বাংলিশ (Banglish)' : 'Banglish Detection'}</div>
+                    <div className="text-[10px] text-slate-500">{isBn ? 'রোমান হরফে বাংলা/সিলেটি গালি' : 'Phonetic Banglish'}</div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={detectBanglish}
+                    onChange={(e) => setDetectBanglish(e.target.checked)}
                     className="w-4 h-4 accent-emerald-700"
                   />
                 </label>
@@ -523,18 +650,51 @@ export function VoiceModerationPage({
                     className="w-4 h-4 accent-emerald-700"
                   />
                 </label>
+              </div>
+            </div>
 
-                <label className="flex items-center justify-between gap-2 p-2.5 rounded-xl border border-slate-200 bg-slate-50/70 cursor-pointer">
-                  <div>
-                    <div className="text-xs font-bold text-slate-900">{isBn ? 'বাংলিশ (Banglish)' : 'Banglish Detection'}</div>
-                    <div className="text-[10px] text-slate-500">{isBn ? 'রোমান হরফে বাংলা গালি' : 'Phonetic Banglish'}</div>
+            {/* Smart Review Queue & Hardware Auto-Model Toggles */}
+            <div className="pt-2 border-t border-slate-100 space-y-2.5">
+              <div className="toggle-row">
+                <div>
+                  <div className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
+                    <Eye size={14} className="text-amber-600" />
+                    <span>{isBn ? 'অস্পষ্ট অডিও Admin Review Queue' : 'Admin Review Queue for Unclear Audio'}</span>
                   </div>
+                  <div className="text-[11px] text-slate-500">
+                    {isBn
+                      ? 'অস্পষ্ট বা সন্দেহজনক ভয়েস সাথে সাথে ডিলিট না করে অ্যাডমিন রিভিউ কিউ-তে রাখবে (ভুল ডিলিট প্রতিরোধ)'
+                      : 'Routes unclear or borderline audio to Admin Review Queue instead of false deletion'}
+                  </div>
+                </div>
+                <label className="switch">
                   <input
                     type="checkbox"
-                    checked={detectBanglish}
-                    onChange={(e) => setDetectBanglish(e.target.checked)}
-                    className="w-4 h-4 accent-emerald-700"
+                    checked={reviewUnclearEnabled}
+                    onChange={(e) => setReviewUnclearEnabled(e.target.checked)}
                   />
+                  <span className="slider" />
+                </label>
+              </div>
+
+              <div className="toggle-row">
+                <div>
+                  <div className="text-xs font-extrabold text-slate-900">
+                    {isBn ? 'হার্ডওয়্যার অনুযায়ী Auto Model নির্বাচন' : 'Auto Select Model by Server RAM/CPU'}
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    {isBn
+                      ? `সার্ভার রিসোর্স কম হলে স্বয়ংক্রিয়ভাবে নিরাপদ মডেল (${overview?.hardware.recommendedModelId || 'base-q5_1'}) ব্যবহার করবে`
+                      : `Automatically selects safest model for current RAM (${overview?.hardware.recommendedModelId || 'base-q5_1'})`}
+                  </div>
+                </div>
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    checked={autoSelectModel}
+                    onChange={(e) => setAutoSelectModel(e.target.checked)}
+                  />
+                  <span className="slider" />
                 </label>
               </div>
             </div>
@@ -549,17 +709,17 @@ export function VoiceModerationPage({
                   {
                     id: 'low' as const,
                     title: isBn ? 'কম (Strict Severe)' : 'Low',
-                    desc: isBn ? 'শুধু তীব্র গালিতে ডিলিট' : 'Severe slurs only',
+                    desc: isBn ? 'শুধু তীব্র ও নিশ্চিত গালিতে ডিলিট' : 'Severe slurs only',
                   },
                   {
                     id: 'medium' as const,
                     title: isBn ? 'মাঝারি (প্রস্তাবিত)' : 'Medium (Rec)',
-                    desc: isBn ? 'ব্যালেন্সড ও কনটেক্সট-সচেতন' : 'Balanced & context-aware',
+                    desc: isBn ? 'ডিকশনারি-মুক্ত কনটেক্সট ও ফোনেটিক' : 'Semantic + phonetic balanced',
                   },
                   {
                     id: 'high' as const,
                     title: isBn ? 'বেশি (কঠোর)' : 'High (Strict)',
-                    desc: isBn ? 'মৃদু গালি ও স্ল্যাংও ধরবে' : 'Catches mild slurs too',
+                    desc: isBn ? 'মৃদু গালি ও সন্দেহজনক শব্দও ধরবে' : 'Catches mild slurs too',
                   },
                 ].map((opt) => (
                   <button
@@ -665,7 +825,7 @@ export function VoiceModerationPage({
                 <div className="flex flex-wrap gap-1.5 min-h-[28px]">
                   {blockedWords.length === 0 ? (
                     <span className="text-[11px] text-slate-400">
-                      {isBn ? 'ডিফল্ট বাংলা+ইংরেজি ডিকশনারি চালু আছে' : 'Using built-in dictionaries'}
+                      {isBn ? 'সেমান্টিক + ফোনেটিক + ডিকশনারি চালু আছে' : 'Semantic + phonetic + built-in lists active'}
                     </span>
                   ) : (
                     blockedWords.map((w) => (
@@ -720,19 +880,19 @@ export function VoiceModerationPage({
                 </div>
                 <div className="text-[10px] text-slate-500 tabular-nums">
                   {isBn
-                    ? `ফ্রি RAM: ${overview?.hardware.freeRamMb ?? 0} MB`
-                    : `Free RAM: ${overview?.hardware.freeRamMb ?? 0} MB`}
+                    ? `ফ্রি: ${overview?.hardware.freeRamMb ?? 0} MB · লোড: ${overview?.hardware.cpuLoad1m ?? 0}`
+                    : `Free: ${overview?.hardware.freeRamMb ?? 0} MB · Load: ${overview?.hardware.cpuLoad1m ?? 0}`}
                 </div>
               </div>
 
               <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
                 <div className="text-[10px] font-bold text-slate-500">{isBn ? 'ডিস্ক ও বাইনারি' : 'Disk & Binaries'}</div>
                 <div className="font-extrabold text-slate-900 mt-0.5 tabular-nums">
-                  {overview?.hardware.diskFreeGb ?? 0} GB {isBn ? 'ফ্রি' : 'free'}
+                  {overview?.hardware.diskFreeGb ?? 0} GB {isBn ? 'ফ্রি' : 'free'} · RSS {overview?.hardware.processRssMb ?? 0}MB
                 </div>
-                <div className="text-[10px] text-emerald-700 font-semibold">
+                <div className="text-[10px] text-emerald-700 font-semibold truncate">
                   whisper.cpp {overview?.engine.whisperBinaryFound ? '✓' : '✗'} · ffmpeg{' '}
-                  {overview?.engine.ffmpegFound ? '✓' : '✗'}
+                  {overview?.engine.ffmpegFound ? `✓ ${overview.hardware.ffmpegVersion || ''}` : '✗'}
                 </div>
               </div>
             </div>
@@ -741,8 +901,8 @@ export function VoiceModerationPage({
               <Sparkles size={14} className="text-emerald-700 shrink-0 mt-0.5" />
               <span>
                 {isBn
-                  ? '১০০% ফ্রি ও অফলাইন: কোনো Gemini/OpenAI/Groq পেইড API বা কী ব্যবহার করা হয় না। সব অডিও লোকাল whisper.cpp দিয়ে প্রসেস হয়ে টেম্প ফাইল সাথে সাথে মুছে ফেলা হয়।'
-                  : '100% Zero-API Offline: Uses quantized open-source Whisper.cpp directly on your server with automatic immediate temp audio deletion.'}
+                  ? 'ডুয়াল-পাস + ডিকশনারি-মুক্ত এআই: অস্পষ্ট অডিওতে বাংলা/সিলেটি ডায়ালেক্ট ২য় পাস চলে; ফোনেটিক ও সেমান্টিক ফ্রেম দিয়ে অজানা গালি ধরে এবং টেম্প ফাইল সাথে সাথে মুছে ফেলে।'
+                  : 'Dual-pass Bangla/Sylheti STT + phonetic/semantic scoring with zero paid APIs and instant temp audio cleanup.'}
               </span>
             </div>
 
@@ -820,13 +980,13 @@ export function VoiceModerationPage({
                   {isBn ? 'রিয়েল অফলাইন অডিও টেস্টার' : 'Real Offline Audio Tester'}
                 </h2>
               </div>
-              <span className="text-[10px] font-bold text-slate-500">whisper.cpp</span>
+              <span className="text-[10px] font-bold text-slate-500">whisper.cpp + semantic</span>
             </div>
 
             <p className="text-[11px] text-slate-500">
               {isBn
-                ? 'যেকোনো .ogg / .mp3 / .wav / .m4a ভয়েস ক্লিপ আপলোড করুন অথবা সরাসরি মাইক্রোফোন দিয়ে রেকর্ড করে অফলাইন ডিটেকশন যাচাই করুন।'
-                : 'Upload a real audio clip or record via microphone to verify local Whisper.cpp transcription & profanity filtering.'}
+                ? 'যেকোনো .ogg / .mp3 / .wav / .m4a ভয়েস ক্লিপ আপলোড করুন অথবা মাইক্রোফোন দিয়ে রেকর্ড করে বাংলা/সিলেটি/বাংলিশ সেমান্টিক ডিটেকশন যাচাই করুন।'
+                : 'Upload an audio clip or record via microphone to verify local Whisper.cpp transcription, dialect detection & semantic filtering.'}
             </p>
 
             <input
@@ -873,7 +1033,7 @@ export function VoiceModerationPage({
               <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-xs font-semibold text-amber-800 flex items-center gap-2">
                 <RefreshCw size={14} className="animate-spin" />
                 <span>
-                  {isBn ? 'whisper.cpp অফলাইনে অডিও ট্রান্সক্রাইব ও বিশ্লেষণ করছে...' : 'Transcribing offline...'}
+                  {isBn ? 'whisper.cpp ডুয়াল-পাস ও সেমান্টিক এআই বিশ্লেষণ করছে...' : 'Transcribing offline...'}
                 </span>
               </div>
             )}
@@ -889,18 +1049,32 @@ export function VoiceModerationPage({
                 className={`p-3 rounded-xl border text-xs space-y-1.5 ${
                   testResult.analysis?.isProfane
                     ? 'bg-rose-50/70 border-rose-200'
-                    : 'bg-emerald-50/70 border-emerald-200'
+                    : testResult.analysis?.needsReview
+                      ? 'bg-amber-50/80 border-amber-200'
+                      : 'bg-emerald-50/70 border-emerald-200'
                 }`}
               >
                 <div className="flex items-center justify-between font-extrabold">
-                  <span className={testResult.analysis?.isProfane ? 'text-rose-800' : 'text-emerald-800'}>
+                  <span
+                    className={
+                      testResult.analysis?.isProfane
+                        ? 'text-rose-800'
+                        : testResult.analysis?.needsReview
+                          ? 'text-amber-800'
+                          : 'text-emerald-800'
+                    }
+                  >
                     {testResult.analysis?.isProfane
                       ? isBn
-                        ? '🚨 গালি শনাক্ত — ডিলিট সিদ্ধান্ত'
-                        : '🚨 Profanity Detected — Would Delete'
-                      : isBn
-                        ? '✅ নিরাপদ — অক্ষত রাখা হবে'
-                        : '✅ Clean — Kept Intact'}
+                        ? '🚨 অশ্লীলতা শনাক্ত — ডিলিট সিদ্ধান্ত'
+                        : '🚨 Abuse Detected — Would Delete'
+                      : testResult.analysis?.needsReview
+                        ? isBn
+                          ? '⚠️ অস্পষ্ট / রিভিউ কিউতে যাবে'
+                          : '⚠️ Unclear — Would Queue for Admin Review'
+                        : isBn
+                          ? '✅ নিরাপদ — অক্ষত রাখা হবে'
+                          : '✅ Clean — Kept Intact'}
                   </span>
                   <span className="text-[11px] tabular-nums text-slate-600">
                     {testResult.processingMs} ms · {testResult.detectedLanguage}
@@ -914,12 +1088,29 @@ export function VoiceModerationPage({
                   <span>
                     <strong>Confidence:</strong> {testResult.analysis?.confidenceScore ?? 0}%
                   </span>
+                  {testResult.analysis?.dialectDetected && testResult.analysis.dialectDetected !== 'standard' && (
+                    <span className="text-emerald-800 font-bold">
+                      {isBn ? 'উপভাষা:' : 'Dialect:'} {testResult.analysis.dialectDetected}
+                    </span>
+                  )}
                   {testResult.analysis?.matchedWords?.length > 0 && (
                     <span className="text-rose-700 font-bold">
-                      {isBn ? 'শনাক্ত শব্দ:' : 'Matched:'} {testResult.analysis.matchedWords.join(', ')}
+                      {isBn ? 'শনাক্ত:' : 'Matched:'} {testResult.analysis.matchedWords.join(', ')}
                     </span>
                   )}
                 </div>
+                {testResult.analysis?.semanticSignals?.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {testResult.analysis.semanticSignals.map((sig: string) => (
+                      <span
+                        key={sig}
+                        className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-[10px] font-semibold text-slate-700"
+                      >
+                        {sig}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="text-[10px] text-slate-500">{testResult.analysis?.contextReason}</div>
               </div>
             )}
@@ -927,18 +1118,96 @@ export function VoiceModerationPage({
         </div>
       </div>
 
-      {/* Voice Moderation History */}
+      {/* Group Voice Clips Download Center */}
+      <div className="card p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+          <div>
+            <h2 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
+              <Download size={16} className="text-emerald-700" />
+              <span>{isBn ? 'গ্রুপ ভয়েস মেসেজ ডাউনলোড (সংরক্ষিত অডিও)' : 'Group Voice Recordings Download'}</span>
+            </h2>
+            <p className="text-[11px] text-slate-500">
+              {isBn
+                ? 'গ্রুপের ইনকামিং ভয়েস নোট সরাসরি শুনুন এবং ১-ক্লিকে ডিভাইসে ডাউনলোড করুন'
+                : 'Listen to captured group voice clips and download them directly to your device'}
+            </p>
+          </div>
+          <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 tabular-nums">
+            {groupVoiceClips.length} {isBn ? 'টি ভয়েস ক্লিপ' : 'clips'}
+          </span>
+        </div>
+
+        {groupVoiceClips.length === 0 ? (
+          <div className="py-6 text-center text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl bg-slate-50/50">
+            {isBn
+              ? 'এখনো কোনো গ্রুপ ভয়েস নোট ইনবক্স মিডিয়ায় জমা হয়নি। গ্রুপে নতুন ভয়েস নোট এলে এখান থেকেও সরাসরি ডাউনলোড করতে পারবেন।'
+              : 'No captured group voice clips yet.'}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+            {groupVoiceClips.map((clip) => {
+              const streamUrl = buildVoiceMediaUrl(clip.mediaUrl, apiBaseUrl);
+              const dlUrl = buildVoiceMediaUrl(clip.downloadUrl, apiBaseUrl) || (streamUrl ? `${streamUrl}&download=1` : '');
+              return (
+                <div
+                  key={`${clip.groupId}_${clip.id}`}
+                  className="p-3 rounded-xl border border-slate-200 bg-slate-50/60 flex flex-col gap-2"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-extrabold text-slate-900 truncate">
+                        {clip.senderName || clip.senderPhone}
+                      </div>
+                      <div className="text-[10.5px] text-slate-500 truncate">
+                        {clip.groupName} · {clip.durationSec > 0 ? `${clip.durationSec}s` : ''} ·{' '}
+                        {formatBytesShort(clip.fileSize)}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {clip.isDeleted && (
+                        <span className="text-[9.5px] font-bold px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">
+                          {isBn ? 'ডিলিটেড' : 'Deleted'}
+                        </span>
+                      )}
+                      {dlUrl && (
+                        <a
+                          href={dlUrl}
+                          download={`voice_${clip.senderPhone || 'group'}_${clip.id}.ogg`}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold transition-colors"
+                        >
+                          <Download size={12} />
+                          <span>{isBn ? 'ডাউনলোড' : 'Download'}</span>
+                        </a>
+                      )}
+                    </div>
+                  </div>
+
+                  {streamUrl && (
+                    <audio controls preload="none" src={streamUrl} className="w-full h-8" />
+                  )}
+
+                  <div className="text-[10px] text-slate-400 tabular-nums">
+                    {new Date(clip.timestamp).toLocaleString()}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Voice Moderation History & Admin Review Queue */}
       <div className="card p-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-slate-100 pb-3">
           <div>
             <h2 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
               <ShieldAlert size={16} className="text-emerald-700" />
-              <span>{isBn ? 'ভয়েস মডারেশন হিস্ট্রি (লাইভ অডিট)' : 'Voice Moderation History'}</span>
+              <span>{isBn ? 'ভয়েস মডারেশন হিস্ট্রি ও রিভিউ কিউ' : 'Voice Moderation History & Review Queue'}</span>
             </h2>
             <p className="text-[11px] text-slate-500">
               {isBn
-                ? 'প্রতিটি ইনকামিং ভয়েস মেসেজের ট্রান্সক্রিপশন, কনফিডেন্স ও ডিলিট স্ট্যাটাস (ডুপ্লিকেট সুরক্ষিত)'
-                : 'Audit log of transcribed group voice notes, confidence scores, and verified WhatsApp actions'}
+                ? 'প্রতিটি ইনকামিং ভয়েস মেসেজের ট্রান্সক্রিপশন, ডায়ালেক্ট, সেমান্টিক স্কোর ও অ্যাডমিন রিভিউ অ্যাকশন'
+                : 'Audit log with dialect detection, semantic context signals, and Admin Review Queue actions'}
             </p>
           </div>
 
@@ -969,6 +1238,10 @@ export function VoiceModerationPage({
           <div className="flex flex-wrap gap-1.5">
             {[
               { id: 'all' as const, label: isBn ? 'সবগুলো' : 'All' },
+              {
+                id: 'review' as const,
+                label: isBn ? `রিভিউ কিউ (${reviewPendingCount})` : `Review (${reviewPendingCount})`,
+              },
               { id: 'deleted' as const, label: isBn ? 'ডিলিট হয়েছে' : 'Deleted' },
               { id: 'clean' as const, label: isBn ? 'পরিষ্কার ও অক্ষত' : 'Clean' },
               { id: 'failed' as const, label: isBn ? 'ব্যর্থ / পারমিশন নেই' : 'Failed / No Admin' },
@@ -979,7 +1252,9 @@ export function VoiceModerationPage({
                 onClick={() => setHistoryFilter(tab.id)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold border cursor-pointer transition-colors ${
                   historyFilter === tab.id
-                    ? 'bg-emerald-700 text-white border-emerald-700'
+                    ? tab.id === 'review'
+                      ? 'bg-amber-600 text-white border-amber-600'
+                      : 'bg-emerald-700 text-white border-emerald-700'
                     : 'bg-white text-slate-700 border-slate-200 hover:border-emerald-300'
                 }`}
               >
@@ -1004,35 +1279,42 @@ export function VoiceModerationPage({
         {filteredHistory.length === 0 ? (
           <div className="py-10 text-center text-xs text-slate-500 border border-dashed border-slate-200 rounded-xl bg-slate-50/50">
             {isBn
-              ? 'এখনো কোনো ভয়েস মডারেশন রেকর্ড জমা হয়নি। গ্রুপে ভয়েস মেসেজ এলে বা উপরের টেস্টার দিয়ে যাচাই করলে এখানে দেখাবে।'
-              : 'No voice moderation records yet.'}
+              ? 'কোনো ভয়েস মডারেশন রেকর্ড পাওয়া যায়নি।'
+              : 'No voice moderation records match the current filter.'}
           </div>
         ) : (
           <div className="space-y-2.5">
             {filteredHistory.map((rec) => {
+              const isPendingReview = rec.status === 'needs_review' && rec.reviewStatus !== 'approved_clean' && rec.reviewStatus !== 'deleted_by_admin' && rec.reviewStatus !== 'dismissed';
               const badge =
                 rec.status === 'profane_deleted'
                   ? { cls: 'bg-rose-50 text-rose-800 border-rose-200', label: isBn ? 'গালি · ডিলিট হয়েছে' : 'Abuse Deleted' }
-                  : rec.status === 'no_admin_permission'
-                    ? {
-                        cls: 'bg-amber-50 text-amber-800 border-amber-200',
-                        label: isBn ? 'অ্যাডমিন পারমিশন নেই' : 'No Admin Permission',
-                      }
-                    : rec.status === 'delete_failed' || rec.status === 'failed'
-                      ? { cls: 'bg-rose-50 text-rose-700 border-rose-200', label: isBn ? 'ব্যর্থ' : 'Failed' }
-                      : rec.status === 'skipped_admin'
-                        ? { cls: 'bg-sky-50 text-sky-800 border-sky-200', label: isBn ? 'অ্যাডমিন শিল্ড' : 'Admin Shield' }
-                        : { cls: 'bg-emerald-50 text-emerald-800 border-emerald-200', label: isBn ? 'পরিষ্কার · অক্ষত' : 'Clean · Kept' };
+                  : isPendingReview
+                    ? { cls: 'bg-amber-50 text-amber-800 border-amber-300', label: isBn ? 'রিভিউ প্রয়োজন' : 'Needs Review' }
+                    : rec.status === 'no_admin_permission'
+                      ? {
+                          cls: 'bg-amber-50 text-amber-800 border-amber-200',
+                          label: isBn ? 'অ্যাডমিন পারমিশন নেই' : 'No Admin Permission',
+                        }
+                      : rec.status === 'delete_failed' || rec.status === 'failed'
+                        ? { cls: 'bg-rose-50 text-rose-700 border-rose-200', label: isBn ? 'ব্যর্থ' : 'Failed' }
+                        : rec.status === 'skipped_admin'
+                          ? { cls: 'bg-sky-50 text-sky-800 border-sky-200', label: isBn ? 'অ্যাডমিন শিল্ড' : 'Admin Shield' }
+                          : { cls: 'bg-emerald-50 text-emerald-800 border-emerald-200', label: isBn ? 'পরিষ্কার · অক্ষত' : 'Clean · Kept' };
+
+              const audioUrl = buildVoiceMediaUrl(rec.voiceAudioUrl, apiBaseUrl);
+              const audioDlUrl = buildVoiceMediaUrl(rec.voiceDownloadUrl, apiBaseUrl);
 
               return (
-                <div key={rec.id} className="p-3 rounded-xl border border-slate-200 bg-white space-y-1.5">
+                <div key={rec.id} className="p-3 rounded-xl border border-slate-200 bg-white space-y-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex flex-wrap items-center gap-2 text-xs">
                       <span className="font-extrabold text-slate-900">{rec.senderName || rec.senderPhone}</span>
                       <span className="text-slate-400">·</span>
                       <span className="font-semibold text-slate-700">{rec.groupName}</span>
                       <span className="text-[11px] text-slate-400 tabular-nums">
-                        {rec.audioDurationSec > 0 ? `${rec.audioDurationSec}s` : ''} · {rec.detectedLanguage} ·{' '}
+                        {rec.audioDurationSec > 0 ? `${rec.audioDurationSec}s` : ''} · {rec.detectedLanguage}
+                        {rec.dialectDetected && rec.dialectDetected !== 'standard' ? ` (${rec.dialectDetected})` : ''} ·{' '}
                         {(rec.processingMs / 1000).toFixed(1)}s STT
                       </span>
                     </div>
@@ -1052,6 +1334,22 @@ export function VoiceModerationPage({
                     </div>
                   )}
 
+                  {audioUrl && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <audio controls preload="none" src={audioUrl} className="h-8 flex-1 min-w-[200px] max-w-sm" />
+                      {audioDlUrl && (
+                        <a
+                          href={audioDlUrl}
+                          download={`voice_${rec.senderPhone || 'member'}_${rec.messageId}.ogg`}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-emerald-700 hover:text-white text-slate-700 text-[11px] font-bold border border-slate-200 transition-colors"
+                        >
+                          <Download size={12} />
+                          <span>{isBn ? 'অডিও ডাউনলোড' : 'Download Audio'}</span>
+                        </a>
+                      )}
+                    </div>
+                  )}
+
                   <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500">
                     <span>{rec.contextReason}</span>
                     {rec.matchedWords.length > 0 && (
@@ -1060,6 +1358,62 @@ export function VoiceModerationPage({
                       </span>
                     )}
                   </div>
+
+                  {rec.semanticSignals && rec.semanticSignals.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {rec.semanticSignals.map((sig) => (
+                        <span
+                          key={sig}
+                          className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-[10px] font-semibold text-slate-700"
+                        >
+                          {sig}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Admin Review Actions */}
+                  {isPendingReview && onResolveReview && (
+                    <div className="pt-2 border-t border-amber-100 flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[11px] font-bold text-amber-800 flex items-center gap-1">
+                        <AlertTriangle size={13} />
+                        {isBn
+                          ? 'এআই নিশ্চিত হতে পারেনি — আপনি অডিও শুনে সিদ্ধান্ত নিন:'
+                          : 'Uncertain audio — Admin decision required:'}
+                      </span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {rec.canDeleteFromReview && (
+                          <button
+                            type="button"
+                            disabled={resolvingReviewId === rec.id}
+                            onClick={() => triggerReviewAction(rec.id, 'delete')}
+                            className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer disabled:opacity-60"
+                          >
+                            <Trash2 size={12} />
+                            <span>{isBn ? 'ডিলিট করুন' : 'Delete Voice'}</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          disabled={resolvingReviewId === rec.id}
+                          onClick={() => triggerReviewAction(rec.id, 'approve_clean')}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer disabled:opacity-60"
+                        >
+                          <CheckCircle2 size={12} />
+                          <span>{isBn ? 'নিরাপদ অনুমোদন' : 'Approve Safe'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={resolvingReviewId === rec.id}
+                          onClick={() => triggerReviewAction(rec.id, 'dismiss')}
+                          className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold inline-flex items-center gap-1 cursor-pointer disabled:opacity-60"
+                        >
+                          <X size={12} />
+                          <span>{isBn ? 'বাতিল' : 'Dismiss'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
