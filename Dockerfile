@@ -11,7 +11,7 @@ RUN git clone --depth 1 --branch v1.7.2 https://github.com/ggml-org/whisper.cpp.
     -DBUILD_SHARED_LIBS=OFF \
     -DWHISPER_BUILD_EXAMPLES=ON \
     -DWHISPER_BUILD_TESTS=OFF \
-  && cmake --build /tmp/whisper.cpp/build --target whisper-cli -j2 \
+  && cmake --build /tmp/whisper.cpp/build --target whisper-cli -j1 \
   && cp /tmp/whisper.cpp/build/bin/whisper-cli /usr/local/bin/whisper-cli \
   && rm -rf /tmp/whisper.cpp
 
@@ -27,7 +27,7 @@ COPY --from=whisper_builder /usr/local/bin/whisper-cli /usr/local/bin/whisper-cl
 RUN mkdir -p /app/tools/whisper && cp /usr/local/bin/whisper-cli /app/tools/whisper/whisper-cli && chmod +x /usr/local/bin/whisper-cli
 
 COPY package*.json ./
-RUN npm install --no-audit --no-fund
+RUN npm install --legacy-peer-deps --no-audit --no-fund
 
 COPY . .
 RUN cp /usr/local/bin/whisper-cli /app/tools/whisper/whisper-cli && chmod +x /app/tools/whisper/whisper-cli

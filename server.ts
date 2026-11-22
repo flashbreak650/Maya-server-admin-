@@ -330,8 +330,19 @@ app.use('/api', (req: Request, res: Response, next) => {
   });
 });
 
+const SERVER_BOOTED_AT = Date.now();
+
 app.get('/api/health', (_req: Request, res: Response) => {
-  res.status(200).json({ ok: true, status: 'healthy', port: PORT });
+  res.status(200).json({
+    ok: true,
+    status: 'healthy',
+    port: PORT,
+    bootedAt: SERVER_BOOTED_AT,
+    features: {
+      voiceModeration: true,
+      autoHistoryCleanup: true,
+    },
+  });
 });
 
 app.get('/api/auth/status', (req: Request, res: Response) => {
@@ -2704,9 +2715,11 @@ async function startServer() {
   const distDir = path.join(__dirname, 'dist');
   const distIndexPath = path.join(distDir, 'index.html');
   const hasBuiltDist = fs.existsSync(distIndexPath);
-  const isProd =
+  const isHostedProdEnv =
     process.env.NODE_ENV === 'production' ||
-    (Boolean(process.env.K_SERVICE) && !process.env.NGINX_PORT && hasBuiltDist);
+    Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RENDER || process.env.FLY_APP_NAME) ||
+    (Boolean(process.env.K_SERVICE) && !process.env.NGINX_PORT);
+  const isProd = isHostedProdEnv && (hasBuiltDist || process.env.NODE_ENV === 'production');
 
   if (!isProd) {
     const { createServer: createViteServer } = await import('vite');
@@ -2716,9 +2729,18 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(distDir));
+    app.use(
+      express.static(distDir, {
+        setHeaders: (res, filePath) => {
+          if (filePath.endsWith('.html')) {
+            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+          }
+        },
+      })
+    );
     app.get('*', (_req: Request, res: Response) => {
       if (fs.existsSync(distIndexPath)) {
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
         return res.sendFile(distIndexPath);
       }
       return res.status(200).send('WAGuard Server Running');
