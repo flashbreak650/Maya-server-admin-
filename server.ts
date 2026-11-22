@@ -1,5 +1,6 @@
 import express, { type Request, type Response } from 'express';
 import { createServer } from 'http';
+import { WebSocketServer, type WebSocket } from 'ws';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
@@ -111,6 +112,25 @@ import {
   updateCleanupSettings,
   type CleanupMode,
 } from './src/storageCleanup.ts';
+import {
+  captureIncomingGroupMessages,
+  enforceInboxMediaStorageLimit,
+  flushInboxStoreSync,
+  getInboxGroupsList,
+  getInboxSettings,
+  getInboxStorageStats,
+  markGroupLeftInInbox,
+  markInboxMessageDeleted,
+  queryGroupInboxMessages,
+  resolveSafeGroupAvatarFile,
+  resolveSafeInboxMediaFile,
+  subscribeInboxEvents,
+  syncConnectedGroupsToInbox,
+  toggleMessageImportant,
+  updateInboxSettings,
+  type InboxGroupSummary,
+  type InboxMessageRecord,
+} from './src/inboxStore.ts';
 
 initConnectionDiagnosticsOnBoot();
 
@@ -199,6 +219,55 @@ function verifyAdminToken(token: string | undefined, activePin: string): boolean
   }
 }
 
+function signMediaToken(resourceKey: string): string {
+  const exp = Date.now() + 6 * 60 * 60 * 1000; // 6 hours
+  const payload = `${exp}.${resourceKey}`;
+  const sig = crypto.createHmac('sha256', AUTH_SECRET).update(payload).digest('hex');
+  return `${exp}.${sig}`;
+}
+
+function verifyMediaToken(token: string | undefined, resourceKey: string): boolean {
+  if (!token || !resourceKey) return false;
+  const parts = String(token).trim().split('.');
+  if (parts.length !== 2) return false;
+  const [expStr, sig] = parts;
+  const exp = Number(expStr);
+  if (!Number.isFinite(exp) || Date.now() > exp) return false;
+  const expectedSig = crypto.createHmac('sha256', AUTH_SECRET).update(`${expStr}.${resourceKey}`).digest('hex');
+  try {
+    return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig));
+  } catch {
+    return false;
+  }
+}
+
+function attachSignedAvatarUrl<T extends InboxGroupSummary>(group: T): T & { avatarUrl?: string } {
+  if (group.avatarStatus === 'ready') {
+    const mt = signMediaToken(`avatar:${group.id}`);
+    return {
+      ...group,
+      avatarUrl: `/api/inbox/avatar/${encodeURIComponent(group.id)}?mt=${encodeURIComponent(mt)}`,
+    };
+  }
+  return group;
+}
+
+function attachSignedMediaUrls(msg: InboxMessageRecord): InboxMessageRecord & {
+  media?: InboxMessageRecord['media'] & { mediaUrl?: string; downloadUrl?: string };
+} {
+  if (!msg.media || msg.media.status !== 'saved') return msg;
+  const mt = signMediaToken(`media:${msg.groupId}:${msg.id}`);
+  const base = `/api/inbox/media/${encodeURIComponent(msg.groupId)}/${encodeURIComponent(msg.id)}?mt=${encodeURIComponent(mt)}`;
+  return {
+    ...msg,
+    media: {
+      ...msg.media,
+      mediaUrl: base,
+      downloadUrl: `${base}&download=1`,
+    },
+  };
+}
+
 function extractRequestToken(req: Request): string {
   const headerToken = req.headers['x-admin-token'];
   if (typeof headerToken === 'string' && headerToken.trim()) return headerToken.trim();
@@ -222,6 +291,25 @@ app.use('/api', (req: Request, res: Response, next) => {
   const token = extractRequestToken(req);
   if (verifyAdminToken(token, settings.dashboardPin)) {
     return next();
+  }
+  if (req.method === 'GET') {
+    const mediaMatch = req.path.match(/^\/inbox\/media\/([^/]+)\/([^/]+)$/);
+    if (mediaMatch) {
+      const gId = decodeURIComponent(mediaMatch[1]);
+      const mId = decodeURIComponent(mediaMatch[2]);
+      const mt = typeof req.query.mt === 'string' ? req.query.mt : '';
+      if (verifyMediaToken(mt, `media:${gId}:${mId}`)) {
+        return next();
+      }
+    }
+    const avatarMatch = req.path.match(/^\/inbox\/avatar\/([^/]+)$/);
+    if (avatarMatch) {
+      const gId = decodeURIComponent(avatarMatch[1]);
+      const mt = typeof req.query.mt === 'string' ? req.query.mt : '';
+      if (verifyMediaToken(mt, `avatar:${gId}`)) {
+        return next();
+      }
+    }
   }
   return res.status(401).json({
     success: false,
@@ -340,10 +428,7 @@ const botState: BotState = {
   messagesChecked: 142,
   warnings: 3,
   blockedWords: 18,
-  groups: [
-    { id: '12036302@g.us', name: 'WAGuard Official Community', participants: 184, status: 'Active' },
-    { id: '12036303@g.us', name: 'Devs & Admins Group', participants: 42, status: 'Active' },
-  ],
+  groups: [] as Array<{ id: string; name: string; participants: number; status: string }>,
   lastError: null,
 };
 
@@ -429,7 +514,10 @@ function destroyCurrentSocket() {
       oldSock.ev.removeAllListeners('connection.update');
       oldSock.ev.removeAllListeners('creds.update');
       oldSock.ev.removeAllListeners('messages.upsert');
+      oldSock.ev.removeAllListeners('messages.update');
       oldSock.ev.removeAllListeners('group-participants.update');
+      oldSock.ev.removeAllListeners('groups.upsert');
+      oldSock.ev.removeAllListeners('groups.update');
       oldSock.ev.removeAllListeners('call');
       oldSock.ev.removeAllListeners('contacts.upsert');
       oldSock.ev.removeAllListeners('contacts.update');
@@ -531,6 +619,15 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
           if (groupList.length > 0) {
             botState.groups = groupList;
           }
+          syncConnectedGroupsToInbox(
+            sock,
+            groupList.map((g) => ({
+              id: g.id,
+              name: g.name,
+              participants: g.participants,
+              isBotAdmin: isBotGroupAdminFromMeta(sock, groups[g.id]),
+            }))
+          ).catch(() => {});
         } catch {
           // non-blocking
         }
@@ -736,11 +833,36 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
   sock.ev.on('groups.upsert', (groups: any[]) => {
     if (socketToken !== activeSocketToken || sock !== currentSock) return;
     upsertCachedGroupMeta(groups);
+    const items = (groups || [])
+      .filter((g) => g?.id && String(g.id).endsWith('@g.us'))
+      .map((g) => ({
+        id: g.id,
+        name: g.subject || 'WhatsApp Group',
+        participants: Array.isArray(g.participants) ? g.participants.length : 0,
+        isBotAdmin: isBotGroupAdminFromMeta(sock, g),
+      }));
+    if (items.length > 0) {
+      syncConnectedGroupsToInbox(sock, items).catch(() => {});
+    }
   });
 
   sock.ev.on('groups.update', (updates: any[]) => {
     if (socketToken !== activeSocketToken || sock !== currentSock) return;
     upsertCachedGroupMeta(updates);
+    const items = (updates || [])
+      .filter((g) => g?.id && String(g.id).endsWith('@g.us') && g.subject)
+      .map((g) => {
+        const cached = getCachedGroupMetadataSync(g.id);
+        return {
+          id: g.id,
+          name: g.subject,
+          participants: Array.isArray(cached?.participants) ? cached.participants.length : 0,
+          isBotAdmin: cached ? isBotGroupAdminFromMeta(sock, cached) : undefined,
+        };
+      });
+    if (items.length > 0) {
+      syncConnectedGroupsToInbox(sock, items).catch(() => {});
+    }
   });
 
   sock.ev.on('messaging-history.set', (data: any) => {
@@ -750,6 +872,11 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
       for (const m of data.lidPnMappings) {
         if (m?.lid && m?.pn) rememberLidPnPair(m.lid, m.pn);
       }
+    }
+    if (Array.isArray(data?.messages) && data.messages.length > 0) {
+      captureIncomingGroupMessages(sock, data.messages, 'history_sync').catch((err: any) => {
+        console.warn('[Inbox History Sync Note]:', err?.message || err);
+      });
     }
   });
 
@@ -766,9 +893,35 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
     }
   });
 
+  sock.ev.on('messages.update', async (updates: any[]) => {
+    if (socketToken !== activeSocketToken || sock !== currentSock) return;
+    if (!Array.isArray(updates)) return;
+    for (const u of updates) {
+      const remoteJid = u?.key?.remoteJid;
+      const messageId = u?.key?.id;
+      if (!remoteJid || !messageId || !remoteJid.endsWith('@g.us')) continue;
+      const stub = u?.update?.messageStubType;
+      const protoType = u?.update?.message?.protocolMessage?.type;
+      if (stub === 1 || stub === 68 || protoType === 0) {
+        await markInboxMessageDeleted(
+          remoteJid,
+          messageId,
+          'sender_revoke',
+          'প্রেরক WhatsApp থেকে মেসেজটি মুছে দিয়েছেন (Deleted for Everyone)'
+        ).catch(() => {});
+      }
+    }
+  });
+
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (socketToken !== activeSocketToken || sock !== currentSock) {
       return;
+    }
+    if ((type === 'notify' || type === 'append') && Array.isArray(messages)) {
+      // Capture every WhatsApp group message & media (text, image, video, voice, audio, sticker, document, location, contact, revoke) BEFORE fast-path filter
+      captureIncomingGroupMessages(sock, messages, type === 'append' ? 'history_sync' : 'live').catch((err: any) => {
+        console.warn('[Inbox Capture Note]:', err?.message || err);
+      });
     }
     if (type === 'notify' && Array.isArray(messages)) {
       botState.messagesChecked += messages.length;
@@ -838,7 +991,7 @@ async function initializeExistingSession() {
       browser: Browsers.windows('Chrome'),
       countryCode: 'BD',
       syncFullHistory: false,
-      shouldSyncHistoryMessage: () => false,
+      shouldSyncHistoryMessage: () => true,
       markOnlineOnConnect: false,
       generateHighQualityLinkPreview: false,
       emitOwnEvents: false,
@@ -951,7 +1104,7 @@ async function startRealPairingFlow(cleanPhone: string): Promise<{ pairingCode: 
         browser: Browsers.windows('Chrome'),
         countryCode: cleanPhone.startsWith('880') ? 'BD' : 'US',
         syncFullHistory: false,
-        shouldSyncHistoryMessage: () => false,
+        shouldSyncHistoryMessage: () => true,
         markOnlineOnConnect: false,
         generateHighQualityLinkPreview: false,
         emitOwnEvents: false,
@@ -1469,6 +1622,7 @@ app.get('/api/groups', async (req: Request, res: Response) => {
   if (currentSock && botState.status === 'connected') {
     try {
       const groups = await currentSock.groupFetchAllParticipating();
+      primeGroupMetaCache(groups);
       const list = Object.values(groups).map((g) => ({
         id: g.id,
         name: g.subject,
@@ -1476,9 +1630,24 @@ app.get('/api/groups', async (req: Request, res: Response) => {
         status: 'Active',
       }));
       botState.groups = list;
+      await syncConnectedGroupsToInbox(
+        currentSock,
+        list.map((g) => ({
+          id: g.id,
+          name: g.name,
+          participants: g.participants,
+          isBotAdmin: isBotGroupAdminFromMeta(currentSock, groups[g.id]),
+        }))
+      ).catch(() => {});
     } catch (e) {}
   }
-  res.json({ groups: botState.groups });
+  const inboxGroups = getInboxGroupsList();
+  const inboxMap = new Map(inboxGroups.map((ig) => [ig.id, attachSignedAvatarUrl(ig)]));
+  const enriched = botState.groups.map((g) => ({
+    ...g,
+    ...(inboxMap.get(g.id) || {}),
+  }));
+  res.json({ groups: enriched, inboxGroups: inboxGroups.map(attachSignedAvatarUrl) });
 });
 
 // 4b. Leave Any Connected WhatsApp Group from Server
@@ -1506,6 +1675,7 @@ app.post('/api/groups/leave', async (req: Request, res: Response) => {
 
     await currentSock.groupLeave(groupId);
     botState.groups = botState.groups.filter((g) => g.id !== groupId);
+    markGroupLeftInInbox(groupId);
     await resolveAdminPermissionProblemsForGroup(groupId, groupName, currentSock).catch(() => {});
 
     try {
@@ -2135,6 +2305,241 @@ app.post('/api/server/cleanup/settings', async (req: Request, res: Response) => 
   }
 });
 
+// -----------------------------------------------------------------------------
+// GROUP INBOX SYSTEM ENDPOINTS (Real-time Messages, Media Streaming & Limits)
+// -----------------------------------------------------------------------------
+
+app.get('/api/inbox/groups', async (_req: Request, res: Response) => {
+  try {
+    if (currentSock && botState.status === 'connected') {
+      try {
+        const groups = await currentSock.groupFetchAllParticipating();
+        primeGroupMetaCache(groups);
+        const list = Object.values(groups).map((g) => ({
+          id: g.id,
+          name: g.subject,
+          participants: g.participants?.length || 0,
+          status: 'Active',
+        }));
+        botState.groups = list;
+        await syncConnectedGroupsToInbox(
+          currentSock,
+          list.map((g) => ({
+            id: g.id,
+            name: g.name,
+            participants: g.participants,
+            isBotAdmin: isBotGroupAdminFromMeta(currentSock, groups[g.id]),
+          }))
+        );
+      } catch {}
+    }
+
+    const groups = getInboxGroupsList().map(attachSignedAvatarUrl);
+    res.json({
+      success: true,
+      online: botState.status === 'connected',
+      groups,
+      storage: getInboxStorageStats(),
+      settings: getInboxSettings(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to load inbox groups' });
+  }
+});
+
+app.get('/api/inbox/groups/:groupId/messages', (req: Request, res: Response) => {
+  try {
+    const groupId = decodeURIComponent(String(req.params.groupId || '')).trim();
+    if (!groupId || !/^[0-9A-Za-z._-]+@g\.us$/.test(groupId)) {
+      return res.status(400).json({ success: false, error: 'সঠিক গ্রুপ আইডি (@g.us) প্রয়োজন।' });
+    }
+
+    const limit = Number(req.query.limit || 35);
+    const beforeTimestamp = req.query.beforeTimestamp ? Number(req.query.beforeTimestamp) : undefined;
+    const beforeId = typeof req.query.beforeId === 'string' ? req.query.beforeId : undefined;
+    const sender = typeof req.query.sender === 'string' ? req.query.sender : undefined;
+    const query = typeof req.query.query === 'string' ? req.query.query : undefined;
+    const typeFilter = (typeof req.query.type === 'string' ? req.query.type : 'all') as any;
+    const dateFrom = typeof req.query.dateFrom === 'string' ? req.query.dateFrom : undefined;
+    const dateTo = typeof req.query.dateTo === 'string' ? req.query.dateTo : undefined;
+    const deletedOnly = req.query.deletedOnly === '1' || req.query.deletedOnly === 'true';
+
+    const result = queryGroupInboxMessages({
+      groupId,
+      limit,
+      beforeTimestamp,
+      beforeId,
+      sender,
+      query,
+      typeFilter,
+      dateFrom,
+      dateTo,
+      deletedOnly,
+    });
+
+    res.json({
+      success: true,
+      group: result.group ? attachSignedAvatarUrl(result.group) : null,
+      messages: result.messages.map(attachSignedMediaUrls),
+      hasMore: result.hasMore,
+      totalMatching: result.totalMatching,
+      nextCursor: result.nextCursor,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to load group inbox messages' });
+  }
+});
+
+app.post('/api/inbox/messages/important', (req: Request, res: Response) => {
+  try {
+    const groupId = String(req.body?.groupId || '').trim();
+    const messageId = String(req.body?.messageId || '').trim();
+    const important = typeof req.body?.important === 'boolean' ? req.body.important : undefined;
+    if (!groupId || !/^[0-9A-Za-z._-]+@g\.us$/.test(groupId) || !messageId) {
+      return res.status(400).json({ success: false, error: 'সঠিক groupId ও messageId প্রয়োজন।' });
+    }
+    const updated = toggleMessageImportant(groupId, messageId, important);
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'মেসেজটি ইনবক্স ডাটাবেজে পাওয়া যায়নি।' });
+    }
+    res.json({
+      success: true,
+      message: attachSignedMediaUrls(updated),
+      storage: getInboxStorageStats(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Could not update important flag' });
+  }
+});
+
+app.get('/api/inbox/media/:groupId/:messageId', (req: Request, res: Response) => {
+  try {
+    const groupId = decodeURIComponent(String(req.params.groupId || '')).trim();
+    const messageId = decodeURIComponent(String(req.params.messageId || '')).trim();
+    if (!groupId || !/^[0-9A-Za-z._-]+@g\.us$/.test(groupId) || !messageId) {
+      return res.status(400).json({ success: false, error: 'Invalid media identifier' });
+    }
+
+    const found = resolveSafeInboxMediaFile(groupId, messageId);
+    if (!found) {
+      return res.status(404).json({ success: false, error: 'মিডিয়া ফাইলটি পাওয়া যায়নি বা পরিষ্কার করা হয়েছে।' });
+    }
+
+    const { filePath, record } = found;
+    const stat = fs.statSync(filePath);
+    const totalSize = stat.size;
+    const rawMime = (record.media?.mimeType || 'application/octet-stream').split(';')[0].trim().toLowerCase();
+    const isActiveContent =
+      rawMime.includes('html') ||
+      rawMime.includes('svg') ||
+      rawMime.includes('xml') ||
+      rawMime.includes('javascript') ||
+      rawMime.includes('ecmascript');
+    const forceDownload = req.query.download === '1' || req.query.download === 'true' || isActiveContent;
+
+    const safeDownloadName = (record.media?.fileName || `waguard_${messageId.slice(0, 12)}${path.extname(filePath)}`)
+      .replace(/["\r\n\\/]/g, '_');
+
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Content-Type', isActiveContent ? 'application/octet-stream' : rawMime || 'application/octet-stream');
+    if (forceDownload) {
+      res.setHeader('Content-Disposition', `attachment; filename="${safeDownloadName}"`);
+    } else {
+      res.setHeader('Content-Disposition', `inline; filename="${safeDownloadName}"`);
+    }
+
+    const rangeHeader = req.headers.range;
+    if (rangeHeader && typeof rangeHeader === 'string' && rangeHeader.startsWith('bytes=')) {
+      const [startRaw, endRaw] = rangeHeader.replace(/^bytes=/, '').split('-');
+      const start = startRaw ? Number(startRaw) : 0;
+      const end = endRaw ? Math.min(totalSize - 1, Number(endRaw)) : totalSize - 1;
+      if (
+        !Number.isFinite(start) ||
+        !Number.isFinite(end) ||
+        start < 0 ||
+        start >= totalSize ||
+        end < start
+      ) {
+        res.status(416).setHeader('Content-Range', `bytes */${totalSize}`).end();
+        return;
+      }
+      res.status(206);
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${totalSize}`);
+      res.setHeader('Content-Length', String(end - start + 1));
+      fs.createReadStream(filePath, { start, end }).pipe(res);
+      return;
+    }
+
+    res.setHeader('Content-Length', String(totalSize));
+    fs.createReadStream(filePath).pipe(res);
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Media read error' });
+  }
+});
+
+app.get('/api/inbox/avatar/:groupId', (req: Request, res: Response) => {
+  try {
+    const groupId = decodeURIComponent(String(req.params.groupId || '')).trim();
+    if (!groupId || !/^[0-9A-Za-z._-]+@g\.us$/.test(groupId)) {
+      return res.status(400).end();
+    }
+    const avatarPath = resolveSafeGroupAvatarFile(groupId);
+    if (!avatarPath) {
+      return res.status(404).end();
+    }
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('Content-Type', 'image/jpeg');
+    fs.createReadStream(avatarPath).pipe(res);
+  } catch {
+    res.status(404).end();
+  }
+});
+
+app.get('/api/inbox/storage', (_req: Request, res: Response) => {
+  res.json({
+    success: true,
+    storage: getInboxStorageStats(),
+    settings: getInboxSettings(),
+  });
+});
+
+app.post('/api/inbox/storage/settings', (req: Request, res: Response) => {
+  try {
+    const settings = updateInboxSettings(req.body || {});
+    res.json({
+      success: true,
+      settings,
+      storage: getInboxStorageStats(),
+      message: 'ইনবক্স মিডিয়া স্টোরেজ লিমিট সেভ হয়েছে!',
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Could not update inbox storage settings' });
+  }
+});
+
+app.post('/api/inbox/storage/cleanup', async (req: Request, res: Response) => {
+  try {
+    const forcePrunePercent = req.body?.forcePrunePercent !== undefined ? Number(req.body.forcePrunePercent) : 20;
+    const result = await enforceInboxMediaStorageLimit(
+      Number.isFinite(forcePrunePercent) && forcePrunePercent > 0 ? forcePrunePercent : 20
+    );
+    res.json({
+      success: true,
+      result,
+      storage: getInboxStorageStats(),
+      message:
+        result.filesRemoved > 0
+          ? `${result.filesRemoved}টি পুরোনো নন-ইম্পর্ট্যান্ট মিডিয়া ফাইল পরিষ্কার করা হয়েছে (${result.protectedImportantSkipped}টি গুরুত্বপূর্ণ ফাইল সুরক্ষিত রাখা হয়েছে)।`
+          : 'কোনো অপ্রয়োজনীয় নন-ইম্পর্ট্যান্ট মিডিয়া পরিষ্কারের দরকার হয়নি।',
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Inbox media cleanup failed' });
+  }
+});
+
 // Vite middleware in dev or static files in production
 async function startServer() {
   const distDir = path.join(__dirname, 'dist');
@@ -2174,13 +2579,105 @@ async function startServer() {
     }
   });
 
+  const inboxWss = new WebSocketServer({ server, path: '/ws/inbox' });
+  const wsSubscriptions = new Map<WebSocket, () => void>();
+
+  inboxWss.on('connection', (ws: WebSocket) => {
+    const settings = getModerationSettings();
+    const pinRequired = Boolean(settings.dashboardPinEnabled && settings.dashboardPin);
+    let authenticated = !pinRequired;
+    let authTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const attachSubscription = () => {
+      if (wsSubscriptions.has(ws)) return;
+      const unsub = subscribeInboxEvents((ev) => {
+        if (ws.readyState !== 1) return;
+        try {
+          const payload = {
+            ...ev,
+            ...(ev.message ? { message: attachSignedMediaUrls(ev.message) } : {}),
+            ...(ev.groupSummary ? { groupSummary: attachSignedAvatarUrl(ev.groupSummary) } : {}),
+          };
+          ws.send(JSON.stringify(payload));
+        } catch {}
+      });
+      wsSubscriptions.set(ws, unsub);
+      try {
+        ws.send(JSON.stringify({ type: 'inbox:ready', storage: getInboxStorageStats(), timestamp: Date.now() }));
+      } catch {}
+    };
+
+    if (authenticated) {
+      attachSubscription();
+    } else {
+      authTimeout = setTimeout(() => {
+        if (!authenticated && ws.readyState === 1) {
+          try {
+            ws.send(JSON.stringify({ type: 'inbox:auth_error', error: 'Authentication timeout' }));
+          } catch {}
+          ws.close(4001, 'Auth timeout');
+        }
+      }, 6000);
+    }
+
+    ws.on('message', (raw) => {
+      try {
+        const msg = JSON.parse(String(raw || ''));
+        if (msg?.type === 'auth') {
+          const curSettings = getModerationSettings();
+          if (!curSettings.dashboardPinEnabled || !curSettings.dashboardPin || verifyAdminToken(msg.token, curSettings.dashboardPin)) {
+            authenticated = true;
+            if (authTimeout) {
+              clearTimeout(authTimeout);
+              authTimeout = null;
+            }
+            attachSubscription();
+          } else {
+            ws.send(JSON.stringify({ type: 'inbox:auth_error', error: 'Invalid admin token' }));
+            ws.close(4001, 'Unauthorized');
+          }
+        } else if (msg?.type === 'ping') {
+          ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+        }
+      } catch {}
+    });
+
+    ws.on('close', () => {
+      if (authTimeout) {
+        clearTimeout(authTimeout);
+        authTimeout = null;
+      }
+      const unsub = wsSubscriptions.get(ws);
+      if (unsub) {
+        unsub();
+        wsSubscriptions.delete(ws);
+      }
+    });
+  });
+
+  const wsHeartbeat = setInterval(() => {
+    for (const client of inboxWss.clients) {
+      if (client.readyState === 1) {
+        try {
+          client.ping();
+        } catch {}
+      }
+    }
+  }, 30000);
+  wsHeartbeat.unref?.();
+
   const shutdown = (signal = 'SIGTERM') => {
-    console.log(`Flushing pending moderation DB, diagnostics & sticker queues and closing server gracefully (${signal})...`);
+    console.log(`Flushing pending moderation DB, inbox, diagnostics & sticker queues and closing server gracefully (${signal})...`);
     stopCleanupScheduler();
     recordGracefulServerShutdown(signal);
     flushDiagnosticsSync();
     flushDatabaseSync();
     flushStickerQueueSync();
+    flushInboxStoreSync();
+    clearInterval(wsHeartbeat);
+    try {
+      inboxWss.close();
+    } catch {}
     server.close(() => {
       process.exit(0);
     });

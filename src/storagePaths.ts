@@ -44,6 +44,9 @@ export const STICKER_QUEUE_DB_PATH = path.join(DATA_DIR, 'sticker_queue.json');
 export const PRIMARY_SESSIONS_DIR = path.join(DATA_DIR, 'sessions_primary');
 export const COMPANION_SESSIONS_DIR = path.join(DATA_DIR, 'sessions_companion');
 export const AUTH_SECRET_PATH = path.join(DATA_DIR, '.auth_secret');
+export const INBOX_DIR = path.join(DATA_DIR, 'group_inbox');
+export const INBOX_MEDIA_DIR = path.join(INBOX_DIR, 'media');
+export const INBOX_AVATARS_DIR = path.join(INBOX_DIR, 'avatars');
 
 export function isPersistentVolumeConfigured(): boolean {
   return Boolean(

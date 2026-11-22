@@ -59,6 +59,7 @@ import {
   Trophy,
   Hash,
   HardDrive,
+  Inbox,
 } from 'lucide-react';
 import { HELP_ITEMS } from './helpData.ts';
 import { HelpModal } from './components/HelpModal.tsx';
@@ -90,6 +91,11 @@ import {
   formatBytesHuman,
   type StorageCleanupOverview,
 } from './components/StorageCleanupPage.tsx';
+import {
+  GroupInboxPage,
+  GroupListSection,
+  type InboxGroupSummary,
+} from './components/GroupInboxPage.tsx';
 
 interface LatestDisconnectInfo {
   id: string;
@@ -727,11 +733,11 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  // Groups
-  const [groups, setGroups] = useState<GroupItem[]>([
-    { id: '12036302@g.us', name: 'WAGuard Official Community', participants: 184, status: 'Active' },
-    { id: '12036303@g.us', name: 'Devs & Admins Group', participants: 42, status: 'Active' },
-  ]);
+  // Groups & Real-Time Group Inbox State
+  const [groups, setGroups] = useState<GroupItem[]>([]);
+  const [inboxGroups, setInboxGroups] = useState<InboxGroupSummary[]>([]);
+  const [inboxSelectedGroupId, setInboxSelectedGroupId] = useState<string | null>(null);
+  const [inboxInitialDeletedOnly, setInboxInitialDeletedOnly] = useState<boolean>(false);
   const [isGroupsLoading, setIsGroupsLoading] = useState(false);
   const [selectedGroupForLeave, setSelectedGroupForLeave] = useState<GroupItem | null>(null);
   const [leavingGroupId, setLeavingGroupId] = useState<string | null>(null);
@@ -986,6 +992,7 @@ export default function App() {
       if (queueRes?.success) setStickerQueue(queueRes);
       await Promise.all([
         checkStatus(),
+        loadGroups().catch(() => {}),
         loadCompanionStatus().catch(() => {}),
         loadNightMode().catch(() => {}),
         loadCalls().catch(() => {}),
@@ -1458,7 +1465,7 @@ export default function App() {
     else if (page === 'anticall') loadCalls();
     else if (page === 'activity') loadActivityRank();
     else if (page === 'keywords') loadKeywords();
-    else if (page === 'groups') loadGroups();
+    else if (page === 'groups' || page === 'inbox') loadGroups();
     else if (page === 'maya') loadModerationData();
     else if (page === 'companion') {
       loadCompanionStatus();
@@ -1807,15 +1814,29 @@ export default function App() {
   const loadGroups = async () => {
     setIsGroupsLoading(true);
     try {
-      const data = await callApi('/api/groups');
+      const [data, inboxRes] = await Promise.all([
+        callApi('/api/groups'),
+        callApi('/api/inbox/groups').catch(() => null),
+      ]);
       if (data.groups && Array.isArray(data.groups)) {
         setGroups(data.groups);
+      }
+      if (Array.isArray(inboxRes?.groups)) {
+        setInboxGroups(inboxRes.groups);
+      } else if (Array.isArray(data.inboxGroups)) {
+        setInboxGroups(data.inboxGroups);
       }
     } catch {
       // non-blocking
     } finally {
       setIsGroupsLoading(false);
     }
+  };
+
+  const openGroupInbox = (groupId: string, initialTab?: 'all' | 'deleted') => {
+    setInboxSelectedGroupId(groupId);
+    setInboxInitialDeletedOnly(initialTab === 'deleted');
+    navigateToPage('inbox');
   };
 
   const handleLeaveGroupFromServer = async (group: GroupItem) => {
@@ -1828,6 +1849,9 @@ export default function App() {
       } else {
         setGroups((prev) => prev.filter((item) => item.id !== group.id));
       }
+      setInboxGroups((prev) =>
+        prev.map((item) => (item.id === group.id ? { ...item, connected: false } : item))
+      );
       setSelectedGroupForLeave(null);
       showNotification(
         res?.message ||
@@ -2359,6 +2383,9 @@ export default function App() {
           <button className={`nav ${activePage === 'home' ? 'active' : ''}`} onClick={() => navigateToPage('home')}>
             <LayoutDashboard size={16} /> {t.home}
           </button>
+          <button className={`nav ${activePage === 'inbox' ? 'active' : ''}`} onClick={() => navigateToPage('inbox')}>
+            <Inbox size={16} /> {isBn ? 'গ্রুপ ইনবক্স' : 'Group Inbox'}
+          </button>
           <button className={`nav ${activePage === 'security' ? 'active' : ''}`} onClick={() => navigateToPage('security')}>
             <ShieldCheck size={16} /> {t.security}
           </button>
@@ -2611,6 +2638,66 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Connected Groups Quick Inbox & Long-Press Context Card on Home Dashboard */}
+              <div className="card !mt-5">
+                <div className="card-head">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3>{isBn ? 'কানেক্টেড WhatsApp গ্রুপ ও লাইভ ইনবক্স' : 'Connected WhatsApp Groups & Inbox'}</h3>
+                      <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg tabular-nums">
+                        {inboxGroups.length || groups.length} {isBn ? 'টি গ্রুপ' : 'groups'}
+                      </span>
+                    </div>
+                    <p>
+                      {isBn
+                        ? 'যেকোনো গ্রুপ কার্ডে Tap করলে Inbox খুলবে; Long Press করলে Context Menu দেখাবে।'
+                        : 'Tap any group card to open its Inbox; long press for Context Menu.'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => navigateToPage('inbox')}
+                    className="btn soft"
+                  >
+                    <Inbox size={13} />
+                    <span>{isBn ? 'সব ইনবক্স দেখুন' : 'Open Inbox'}</span>
+                  </button>
+                </div>
+
+                <GroupListSection
+                  isBn={isBn}
+                  compact
+                  groups={
+                    inboxGroups.length > 0
+                      ? inboxGroups
+                      : groups.map((g) => ({
+                          id: g.id,
+                          name: g.name,
+                          participants: g.participants,
+                          totalStoredMessages: 0,
+                          deletedCount: 0,
+                          mediaCount: 0,
+                          importantCount: 0,
+                          connected: true,
+                        }))
+                  }
+                  apiBaseUrl={baileysUrl}
+                  isLoading={isGroupsLoading}
+                  isConnected={liveStatus.online}
+                  leavingGroupId={leavingGroupId}
+                  onRefresh={loadGroups}
+                  onOpenInbox={openGroupInbox}
+                  onLeaveGroup={async (g) => {
+                    await handleLeaveGroupFromServer({
+                      id: g.id,
+                      name: g.name,
+                      participants: g.participants,
+                      status: 'Active',
+                    });
+                  }}
+                />
+              </div>
+
               {/* Every Feature & Security Tool Separate Button Cards Hub on Home Page */}
               <HomeFeatureHub
                 isBn={isBn}
@@ -2844,6 +2931,28 @@ export default function App() {
               onRefresh={loadStorageOverview}
               onRunCleanup={handleRunServerCleanup}
               onSaveSettings={handleSaveCleanupSettings}
+            />
+          )}
+
+          {activePage === 'inbox' && (
+            <GroupInboxPage
+              isBn={isBn}
+              isConnected={liveStatus.online}
+              apiBaseUrl={baileysUrl}
+              adminToken={localStorage.getItem('wg_admin_token') || ''}
+              initialGroupId={inboxSelectedGroupId}
+              initialDeletedOnly={inboxInitialDeletedOnly}
+              callApi={callApi}
+              showNotification={showNotification}
+              onLeaveGroup={async (gid, gname) => {
+                await handleLeaveGroupFromServer({
+                  id: gid,
+                  name: gname,
+                  participants: 0,
+                  status: 'Active',
+                });
+              }}
+              onBack={() => navigateToPage('home')}
             />
           )}
 
@@ -5034,16 +5143,29 @@ export default function App() {
                               </td>
                               <td className="tabular-nums">{g.participants} {isBn ? 'সদস্য' : 'members'}</td>
                               <td>
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="status-tag good">
-                                    <CheckCircle2 size={12} style={{ display: 'inline', marginRight: '4px' }} />
-                                    {t.protectedBadge}
-                                  </span>
-                                  <span className="text-[11px] font-bold text-rose-600 whitespace-nowrap">
-                                    {isSelected ? (isBn ? 'নিশ্চিত করুন' : 'Selected') : isBn ? 'লিভ অপশন' : 'Leave'}
-                                  </span>
-                                </div>
-                              </td>
+                                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                                    <span className="status-tag good">
+                                      <CheckCircle2 size={12} style={{ display: 'inline', marginRight: '4px' }} />
+                                      {t.protectedBadge}
+                                    </span>
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          openGroupInbox(g.id);
+                                        }}
+                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-[11px] font-bold text-emerald-800 hover:bg-emerald-100 cursor-pointer whitespace-nowrap"
+                                      >
+                                        <Inbox size={11} />
+                                        <span>{isBn ? 'ইনবক্স' : 'Inbox'}</span>
+                                      </button>
+                                      <span className="text-[11px] font-bold text-rose-600 whitespace-nowrap">
+                                        {isSelected ? (isBn ? 'নিশ্চিত করুন' : 'Selected') : isBn ? 'লিভ অপশন' : 'Leave'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </td>
                             </tr>
                           );
                         })
@@ -5716,10 +5838,10 @@ export default function App() {
           <ShieldCheck size={16} /> {t.security}
         </button>
         <button
-          className={activePage === 'activity' ? 'active' : ''}
-          onClick={() => navigateToPage('activity')}
+          className={activePage === 'inbox' ? 'active' : ''}
+          onClick={() => navigateToPage('inbox')}
         >
-          <Trophy size={16} /> {isBn ? 'র‍্যাংক' : 'Rank'}
+          <Inbox size={16} /> {isBn ? 'ইনবক্স' : 'Inbox'}
         </button>
         <button
           className={activePage === 'maya' ? 'active' : ''}

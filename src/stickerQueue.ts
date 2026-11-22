@@ -23,6 +23,7 @@ import {
   safeSendMessage,
 } from './moderationEngine.ts';
 import { DATA_DIR, STICKER_QUEUE_DB_PATH } from './storagePaths.ts';
+import { markInboxMessageDeleted } from './inboxStore.ts';
 
 const QUEUE_DB_PATH = STICKER_QUEUE_DB_PATH;
 
@@ -769,6 +770,12 @@ async function processStickerTask(item: StickerQueueItem) {
     queueStats.totalVerifiedDeleted += 1;
     pushHistoryRecord({ ...item });
     incrementVerifiedDeletedStat(item.policy === 'restricted_user');
+    markInboxMessageDeleted(
+      item.groupId,
+      item.messageId,
+      'sticker_queue',
+      `স্টিকার প্রোটেকশন (${item.policy === 'restricted_user' ? 'রেস্ট্রিক্টেড ইউজার' : item.policy === 'anti_sticker' ? 'Anti-Sticker' : 'Sticker Spam'})`
+    ).catch(() => {});
     scheduleSaveQueue(false);
 
     if (hadDeniedBefore) {

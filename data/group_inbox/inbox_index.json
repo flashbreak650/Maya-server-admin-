@@ -1,0 +1,24 @@
+{
+  "settings": {
+    "mediaStorageLimitMb": 250,
+    "autoPruneOldNonImportantMedia": true,
+    "maxMessagesPerGroup": 2500
+  },
+  "groups": {
+    "999999999999999999@g.us": {
+      "id": "999999999999999999@g.us",
+      "name": "WhatsApp Group",
+      "participants": 0,
+      "totalStoredMessages": 4,
+      "deletedCount": 1,
+      "mediaCount": 0,
+      "importantCount": 1,
+      "connected": true,
+      "lastMessageId": "m4",
+      "lastMessageText": "🎙️ ভয়েস মেসেজ (14s)",
+      "lastMessageType": "voice",
+      "lastMessageSender": "Alice",
+      "lastMessageAt": 1700000004000
+    }
+  }
+}

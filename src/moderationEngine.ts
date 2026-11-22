@@ -4,6 +4,11 @@ import { downloadMediaMessage, jidNormalizedUser, type proto, type WASocket } fr
 import { getMayaMultimodalResponse, getMayaResponse, inspectImageSafetyWithAi } from './aiEngine.ts';
 import { DATA_DIR, MODERATION_DB_PATH } from './storagePaths.ts';
 import { recordWebServerProblemEvent } from './connectionDiagnostics.ts';
+import {
+  captureBotOutgoingGroupMessage,
+  markInboxMessageDeleted,
+  setInboxIdentityResolver,
+} from './inboxStore.ts';
 
 const DB_PATH = MODERATION_DB_PATH;
 const ACTIVE_PROBLEMS_PATH = path.join(DATA_DIR, 'active_problems.json');
@@ -840,6 +845,70 @@ export function setSocketGetter(getter: () => WASocket | null) {
 const contactNamesCache: Record<string, string> = {};
 const lidToPnUserMap = new Map<string, string>();
 const pnToLidUserMap = new Map<string, string>();
+
+setInboxIdentityResolver(({ groupId, senderJid, senderAltJid, pushName }) => {
+  const meta = getCachedGroupMetadataSync(groupId);
+  const groupName = meta?.subject || undefined;
+
+  rememberLidPnPair(senderJid, senderAltJid);
+
+  let resolvedPhone = '';
+  for (const cand of [senderAltJid, senderJid]) {
+    if (!cand) continue;
+    const cu = String(cand).split('@')[0].split(':')[0].trim();
+    if (!cu) continue;
+    if (String(cand).toLowerCase().includes('@lid')) {
+      const mapped = lidToPnUserMap.get(cu);
+      if (mapped) {
+        resolvedPhone = mapped;
+        break;
+      }
+    } else if (/^\d{8,15}$/.test(cu)) {
+      resolvedPhone = cu;
+      break;
+    }
+  }
+  if (!resolvedPhone && senderJid) {
+    resolvedPhone = String(senderJid).split('@')[0].split(':')[0].trim();
+  }
+
+  const candUsers = new Set<string>();
+  for (const cand of [senderJid, senderAltJid, resolvedPhone]) {
+    if (!cand) continue;
+    const cu = String(cand).split('@')[0].split(':')[0].trim();
+    if (cu) candUsers.add(cu);
+  }
+
+  let resolvedName = '';
+  for (const cu of candUsers) {
+    if (contactNamesCache[cu]) {
+      resolvedName = contactNamesCache[cu];
+      break;
+    }
+  }
+  if (!resolvedName && Array.isArray(meta?.participants)) {
+    for (const p of meta.participants) {
+      const pId = String((p as any).id || '').split('@')[0].split(':')[0];
+      const pPn = String((p as any).phoneNumber || '').split('@')[0].split(':')[0];
+      if (candUsers.has(pId) || (pPn && candUsers.has(pPn))) {
+        const pName = String((p as any).notify || (p as any).name || '').trim();
+        if (pName) {
+          resolvedName = pName;
+          break;
+        }
+      }
+    }
+  }
+  if (!resolvedName && pushName) {
+    resolvedName = String(pushName).trim();
+  }
+
+  return {
+    groupName,
+    senderName: resolvedName || undefined,
+    senderPhone: resolvedPhone || undefined,
+  };
+});
 
 export function normalizePhoneDigits(raw?: string | null): string {
   if (!raw) return '';
@@ -1787,7 +1856,20 @@ export async function safeSendMessage(
       }
     }
 
-    await sock.sendMessage(jid, content, options);
+    const sentMsg = await sock.sendMessage(jid, content, options);
+
+    if (jid.endsWith('@g.us') && !content?.delete) {
+      const outText = String(content?.text || content?.caption || '').trim();
+      if (outText) {
+        captureBotOutgoingGroupMessage({
+          groupId: jid,
+          groupName: getCachedGroupMetadataSync(jid)?.subject,
+          messageId: sentMsg?.key?.id || undefined,
+          senderJid: sock?.user?.id,
+          text: outText,
+        });
+      }
+    }
 
     if (shouldShowTyping) {
       sock.sendPresenceUpdate('paused', jid).catch(() => {});
@@ -4195,6 +4277,14 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
         db.stats.deletedMessages++;
         db.stats.restrictedMessagesBlocked = (db.stats.restrictedMessagesBlocked || 0) + 1;
         saveDatabase();
+        if (msg.key?.id) {
+          markInboxMessageDeleted(
+            remoteJid,
+            msg.key.id,
+            'moderation_engine',
+            'রেস্ট্রিক্টেড ইউজারের মেসেজ অটো ডিলিট'
+          ).catch(() => {});
+        }
       } else if (metaKnown && !isBotAdmin) {
         console.warn(`[Individual Mute Warn] Bot lacks admin delete permission in "${groupSubject}".`);
       }
@@ -4238,6 +4328,14 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
         const deleted = await deleteMessageSafely(sock, remoteJid, msg, matchedSenderId);
         if (deleted) {
           db.stats.deletedMessages++;
+          if (msg.key?.id) {
+            markInboxMessageDeleted(
+              remoteJid,
+              msg.key.id,
+              'moderation_engine',
+              'স্টিকার স্প্যাম অটো ডিলিট'
+            ).catch(() => {});
+          }
         }
 
         // 2. Restrict ONLY THIS MEMBER for 10 minutes (Do NOT lock group settings for other members)
@@ -4390,6 +4488,14 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
     const deleteSuccessful = await deleteMessageSafely(sock, remoteJid, msg, matchedSenderId, metaKnown ? isBotAdmin : undefined);
     if (deleteSuccessful) {
       db.stats.deletedMessages++;
+      if (msg.key?.id) {
+        markInboxMessageDeleted(
+          remoteJid,
+          msg.key.id,
+          'moderation_engine',
+          noticeReason || violationType || 'নিয়ম ভঙ্গ মডারেশন ডিলিট'
+        ).catch(() => {});
+      }
     } else if (metaKnown && !isBotAdmin) {
       console.warn(`[Moderation Warn] Cannot delete message in "${groupSubject}" because bot is NOT Group Admin.`);
       reportServerProblem(

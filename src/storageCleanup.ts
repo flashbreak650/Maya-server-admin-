@@ -9,12 +9,14 @@ import {
   AUTH_SECRET_PATH,
   COMPANION_SESSIONS_DIR,
   DATA_DIR,
+  INBOX_DIR,
   MODERATION_DB_PATH,
   PRIMARY_SESSIONS_DIR,
   PROJECT_ROOT,
   STICKER_QUEUE_DB_PATH,
   isPersistentVolumeConfigured,
 } from './storagePaths.ts';
+import { enforceInboxMediaStorageLimit } from './inboxStore.ts';
 import {
   pruneExpiredRuntimeCaches,
   reportServerProblem,
@@ -227,6 +229,7 @@ function getProtectedRoots(): string[] {
     path.resolve(DATA_DIR, 'active_problems.json.tmp'),
     path.resolve(CLEANUP_STATE_PATH),
     path.resolve(`${CLEANUP_STATE_PATH}.tmp`),
+    path.resolve(INBOX_DIR),
     path.resolve(ERROR_LOGS_DIR),
     path.resolve(PROJECT_ROOT, 'src'),
     path.resolve(PROJECT_ROOT, 'node_modules'),
@@ -263,6 +266,7 @@ export function isProtectedPath(targetPath: string): boolean {
     name.startsWith('connection_diagnostics') ||
     name.startsWith('active_problems') ||
     name.startsWith('cleanup_state') ||
+    name.startsWith('inbox_index') ||
     name === '.auth_secret' ||
     name.startsWith('.env') ||
     name.startsWith('error-')
@@ -962,6 +966,16 @@ export async function runCleanup(
       filesDeleted += orphanRes.filesDeleted;
       directBytesFreed += orphanRes.bytesFreed;
       skippedProtectedCount += orphanRes.protectedSkipped;
+
+      // Safe quota-aware Inbox media cleanup (strictly preserves important messages & text/deleted history DB)
+      const inboxPrune = await enforceInboxMediaStorageLimit(0).catch(() => ({
+        filesRemoved: 0,
+        bytesFreed: 0,
+        protectedImportantSkipped: 0,
+      }));
+      filesDeleted += inboxPrune.filesRemoved;
+      directBytesFreed += inboxPrune.bytesFreed;
+      skippedProtectedCount += inboxPrune.protectedImportantSkipped;
     }
 
     // 3. Duplicate Temporary Files Scan & Deduplication
