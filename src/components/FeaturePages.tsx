@@ -683,18 +683,7 @@ export function HomeFeatureHub({
       icon: <Plug size={18} />,
       onClick: () => onNavigate('integrations'),
     },
-    {
-      id: 'inbox',
-      title: isBn ? 'গ্রুপ ইনবক্স ও মিডিয়া' : 'Group Inbox & Media',
-      desc: isBn ? 'রিয়েল-টাইম গ্রুপ চ্যাট, ছবি, ভিডিও, ভয়েস ও ডিলিটেড হিস্ট্রি' : 'Live group messages, media, voice & deleted log',
-      keywords: 'inbox chat group message image video voice sticker document deleted ইনবক্স চ্যাট',
-      statusText: isBn ? `${groupsCount}টি গ্রুপ ইনবক্স` : `${groupsCount} inboxes`,
-      isOn: groupsCount > 0,
-      iconBg: 'bg-emerald-50',
-      iconText: 'text-emerald-700',
-      icon: <Inbox size={18} />,
-      onClick: () => onNavigate('inbox'),
-    },
+
     {
       id: 'groups',
       title: isBn ? 'কানেক্টেড গ্রুপ' : 'Connected Groups',

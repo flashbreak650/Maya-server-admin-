@@ -5057,11 +5057,43 @@ export default function App() {
                           return (
                             <tr
                               key={g.id}
+                              onMouseDown={() => {
+                                const t = setTimeout(() => {
+                                  openGroupInbox(g.id);
+                                  showNotification(isBn ? '৫ সেকেন্ড হোল্ড করায় গ্রুপ ইনবক্স ওপেন হলো!' : 'Group inbox opened via 5s hold!');
+                                }, 5000);
+                                (window as any).__waguard_hold_timer = t;
+                              }}
+                              onMouseUp={() => {
+                                if ((window as any).__waguard_hold_timer) {
+                                  clearTimeout((window as any).__waguard_hold_timer);
+                                  (window as any).__waguard_hold_timer = null;
+                                }
+                              }}
+                              onMouseLeave={() => {
+                                if ((window as any).__waguard_hold_timer) {
+                                  clearTimeout((window as any).__waguard_hold_timer);
+                                  (window as any).__waguard_hold_timer = null;
+                                }
+                              }}
+                              onTouchStart={() => {
+                                const t = setTimeout(() => {
+                                  openGroupInbox(g.id);
+                                  showNotification(isBn ? '৫ সেকেন্ড হোল্ড করায় গ্রুপ ইনবক্স ওপেন হলো!' : 'Group inbox opened via 5s hold!');
+                                }, 5000);
+                                (window as any).__waguard_hold_timer = t;
+                              }}
+                              onTouchEnd={() => {
+                                if ((window as any).__waguard_hold_timer) {
+                                  clearTimeout((window as any).__waguard_hold_timer);
+                                  (window as any).__waguard_hold_timer = null;
+                                }
+                              }}
                               onClick={() => setSelectedGroupForLeave(isSelected ? null : g)}
                               className={`cursor-pointer transition-colors ${
                                 isSelected ? 'bg-rose-50/70' : 'hover:bg-slate-50'
                               }`}
-                              title={isBn ? 'ক্লিক করে সার্ভার থেকে লিভ নেওয়ার অপশন দেখুন' : 'Click to leave group from server'}
+                              title={isBn ? 'ক্লিক করে লিভ অপশন · ৫ সেকেন্ড ধরে রাখলে ইনবক্স খুলবে' : 'Click for settings · Hold for 5s to open inbox'}
                             >
                               <td>
                                 <b>{g.name}</b>
@@ -5069,27 +5101,14 @@ export default function App() {
                               </td>
                               <td className="tabular-nums">{g.participants} {isBn ? 'সদস্য' : 'members'}</td>
                               <td>
-                                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                                  <div className="flex items-center justify-between gap-2">
                                     <span className="status-tag good">
                                       <CheckCircle2 size={12} style={{ display: 'inline', marginRight: '4px' }} />
                                       {t.protectedBadge}
                                     </span>
-                                    <div className="flex items-center gap-2">
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          openGroupInbox(g.id);
-                                        }}
-                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-[11px] font-bold text-emerald-800 hover:bg-emerald-100 cursor-pointer whitespace-nowrap"
-                                      >
-                                        <Inbox size={11} />
-                                        <span>{isBn ? 'ইনবক্স' : 'Inbox'}</span>
-                                      </button>
-                                      <span className="text-[11px] font-bold text-rose-600 whitespace-nowrap">
-                                        {isSelected ? (isBn ? 'নিশ্চিত করুন' : 'Selected') : isBn ? 'লিভ অপশন' : 'Leave'}
-                                      </span>
-                                    </div>
+                                    <span className="text-[11px] font-bold text-rose-600 whitespace-nowrap">
+                                      {isSelected ? (isBn ? 'নিশ্চিত করুন' : 'Selected') : isBn ? 'লিভ অপশন' : 'Leave'}
+                                    </span>
                                   </div>
                                 </td>
                             </tr>
