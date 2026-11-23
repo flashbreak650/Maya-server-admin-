@@ -109,6 +109,7 @@ import {
   appendDebugLog,
   appendErrorLog,
   clearAllHistoriesNow,
+  clearStorageAlerts,
   getStorageCleanupOverview,
   runCleanup,
   startCleanupScheduler,
@@ -2366,16 +2367,38 @@ app.post('/api/server/cleanup/settings', async (req: Request, res: Response) => 
 
 app.post('/api/server/cleanup/clear-histories', async (_req: Request, res: Response) => {
   try {
-    const cleared = clearAllHistoriesNow();
+    const cleared = await clearAllHistoriesNow();
     const overview = await getStorageCleanupOverview();
     res.json({
       success: true,
       cleared,
       overview,
-      message: `স্টিকার (${cleared.stickerHistoryCleared}), ওয়ার্নিং (${cleared.warningsCleared}) ও রিমুভ/অ্যাক্টিভিটি (${cleared.activityLogsCleared}) হিস্ট্রি ক্লিয়ার করা হয়েছে!`,
+      message: `স্টিকার (${cleared.stickerHistoryCleared}), ওয়ার্নিং (${cleared.warningsCleared}) ও রিমুভ/অ্যাক্টিভিটি (${cleared.activityLogsCleared}) হিস্ট্রি এবং ক্যাশ সম্পূর্ণ ক্লিয়ার করা হয়েছে!`,
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || 'Could not clear histories' });
+  }
+});
+
+app.post('/api/server/cleanup/clear-alerts', async (_req: Request, res: Response) => {
+  try {
+    const result = clearStorageAlerts();
+    for (const cat of ['storage_capacity_95', 'storage_capacity_85', 'storage_capacity_70']) {
+      await resolveServerProblem(cat, {
+        details: 'বস কর্তৃক স্টোরেজ সতর্কবার্তা ম্যানুয়ালি রিসেট ও ক্লিয়ার করা হয়েছে।',
+        thanksNote: 'স্টোরেজ সতর্কতা সফলভাবে ক্লিয়ার করা হয়েছে।',
+        sock: currentSock,
+      }).catch(() => {});
+    }
+    const overview = await getStorageCleanupOverview();
+    res.json({
+      success: true,
+      clearedCount: result.clearedCount,
+      overview,
+      message: `${result.clearedCount}টি স্টোরেজ সতর্কবার্তা লগ ক্লিয়ার করা হয়েছে!`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Could not clear alerts' });
   }
 });
 

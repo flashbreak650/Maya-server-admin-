@@ -211,6 +211,7 @@ export interface RestrictedUser {
   senderPhone: string;
   restrictedAt: number;
   expiresAt: number;
+  durationMinutes?: number;
   reason: string;
   violationCount: number;
 }
@@ -1329,11 +1330,16 @@ export function isUserRestricted(
       reason: 'সাময়িক রেস্ট্রিকশনের মেয়াদ শেষ হয়েছে (Auto Lifted)',
     });
 
+    const durMins =
+      restriction.durationMinutes ||
+      Math.max(1, Math.round((restriction.expiresAt - restriction.restrictedAt) / 60000)) ||
+      10;
+
     if (globalSocketGetter) {
       const sock = globalSocketGetter();
       if (sock && sock.authState?.creds?.registered) {
         safeSendMessage(sock, groupId, {
-          text: `🔔 *মেসেজিং বিরতি সমাপ্ত*\n\n👤 @${restriction.senderPhone}\n✅ আপনার সাময়িক নীরবতার সময় শেষ হয়েছে। এখন থেকে পুনরায় গ্রুপে মেসেজ পাঠাতে পারবেন।`,
+          text: `🔔 *মেসেজিং বিরতি সমাপ্ত*\n\n👤 @${restriction.senderPhone}\n✅ আপনার ${durMins} মিনিটের সাময়িক নীরবতার সময় শেষ হয়েছে। এখন থেকে পুনরায় গ্রুপে মেসেজ পাঠাতে পারবেন।`,
           mentions: [restriction.senderJid],
         }).catch(() => {});
       }
@@ -1374,6 +1380,7 @@ export function restrictUser(
     senderPhone,
     restrictedAt: now,
     expiresAt,
+    durationMinutes: Math.max(1, durationMinutes),
     reason,
     violationCount: prevCount + 1,
   };
@@ -1438,11 +1445,15 @@ export function getActiveRestrictedUsers(): Array<RestrictedUser & { remainingSe
     if (now >= user.expiresAt) {
       delete db.restrictedUsers[key];
       saveDatabase();
+      const durMins =
+        user.durationMinutes ||
+        Math.max(1, Math.round((user.expiresAt - user.restrictedAt) / 60000)) ||
+        10;
       if (globalSocketGetter) {
         const sock = globalSocketGetter();
         if (sock && sock.authState?.creds?.registered) {
           safeSendMessage(sock, user.groupId, {
-            text: `✅ WAGuard Security Update\n\n@${user.senderPhone}-এর ১০ মিনিটের Temporary Restriction শেষ হয়েছে। তিনি এখন আবার স্বাভাবিকভাবে গ্রুপে মেসেজ করতে পারবেন।`,
+            text: `✅ WAGuard Security Update\n\n@${user.senderPhone}-এর ${durMins} মিনিটের Temporary Restriction শেষ হয়েছে। তিনি এখন আবার স্বাভাবিকভাবে গ্রুপে মেসেজ করতে পারবেন।`,
             mentions: [user.senderJid],
           }).catch(() => {});
         }
@@ -1510,13 +1521,17 @@ export function startRestrictedUsersMonitor(sockGetter?: () => WASocket | null) 
           reason: 'সাময়িক রেস্ট্রিকশনের মেয়াদ শেষ হয়েছে (Auto Lifted)',
         });
 
+        const durMins =
+          user.durationMinutes ||
+          Math.max(1, Math.round((user.expiresAt - user.restrictedAt) / 60000)) ||
+          10;
         const activeGetter = sockGetter || globalSocketGetter;
         if (activeGetter) {
           const sock = activeGetter();
           if (sock && sock.authState?.creds?.registered) {
             try {
               await safeSendMessage(sock, user.groupId, {
-                text: `✅ WAGuard Security Update\n\n@${user.senderPhone}-এর ১০ মিনিটের Temporary Restriction শেষ হয়েছে। তিনি এখন আবার স্বাভাবিকভাবে গ্রুপে মেসেজ করতে পারবেন।`,
+                text: `✅ WAGuard Security Update\n\n@${user.senderPhone}-এর ${durMins} মিনিটের Temporary Restriction শেষ হয়েছে। তিনি এখন আবার স্বাভাবিকভাবে গ্রুপে মেসেজ করতে পারবেন।`,
                 mentions: [user.senderJid],
               });
             } catch (e) {}

@@ -1103,6 +1103,20 @@ export default function App() {
     }
   };
 
+  const handleClearStorageAlerts = async () => {
+    try {
+      const res = await callApi('/api/server/cleanup/clear-alerts', 'POST');
+      if (res?.overview?.snapshot) {
+        setStorageOverview(res.overview);
+      } else {
+        await loadStorageOverview();
+      }
+      showNotification(res?.message || (isBn ? 'স্টোরেজ সতর্কবার্তা লগ ক্লিয়ার করা হয়েছে!' : 'Storage alerts cleared!'));
+    } catch (err: any) {
+      showNotification((isBn ? 'ব্যর্থ: ' : 'Failed: ') + err.message);
+    }
+  };
+
   const loadVoiceOverview = async () => {
     setIsVoiceLoading(true);
     try {
@@ -3009,6 +3023,7 @@ export default function App() {
               onRunCleanup={handleRunServerCleanup}
               onSaveSettings={handleSaveCleanupSettings}
               onClearHistoriesNow={handleClearAllHistoriesNow}
+              onClearAlerts={handleClearStorageAlerts}
             />
           )}
 

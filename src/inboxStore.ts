@@ -1708,12 +1708,13 @@ export async function enforceInboxMediaStorageLimit(forcePrunePercent = 0): Prom
   }
 
   const limitBytes = (inboxIndex.settings.mediaStorageLimitMb || 250) * 1024 * 1024;
+  const initialMediaBytes = measureFolderBytesSync(INBOX_MEDIA_DIR).bytes;
+
   const targetMaxBytes =
     forcePrunePercent > 0
-      ? Math.max(0, Math.floor(limitBytes * (1 - Math.min(0.95, forcePrunePercent / 100))))
+      ? Math.max(0, Math.floor(initialMediaBytes * (1 - Math.min(1, forcePrunePercent / 100))))
       : Math.floor(limitBytes * 0.85);
 
-  const initialMediaBytes = measureFolderBytesSync(INBOX_MEDIA_DIR).bytes;
   if (forcePrunePercent <= 0 && initialMediaBytes <= limitBytes) {
     return { filesRemoved: 0, bytesFreed: 0, protectedImportantSkipped: 0 };
   }

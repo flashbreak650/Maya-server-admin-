@@ -62,6 +62,9 @@ export interface StorageCleanupOverview {
     measuredAt: number;
     dataDir: string;
     persistentVolumeDetected: boolean;
+    isContainerOverlay?: boolean;
+    appDataBytes?: number;
+    inboxMediaBytes?: number;
     disk: {
       totalBytes: number;
       usedBytes: number;
@@ -94,6 +97,9 @@ export interface StorageCleanupOverview {
       protectedErrorLogsCount: number;
       protectedDatabaseBytes: number;
       protectedSessionsBytes: number;
+      appDataBytes?: number;
+      inboxMediaBytes?: number;
+      inboxMediaFiles?: number;
     };
     totalReclaimableBytes: number;
     protectedSummary: {
@@ -188,6 +194,7 @@ interface StorageCleanupPageProps {
     historyRetentionHours?: number;
   }) => void;
   onClearHistoriesNow?: () => void;
+  onClearAlerts?: () => void;
 }
 
 export function StorageCleanupPage({
@@ -200,6 +207,7 @@ export function StorageCleanupPage({
   onRunCleanup,
   onSaveSettings,
   onClearHistoriesNow,
+  onClearAlerts,
 }: StorageCleanupPageProps) {
   const [autoEnabled, setAutoEnabled] = React.useState(true);
   const [dailyTempEnabled, setDailyTempEnabled] = React.useState(true);
@@ -236,43 +244,57 @@ export function StorageCleanupPage({
   const bd = snap?.breakdown;
   const usedPct = disk?.usedPercent ?? 0;
 
-  const progressColor =
-    usedPct >= 95
-      ? 'bg-rose-600'
-      : usedPct >= 85
-      ? 'bg-amber-600'
-      : usedPct >= 70
-      ? 'bg-amber-500'
-      : 'bg-[#087f55]';
+  const alertLevel = disk?.alertLevel || 'normal';
+  const isCritical = alertLevel === 'critical_95';
+  const isWarning = alertLevel === 'warning_85';
+  const isNotice = alertLevel === 'notice_70';
 
-  const statusText =
-    usedPct >= 95
-      ? isBn
-        ? 'সংকটজনক (≥95%)'
-        : 'Critical (≥95%)'
-      : usedPct >= 85
-      ? isBn
-        ? 'উচ্চ ব্যবহার (≥85%)'
-        : 'High Warning (≥85%)'
-      : usedPct >= 70
-      ? isBn
-        ? 'সতর্ক সীমা (≥70%)'
-        : 'Notice (≥70%)'
-      : isBn
-      ? 'স্বাভাবিক ও সুস্থ'
-      : 'Healthy';
+  const progressColor = isCritical
+    ? 'bg-rose-600'
+    : isWarning
+    ? 'bg-amber-600'
+    : isNotice
+    ? 'bg-amber-500'
+    : 'bg-[#087f55]';
 
-  const statusColor =
-    usedPct >= 95
-      ? 'text-rose-700'
-      : usedPct >= 85
-      ? 'text-amber-700'
-      : usedPct >= 70
-      ? 'text-amber-700'
-      : 'text-emerald-700';
+  const statusText = isCritical
+    ? isBn
+      ? 'সংকটজনক স্পেস (<6MB ফ্রি)'
+      : 'Critical (<6MB free)'
+    : isWarning
+    ? isBn
+      ? 'উচ্চ ব্যবহার (<12MB ফ্রি)'
+      : 'Warning (<12MB free)'
+    : isNotice
+    ? isBn
+      ? 'সতর্ক সীমা (<22MB ফ্রি)'
+      : 'Notice (<22MB free)'
+    : isBn
+    ? 'স্বাভাবিক ও নিরাপদ'
+    : 'Healthy & Secure';
+
+  const statusColor = isCritical
+    ? 'text-rose-700'
+    : isWarning || isNotice
+    ? 'text-amber-700'
+    : 'text-emerald-700';
 
   const cleanableRows = bd
     ? [
+        {
+          label: isBn ? 'বট অ্যাপ ডাটা ডিরেক্টরি (/app/data)' : 'Bot App Data Directory (/app/data)',
+          count: null,
+          bytes: bd.appDataBytes ?? 0,
+          policy: isBn ? 'বটের নিজস্ব ডাটাবেজ ও ফাইল' : 'Bot Application Data',
+          isProtected: true,
+        },
+        {
+          label: isBn ? 'ইনবক্স মিডিয়া ফাইল (Inbox Media)' : 'Inbox Saved Media Files',
+          count: bd.inboxMediaFiles ?? 0,
+          bytes: bd.inboxMediaBytes ?? 0,
+          policy: isBn ? 'ফুল ক্লিনআপে ৫০% পুরোনো প্রুন' : 'Pruned if exceeding limit',
+          isProtected: false,
+        },
         {
           label: isBn ? 'অস্থায়ী ক্যাশ (Server & App Cache)' : 'App & Runtime Disk Cache',
           count: bd.cleanableCacheFiles,
@@ -288,7 +310,7 @@ export function StorageCleanupPage({
           isProtected: false,
         },
         {
-          label: isBn ? 'টেম্পোরারি মিডিয়া (Temp Media)' : 'Temporary Media Files',
+          label: isBn ? 'টেম্পোরারি মিডিয়া (Temp Media & Voice STT)' : 'Temporary Media Files',
           count: bd.tempMediaFiles,
           bytes: bd.tempMediaBytes,
           policy: isBn ? 'অব্যবহৃত হলে পরিষ্কার' : 'Cleaned when unused',
@@ -372,13 +394,16 @@ export function StorageCleanupPage({
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 mb-4">
         <div className="bg-white rounded-xl border border-slate-200 p-3.5">
           <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500 mb-1">
-            <span>{isBn ? 'ডিস্ক ব্যবহার' : 'Disk Usage'}</span>
+            <span>{isBn ? 'বট ডাটা ও স্বাস্থ্য' : 'Bot Data & Storage'}</span>
             <HardDrive size={14} className="text-slate-400" />
           </div>
           <div className="text-lg sm:text-xl font-extrabold text-slate-900 tabular-nums">
-            {disk ? `${usedPct.toFixed(1)}%` : '—'}
+            {snap?.appDataBytes !== undefined ? formatBytesHuman(snap.appDataBytes) : (disk ? `${usedPct.toFixed(1)}%` : '—')}
           </div>
           <div className={`text-[11px] font-bold mt-0.5 ${statusColor}`}>{statusText}</div>
+          <div className="text-[10px] text-slate-400 mt-0.5 tabular-nums">
+            {disk ? (isBn ? `ফ্রি স্পেস: ${formatBytesHuman(disk.freeBytes)}` : `Free: ${formatBytesHuman(disk.freeBytes)}`) : ''}
+          </div>
         </div>
 
         <div className="bg-white rounded-xl border border-slate-200 p-3.5">
@@ -430,13 +455,13 @@ export function StorageCleanupPage({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
           <div>
             <h2 className="text-sm font-extrabold text-slate-900">
-              {isBn ? 'লাইভ সার্ভার স্টোরেজ মনিটর (৭০% / ৮৫% / ৯৫% অ্যালার্ট)' : 'Live Storage Monitor (70% / 85% / 95% Alerts)'}
+              {isBn ? 'লাইভ সার্ভার স্টোরেজ মনিটর' : 'Live Server Storage Monitor'}
             </h2>
             <p className="text-xs text-slate-500 mt-0.5 tabular-nums">
               {disk
                 ? isBn
-                  ? `ব্যবহৃত: ${formatBytesHuman(disk.usedBytes)} / মোট: ${formatBytesHuman(disk.totalBytes)} · খালি আছে: ${formatBytesHuman(disk.freeBytes)} · পরিষ্কারযোগ্য: ${formatBytesHuman(snap?.totalReclaimableBytes)}`
-                  : `Used: ${formatBytesHuman(disk.usedBytes)} / Total: ${formatBytesHuman(disk.totalBytes)} · Free: ${formatBytesHuman(disk.freeBytes)} · Reclaimable: ${formatBytesHuman(snap?.totalReclaimableBytes)}`
+                  ? `বট ডাটা: ${formatBytesHuman(snap?.appDataBytes)} · কন্টেইনার মোট: ${formatBytesHuman(disk.totalBytes)} · খালি আছে: ${formatBytesHuman(disk.freeBytes)} · পরিষ্কারযোগ্য: ${formatBytesHuman(snap?.totalReclaimableBytes)}`
+                  : `Bot Data: ${formatBytesHuman(snap?.appDataBytes)} · Container Total: ${formatBytesHuman(disk.totalBytes)} · Free: ${formatBytesHuman(disk.freeBytes)} · Reclaimable: ${formatBytesHuman(snap?.totalReclaimableBytes)}`
                 : isBn
                 ? 'স্টোরেজ তথ্য লোড হচ্ছে...'
                 : 'Loading storage metrics...'}
@@ -466,7 +491,19 @@ export function StorageCleanupPage({
         <div className="relative w-full h-3 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
           <div
             className={`h-full transition-all duration-300 ${progressColor}`}
-            style={{ width: `${Math.min(100, Math.max(usedPct > 0 ? 1.5 : 0, usedPct))}%` }}
+            style={{
+              width: `${
+                snap?.isContainerOverlay
+                  ? isCritical
+                    ? 96
+                    : isWarning
+                    ? 85
+                    : isNotice
+                    ? 70
+                    : 35
+                  : Math.min(100, Math.max(usedPct > 0 ? 1.5 : 0, usedPct))
+              }%`,
+            }}
           />
           <div className="absolute top-0 bottom-0 left-[70%] w-px bg-amber-500/70" title="70% Notice" />
           <div className="absolute top-0 bottom-0 left-[85%] w-px bg-orange-600/80" title="85% Warning" />
@@ -477,7 +514,11 @@ export function StorageCleanupPage({
           <span>
             {snap
               ? `${isBn ? 'সার্ভার ডাটা পথ' : 'Data Path'}: ${snap.dataDir} · ${
-                  snap.persistentVolumeDetected
+                  snap.isContainerOverlay
+                    ? isBn
+                      ? 'কন্টেইনার লেয়ার (Node.js সহ ৪১৬ MB সিস্টেম)'
+                      : 'Container Layer (OS & Runtime Packages)'
+                    : snap.persistentVolumeDetected
                     ? isBn
                       ? 'Persistent Volume সক্রিয়'
                       : 'Persistent Volume Active'
@@ -738,11 +779,23 @@ export function StorageCleanupPage({
       {/* Storage Threshold Alerts (70%, 85%, 95%) */}
       {overview?.alerts && overview.alerts.length > 0 && (
         <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
-          <div className="flex items-center gap-2 mb-2.5">
-            <AlertTriangle size={15} className="text-amber-600" />
-            <h3 className="text-sm font-extrabold text-slate-900">
-              {isBn ? 'স্টোরেজ সতর্কবার্তা লগ (৭০% / ৮৫% / ৯৫%)' : 'Storage Threshold Alert Log (70% / 85% / 95%)'}
-            </h3>
+          <div className="flex items-center justify-between gap-2 mb-2.5">
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={15} className="text-amber-600" />
+              <h3 className="text-sm font-extrabold text-slate-900">
+                {isBn ? 'স্টোরেজ সতর্কবার্তা লগ (৭০% / ৮৫% / ৯৫%)' : 'Storage Threshold Alert Log (70% / 85% / 95%)'}
+              </h3>
+            </div>
+            {onClearAlerts && (
+              <button
+                type="button"
+                onClick={onClearAlerts}
+                className="inline-flex items-center gap-1 min-h-[30px] px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 border border-rose-200 text-[11px] font-bold text-rose-800 transition-colors cursor-pointer"
+              >
+                <Trash2 size={12} />
+                <span>{isBn ? 'অ্যালার্ট লগ মুছুন' : 'Clear Alerts'}</span>
+              </button>
+            )}
           </div>
           <div className="space-y-2">
             {overview.alerts.slice(0, 8).map((al) => (
