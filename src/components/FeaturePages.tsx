@@ -180,22 +180,22 @@ interface SubPageHeaderProps {
 
 function SubPageHeader({ title, subtitle, isBn, onBack, rightAction }: SubPageHeaderProps) {
   return (
-    <div className="mb-4 pb-3 border-b border-slate-200">
-      <div className="flex items-center justify-between gap-2 mb-2.5">
+    <div className="mb-3 pb-2.5 border-b border-emerald-950/[0.06]">
+      <div className="flex items-center justify-between gap-2 mb-2">
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-2 rounded-xl bg-white border border-slate-200 hover:border-emerald-400 text-xs font-bold text-slate-700 transition-colors cursor-pointer"
+          className="sub-back-btn"
         >
-          <ArrowLeft size={14} className="text-emerald-700" />
+          <ArrowLeft size={12} className="text-[#087f55]" />
           <span>{isBn ? 'হোম পেজ' : 'Back Home'}</span>
         </button>
         {rightAction}
       </div>
-      <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-snug">
+      <h1 className="text-[15px] sm:text-[17px] font-extrabold text-[#0f291e] tracking-tight leading-snug">
         {title}
       </h1>
-      <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 leading-relaxed">
+      <p className="text-[10.5px] sm:text-[11px] text-[#5f7368] mt-0.5 leading-relaxed">
         {subtitle}
       </p>
     </div>
@@ -223,16 +223,16 @@ export function AdminLockScreen({
   const [showPin, setShowPin] = useState(false);
 
   return (
-    <div className="min-h-screen w-full bg-[#f5f7f6] flex items-center justify-center p-4">
-      <div className="w-full max-w-sm bg-white rounded-2xl border border-slate-200 shadow-lg p-6">
+    <div className="min-h-screen w-full bg-[#f4f8f5] flex items-center justify-center p-4">
+      <div className="w-full max-w-sm bg-white rounded-[24px] border border-emerald-950/[0.08] shadow-[0_14px_40px_rgba(10,56,36,0.08)] p-6">
         <div className="flex flex-col items-center text-center mb-5">
-          <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center border border-emerald-200 mb-3">
+          <div className="w-12 h-12 rounded-[15px] bg-[#e9f7f0] text-[#087f55] flex items-center justify-center mb-3">
             <Lock size={22} />
           </div>
-          <h1 className="text-lg font-extrabold text-slate-900">
+          <h1 className="text-lg font-extrabold text-[#0f291e] tracking-tight">
             {isBn ? 'WAGuard অ্যাডমিন লক' : 'WAGuard Admin Lock'}
           </h1>
-          <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+          <p className="text-xs text-[#5f7368] mt-1 leading-relaxed">
             {isBn
               ? 'ড্যাশবোর্ডে প্রবেশ করতে আপনার গোপন পিন কোড দিন'
               : 'Enter your admin PIN to unlock the console'}
@@ -770,30 +770,33 @@ export function HomeFeatureHub({
   const visibleFeatures = featureCards.filter(matchesSearch);
 
   const renderCardGrid = (cards: HubCard[]) => (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 sm:gap-3">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5">
       {cards.map((card) => (
         <button
           key={card.id}
           type="button"
           onClick={card.onClick}
-          className="group text-left min-h-[116px] p-3.5 bg-white rounded-2xl border border-slate-200 hover:border-emerald-400 active:scale-[0.98] transition-all flex flex-col justify-between cursor-pointer shadow-2xs"
+          className="group text-left min-h-[98px] p-3 sm:p-3.5 bg-white rounded-[17px] border border-emerald-950/[0.07] shadow-[0_3px_14px_rgba(10,56,36,0.035)] hover:border-emerald-500/45 hover:shadow-[0_8px_22px_rgba(8,127,85,0.08)] hover:-translate-y-0.5 active:scale-[0.985] transition-all duration-200 flex flex-col justify-between cursor-pointer"
         >
           <div>
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <span className={`w-9 h-9 rounded-xl ${card.iconBg} ${card.iconText} flex items-center justify-center shrink-0`}>
+            <div className="flex items-center justify-between gap-1.5 mb-2">
+              <span className={`w-8 h-8 rounded-[10px] ${card.iconBg} ${card.iconText} flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-105 [&>svg]:w-4 [&>svg]:h-4`}>
                 {card.icon}
               </span>
-              <ArrowRight size={14} className="text-slate-300 group-hover:text-emerald-600 transition-colors shrink-0" />
+              <ArrowRight size={12} className="text-slate-300 group-hover:text-[#087f55] group-hover:translate-x-0.5 transition-all shrink-0" />
             </div>
-            <div className="text-xs sm:text-[13px] font-extrabold text-slate-900 leading-snug">
+            <div className="text-[11.5px] sm:text-[12.5px] font-extrabold text-[#0f291e] leading-snug tracking-tight">
               {card.title}
             </div>
-            <p className="text-[10.5px] text-slate-500 mt-1 leading-snug line-clamp-2">
+            <p className="text-[10px] text-[#5f7368] mt-0.5 leading-snug line-clamp-1 sm:line-clamp-2">
               {card.desc}
             </p>
           </div>
-          <div className="mt-2.5 pt-2 border-t border-slate-100 text-[10.5px] font-bold tabular-nums flex items-center justify-between gap-1">
-            <span className={card.isOn ? 'text-emerald-700' : 'text-slate-400'}>{card.statusText}</span>
+          <div className="mt-2 pt-1.5 border-t border-emerald-950/[0.06] text-[10px] font-bold tabular-nums flex items-center justify-between gap-1">
+            <span className={`inline-flex items-center gap-1.5 truncate ${card.isOn ? 'text-[#087f55]' : 'text-slate-400'}`}>
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${card.isOn ? 'bg-[#10b975]' : 'bg-slate-300'}`} />
+              <span className="truncate">{card.statusText}</span>
+            </span>
           </div>
         </button>
       ))}
@@ -801,11 +804,11 @@ export function HomeFeatureHub({
   );
 
   return (
-    <div className="mt-5 space-y-5">
+    <div className="mt-4 space-y-4">
       {/* Quick Search Box for Easy Tool & Feature Discovery */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-3 shadow-2xs">
+      <div className="bg-white rounded-[16px] border border-emerald-950/[0.07] p-2.5 shadow-[0_4px_16px_rgba(10,56,36,0.035)]">
         <div className="relative flex items-center">
-          <Search size={15} className="absolute left-3 text-emerald-700 pointer-events-none" />
+          <Search size={14} className="absolute left-3 text-[#087f55] pointer-events-none" />
           <input
             type="text"
             value={searchQuery}
@@ -815,16 +818,16 @@ export function HomeFeatureHub({
                 ? 'টুলস খুঁজুন (যেমন: Carrom, স্টিকার, গালি, বস, সালাম, নাইট মোড)...'
                 : 'Search any tool (e.g. Carrom, sticker, badword, boss, salam, night)...'
             }
-            className="w-full min-h-[40px] pl-9 pr-9 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-emerald-500 outline-none text-xs font-semibold text-slate-800"
+            className="w-full min-h-[36px] pl-9 pr-9 rounded-[11px] border border-emerald-950/[0.08] bg-[#f4f8f5] focus:bg-white focus:border-[#087f55] outline-none text-[11px] font-semibold text-[#0f291e] transition-colors"
           />
           {searchQuery && (
             <button
               type="button"
               onClick={() => setSearchQuery('')}
-              className="absolute right-2 w-7 h-7 rounded-lg bg-slate-200/70 hover:bg-slate-200 text-slate-600 flex items-center justify-center cursor-pointer"
+              className="absolute right-2 w-6 h-6 rounded-md bg-emerald-950/[0.06] hover:bg-emerald-950/[0.12] text-[#5f7368] flex items-center justify-center cursor-pointer transition-colors"
               aria-label="Clear search"
             >
-              <X size={13} />
+              <X size={12} />
             </button>
           )}
         </div>
@@ -833,18 +836,18 @@ export function HomeFeatureHub({
       {/* SECTION 1: SECURITY TOOLS (9 SEPARATE TOOL PAGES) */}
       {visibleSecurityTools.length > 0 && (
         <div>
-          <div className="flex items-center justify-between gap-2 mb-3 px-0.5">
+          <div className="flex items-end justify-between gap-2 mb-2.5 px-0.5">
             <div>
-              <h2 className="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight">
-                {isBn ? '🛡️ সিকিউরিটি ও সুরক্ষা টুলস' : '🛡️ Security & Moderation Tools'}
+              <h2 className="text-[13.5px] sm:text-[15px] font-extrabold text-[#0f291e] tracking-tight">
+                {isBn ? 'সিকিউরিটি ও সুরক্ষা টুলস' : 'Security & Moderation Tools'}
               </h2>
-              <p className="text-[11px] text-slate-500">
+              <p className="text-[10px] text-[#5f7368] mt-0.5">
                 {isBn
                   ? 'প্রতিটি সিকিউরিটি ফাংশনের আলাদা টুল পেজ — সহজে খুঁজে অন/অফ করুন'
                   : 'Separate dedicated tool page for every security rule'}
               </p>
             </div>
-            <span className="text-[11px] font-bold text-emerald-700 tabular-nums shrink-0">
+            <span className="text-[11px] font-extrabold text-[#087f55] tabular-nums shrink-0">
               {visibleSecurityTools.length} {isBn ? 'টি টুল' : 'Tools'}
             </span>
           </div>
@@ -855,16 +858,16 @@ export function HomeFeatureHub({
       {/* SECTION 2: 17 CORE FEATURE PAGES */}
       {visibleFeatures.length > 0 && (
         <div>
-          <div className="flex items-center justify-between gap-2 mb-3 px-0.5">
+          <div className="flex items-end justify-between gap-2 mb-2.5 px-0.5">
             <div>
-              <h2 className="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight">
-                {isBn ? '⚙️ সব ফিচার ও বট কন্ট্রোল' : '⚙️ All Features & Control Pages'}
+              <h2 className="text-[13.5px] sm:text-[15px] font-extrabold text-[#0f291e] tracking-tight">
+                {isBn ? 'সব ফিচার ও বট কন্ট্রোল' : 'All Features & Control Pages'}
               </h2>
-              <p className="text-[11px] text-slate-500">
+              <p className="text-[10px] text-[#5f7368] mt-0.5">
                 {isBn ? 'যেকোনো ফিচারে ট্যাপ করে তার আলাদা পেজে প্রবেশ করুন' : 'Tap any card to open its dedicated page'}
               </p>
             </div>
-            <span className="text-[11px] font-bold text-emerald-700 tabular-nums shrink-0">
+            <span className="text-[11px] font-extrabold text-[#087f55] tabular-nums shrink-0">
               {visibleFeatures.length} {isBn ? 'টি ফিচার' : 'Features'}
             </span>
           </div>
@@ -874,8 +877,8 @@ export function HomeFeatureHub({
 
       {/* Empty Search Fallback */}
       {visibleSecurityTools.length === 0 && visibleFeatures.length === 0 && (
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 text-center space-y-2">
-          <p className="text-xs font-bold text-slate-700">
+        <div className="bg-white rounded-[17px] border border-emerald-950/[0.07] shadow-[0_3px_14px_rgba(10,56,36,0.035)] p-5 text-center space-y-2">
+          <p className="text-xs font-bold text-[#0f291e]">
             {isBn ? `"${searchQuery}" নামে কোনো টুল বা ফিচার পাওয়া যায়নি` : `No tools found matching "${searchQuery}"`}
           </p>
           <button type="button" className="btn soft" onClick={() => setSearchQuery('')}>
@@ -1039,7 +1042,7 @@ export function BlocksPage({
 
       <div className="space-y-4">
         {/* Group Locks */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-4">
+        <div className="bg-white rounded-[20px] border border-emerald-950/[0.07] shadow-[0_4px_18px_rgba(10,56,36,0.04)] p-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
               <Lock size={14} className="text-rose-600" />
@@ -1079,7 +1082,7 @@ export function BlocksPage({
         </div>
 
         {/* Restricted Members */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-4">
+        <div className="bg-white rounded-[20px] border border-emerald-950/[0.07] shadow-[0_4px_18px_rgba(10,56,36,0.04)] p-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
               <UserX size={14} className="text-amber-600" />
@@ -1120,7 +1123,7 @@ export function BlocksPage({
         </div>
 
         {/* History */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-4">
+        <div className="bg-white rounded-[20px] border border-emerald-950/[0.07] shadow-[0_4px_18px_rgba(10,56,36,0.04)] p-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-xs font-extrabold text-slate-900">
               {isBn ? 'সাম্প্রতিক ১০ মিনিট ব্লকের ইতিহাস' : 'Recent Block History'}
@@ -1296,16 +1299,12 @@ export function NightModePage({
         }
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-extrabold text-slate-900">
-                {isBn ? 'অটো নাইট মোড চালু করুন' : 'Enable Auto Night Mode'}
-              </h3>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                {isBn ? 'বট অ্যাডমিন থাকা সব গ্রুপে প্রযোজ্য হবে' : 'Applies to groups where bot is Admin'}
-              </p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+        <div className="card">
+          <div className="toggle-row">
+            <div className="toggle-info">
+              <h4>{isBn ? 'অটো নাইট মোড চালু করুন' : 'Enable Auto Night Mode'}</h4>
+              <p>{isBn ? 'বট অ্যাডমিন থাকা সব গ্রুপে প্রযোজ্য হবে' : 'Applies to groups where bot is Admin'}</p>
             </div>
             <label className="switch">
               <input
@@ -1317,48 +1316,11 @@ export function NightModePage({
             </label>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-100">
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                {isBn ? 'লক শুরু (রাত)' : 'Lock Start'}
-              </label>
-              <input
-                type="time"
-                value={start}
-                onChange={(e) => setStart(e.target.value)}
-                className="field tabular-nums"
-              />
+          <div className="toggle-row">
+            <div className="toggle-info">
+              <h4>{isBn ? 'শুভ রাত্রি / সুপ্রভাত নোটিশ' : 'Send Night/Morning Notice in Group'}</h4>
+              <p>{isBn ? 'লক ও আনলক হওয়ার সময় গ্রুপে সুন্দর মেসেজ পাঠাবে' : 'Posts notice when locking & unlocking'}</p>
             </div>
-            <div>
-              <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                {isBn ? 'আনলক সময় (সকাল)' : 'Unlock End'}
-              </label>
-              <input
-                type="time"
-                value={end}
-                onChange={(e) => setEnd(e.target.value)}
-                className="field tabular-nums"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-[11px] font-bold text-slate-600 mb-1">
-              {isBn ? 'টাইমজোন (Timezone)' : 'Timezone'}
-            </label>
-            <select className="field" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
-              <option value="Asia/Dhaka">Asia/Dhaka (বাংলাদেশ সময় +06:00)</option>
-              <option value="Asia/Kolkata">Asia/Kolkata (India +05:30)</option>
-              <option value="Asia/Riyadh">Asia/Riyadh (Saudi Arabia +03:00)</option>
-              <option value="Asia/Dubai">Asia/Dubai (UAE +04:00)</option>
-              <option value="UTC">UTC (+00:00)</option>
-            </select>
-          </div>
-
-          <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
-            <span className="text-xs font-bold text-slate-700">
-              {isBn ? 'গ্রুপে শুভ রাত্রি / সুপ্রভাত মেসেজ পাঠাবে' : 'Send Night/Morning Notice in Group'}
-            </span>
             <label className="switch">
               <input
                 type="checkbox"
@@ -1369,70 +1331,110 @@ export function NightModePage({
             </label>
           </div>
 
-          <button
-            type="button"
-            onClick={() => onSaveNightSettings({ nightLockStart: start, nightLockEnd: end, nightModeTimezone: timezone })}
-            className="w-full min-h-[44px] rounded-xl bg-[#087f55] text-white text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer"
-          >
-            <Save size={14} /> {isBn ? 'সময়সূচি সেভ করুন' : 'Save Schedule'}
-          </button>
+          <div className="subpanel-soft mt-3 space-y-2.5">
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
+                <label className="block text-[10px] font-bold text-[#5f7368] mb-1">
+                  {isBn ? 'লক শুরু (রাত)' : 'Lock Start'}
+                </label>
+                <input
+                  type="time"
+                  value={start}
+                  onChange={(e) => setStart(e.target.value)}
+                  className="field tabular-nums"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-[#5f7368] mb-1">
+                  {isBn ? 'আনলক সময় (সকাল)' : 'Unlock End'}
+                </label>
+                <input
+                  type="time"
+                  value={end}
+                  onChange={(e) => setEnd(e.target.value)}
+                  className="field tabular-nums"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-[#5f7368] mb-1">
+                {isBn ? 'টাইমজোন (Timezone)' : 'Timezone'}
+              </label>
+              <select className="field" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
+                <option value="Asia/Dhaka">Asia/Dhaka (বাংলাদেশ সময় +06:00)</option>
+                <option value="Asia/Kolkata">Asia/Kolkata (India +05:30)</option>
+                <option value="Asia/Riyadh">Asia/Riyadh (Saudi Arabia +03:00)</option>
+                <option value="Asia/Dubai">Asia/Dubai (UAE +04:00)</option>
+                <option value="UTC">UTC (+00:00)</option>
+              </select>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => onSaveNightSettings({ nightLockStart: start, nightLockEnd: end, nightModeTimezone: timezone })}
+              className="btn primary w-full justify-center"
+            >
+              <Save size={12} /> {isBn ? 'সময়সূচি সেভ করুন' : 'Save Schedule'}
+            </button>
+          </div>
         </div>
 
-        <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4">
+        <div className="card space-y-3">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-extrabold text-slate-900">
+            <h3 className="text-[13px] font-extrabold text-[#0f291e]">
               {isBn ? 'লাইভ স্ট্যাটাস ও ম্যানুয়াল কন্ট্রোল' : 'Live Status & Manual Control'}
             </h3>
-            <span className="text-xs font-mono font-bold text-indigo-700 tabular-nums">
+            <span className="text-[11px] font-mono font-bold text-[#087f55] tabular-nums">
               {nightStatus?.currentLocalTime || '--:--'}
             </span>
           </div>
 
-          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5 text-xs">
-            <div className="flex justify-between">
-              <span className="text-slate-500">{isBn ? 'বর্তমান অবস্থা:' : 'Current Window:'}</span>
-              <span className={`font-bold ${nightStatus?.isNightWindowNow ? 'text-indigo-700' : 'text-emerald-700'}`}>
+          <div className="policy-box space-y-1">
+            <div className="flex justify-between text-[11px]">
+              <span>{isBn ? 'বর্তমান অবস্থা:' : 'Current Window:'}</span>
+              <span className="font-bold">
                 {nightStatus?.isNightWindowNow
                   ? isBn
-                    ? '🌙 নাইট মোড চলছে'
+                    ? 'নাইট মোড চলছে'
                     : 'Night Window Active'
                   : isBn
-                  ? '☀️ দিনের সময় (উন্মুক্ত)'
+                  ? 'দিনের সময় (উন্মুক্ত)'
                   : 'Daytime (Open)'}
               </span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-slate-500">{isBn ? 'নাইট লকে থাকা গ্রুপ:' : 'Night-Locked Groups:'}</span>
-              <span className="font-extrabold text-slate-900 tabular-nums">{nightStatus?.lockedCount || 0}</span>
+            <div className="flex justify-between text-[11px]">
+              <span>{isBn ? 'নাইট লকে থাকা গ্রুপ:' : 'Night-Locked Groups:'}</span>
+              <span className="font-extrabold tabular-nums">{nightStatus?.lockedCount || 0}</span>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2.5">
+          <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
               onClick={() => onToggleNow(true)}
-              className="min-h-[44px] px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
+              className="btn primary w-full justify-center"
             >
-              <Moon size={14} /> {isBn ? 'এখনই নাইট লক দিন' : 'Lock Now'}
+              <Moon size={12} /> {isBn ? 'এখনই লক দিন' : 'Lock Now'}
             </button>
             <button
               type="button"
               onClick={() => onToggleNow(false)}
-              className="min-h-[44px] px-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
+              className="btn outline w-full justify-center"
             >
-              <Sun size={14} /> {isBn ? 'সব আনলক করুন' : 'Unlock All'}
+              <Sun size={12} /> {isBn ? 'সব আনলক করুন' : 'Unlock All'}
             </button>
           </div>
 
           {nightStatus && nightStatus.lockedGroups.length > 0 && (
-            <div className="pt-2 border-t border-slate-100 space-y-1.5">
-              <span className="text-[11px] font-bold text-slate-600">
+            <div className="pt-2 border-t border-emerald-950/[0.06] space-y-1.5">
+              <span className="text-[10.5px] font-bold text-[#5f7368]">
                 {isBn ? 'লক করা গ্রুপসমূহ:' : 'Currently Night-Locked:'}
               </span>
               {nightStatus.lockedGroups.map((g) => (
-                <div key={g.groupId} className="p-2 rounded-lg bg-indigo-50 text-indigo-900 text-xs font-bold flex justify-between">
+                <div key={g.groupId} className="p-2 rounded-[10px] bg-[#f4f8f5] text-[#0f291e] text-[11px] font-bold flex justify-between">
                   <span className="truncate">{g.groupName}</span>
-                  <span className="text-[10px] font-mono tabular-nums shrink-0">
+                  <span className="text-[10px] font-mono tabular-nums shrink-0 text-[#5f7368]">
                     {new Date(g.lockedAt).toLocaleTimeString()}
                   </span>
                 </div>
@@ -1482,27 +1484,23 @@ export function AntiCallPage({
         isBn={isBn}
         onBack={onBack}
         rightAction={
-          <div className="flex gap-2">
+          <div className="flex gap-1.5">
             <button type="button" className="btn outline" onClick={onRefresh}>
               <RefreshCw size={12} /> {isBn ? 'রিফ্রেশ' : 'Refresh'}
             </button>
             <button type="button" className="btn danger" onClick={onClearCalls}>
-              <Trash2 size={12} /> {isBn ? 'লগ ক্লিয়ার' : 'Clear'}
+              <Trash2 size={12} /> {isBn ? 'ক্লিয়ার' : 'Clear'}
             </button>
           </div>
         }
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-extrabold text-slate-900">
-                {isBn ? 'কল অটো-রিজেক্ট সক্রিয় করুন' : 'Enable Call Auto-Reject'}
-              </h3>
-              <p className="text-[11px] text-slate-500 mt-0.5">
-                {isBn ? 'যেকোনো ভয়েস/ভিডিও কল আসা মাত্রই কেটে দেবে' : 'Rejects voice & video calls immediately'}
-              </p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+        <div className="card">
+          <div className="toggle-row">
+            <div className="toggle-info">
+              <h4>{isBn ? 'কল অটো-রিজেক্ট সক্রিয় করুন' : 'Enable Call Auto-Reject'}</h4>
+              <p>{isBn ? 'যেকোনো ভয়েস/ভিডিও কল আসা মাত্রই কেটে দেবে' : 'Rejects voice & video calls immediately'}</p>
             </div>
             <label className="switch">
               <input
@@ -1514,69 +1512,71 @@ export function AntiCallPage({
             </label>
           </div>
 
-          <div>
-            <label className="block text-[11px] font-bold text-slate-600 mb-1">
-              {isBn ? 'কল করলে ইনবক্সে যাওয়ার সতর্কবার্তা' : 'Auto Warning Reply on Call'}
-            </label>
-            <textarea
-              rows={3}
-              value={msg}
-              onChange={(e) => setMsg(e.target.value)}
-              className="w-full p-2.5 rounded-xl border border-slate-200 text-xs outline-none focus:border-emerald-500 bg-slate-50 focus:bg-white"
-            />
-          </div>
+          <div className="subpanel-soft mt-3 space-y-2.5">
+            <div>
+              <label className="block text-[10px] font-bold text-[#5f7368] mb-1">
+                {isBn ? 'কল করলে ইনবক্সে যাওয়ার সতর্কবার্তা' : 'Auto Warning Reply on Call'}
+              </label>
+              <textarea
+                rows={3}
+                value={msg}
+                onChange={(e) => setMsg(e.target.value)}
+                className="w-full p-2.5 rounded-[10px] border border-emerald-950/[0.1] text-[11px] outline-none focus:border-[#087f55] bg-white"
+              />
+            </div>
 
-          <div>
-            <label className="block text-[11px] font-bold text-slate-600 mb-1">
-              {isBn ? 'কতবার কল করলে অটো-ব্লক হবে (০ = ব্লক করবে না)' : 'Auto-Block After N Calls (0 = off)'}
-            </label>
-            <select
-              className="field"
-              value={blockLimit}
-              onChange={(e) => setBlockLimit(Number(e.target.value))}
+            <div>
+              <label className="block text-[10px] font-bold text-[#5f7368] mb-1">
+                {isBn ? 'কতবার কল করলে অটো-ব্লক হবে (০ = ব্লক করবে না)' : 'Auto-Block After N Calls (0 = off)'}
+              </label>
+              <select
+                className="field"
+                value={blockLimit}
+                onChange={(e) => setBlockLimit(Number(e.target.value))}
+              >
+                <option value={0}>{isBn ? 'অটো-ব্লক বন্ধ (শুধু কল কাটবে)' : 'Off (Reject only)'}</option>
+                <option value={2}>{isBn ? '২ বার কল করলে ব্লক' : 'Block after 2 calls'}</option>
+                <option value={3}>{isBn ? '৩ বার কল করলে ব্লক (প্রস্তাবিত)' : 'Block after 3 calls (Recommended)'}</option>
+                <option value={5}>{isBn ? '৫ বার কল করলে ব্লক' : 'Block after 5 calls'}</option>
+              </select>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => onSaveAntiCall({ antiCallMessage: msg, antiCallAutoBlockCount: blockLimit })}
+              className="btn primary w-full justify-center"
             >
-              <option value={0}>{isBn ? 'অটো-ব্লক বন্ধ (শুধু কল কাটবে)' : 'Off (Reject only)'}</option>
-              <option value={2}>{isBn ? '২ বার কল করলে ব্লক' : 'Block after 2 calls'}</option>
-              <option value={3}>{isBn ? '৩ বার কল করলে ব্লক (প্রস্তাবিত)' : 'Block after 3 calls (Recommended)'}</option>
-              <option value={5}>{isBn ? '৫ বার কল করলে ব্লক' : 'Block after 5 calls'}</option>
-            </select>
+              <Save size={12} /> {isBn ? 'অ্যান্টি-কল সেটিং সেভ' : 'Save Anti-Call Settings'}
+            </button>
           </div>
-
-          <button
-            type="button"
-            onClick={() => onSaveAntiCall({ antiCallMessage: msg, antiCallAutoBlockCount: blockLimit })}
-            className="w-full min-h-[44px] rounded-xl bg-[#087f55] text-white text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer"
-          >
-            <Save size={14} /> {isBn ? 'অ্যান্টি-কল সেটিং সেভ' : 'Save Anti-Call Settings'}
-          </button>
         </div>
 
-        <div className="bg-white rounded-2xl border border-slate-200 p-4">
+        <div className="card">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-extrabold text-slate-900">
+            <h3 className="text-[13px] font-extrabold text-[#0f291e]">
               {isBn ? 'রিজেক্ট করা কলের ইতিহাস' : 'Rejected Call Logs'}
             </h3>
-            <span className="text-xs font-extrabold text-rose-600 tabular-nums">{callLogs.length}</span>
+            <span className="text-[11px] font-extrabold text-rose-600 tabular-nums">{callLogs.length}</span>
           </div>
           {callLogs.length > 0 ? (
-            <div className="space-y-2 max-h-[380px] overflow-y-auto">
+            <div className="space-y-2 max-h-[360px] overflow-y-auto">
               {callLogs.map((c) => (
-                <div key={c.id} className="p-3 rounded-xl border border-slate-200 bg-slate-50/60 flex items-center justify-between gap-2">
+                <div key={c.id} className="p-2.5 rounded-[11px] border border-emerald-950/[0.06] bg-[#f7faf8] flex items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <div className="font-mono text-xs font-extrabold text-slate-900">@{c.callerPhone}</div>
-                    <div className="text-[11px] text-slate-600 mt-0.5">
+                    <div className="font-mono text-[11px] font-extrabold text-[#0f291e]">@{c.callerPhone}</div>
+                    <div className="text-[10.5px] text-[#5f7368] mt-0.5">
                       {c.isVideo ? (isBn ? 'ভিডিও কল' : 'Video Call') : isBn ? 'ভয়েস কল' : 'Voice Call'} ·{' '}
                       <span className={c.blocked ? 'text-rose-600 font-bold' : 'text-amber-700 font-bold'}>{c.status}</span>
                     </div>
                   </div>
-                  <span className="text-[10px] text-slate-400 tabular-nums shrink-0">
+                  <span className="text-[10px] text-[#5f7368] tabular-nums shrink-0">
                     {new Date(c.timestamp).toLocaleTimeString()}
                   </span>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="p-8 text-center text-xs text-slate-500 bg-slate-50 rounded-xl border border-slate-100">
+            <div className="p-6 text-center text-[11px] text-[#5f7368] bg-[#f7faf8] rounded-[12px] border border-emerald-950/[0.06]">
               {isBn ? 'এখনো কোনো ইনকামিং কল রেকর্ড হয়নি।' : 'No rejected calls recorded yet.'}
             </div>
           )}
@@ -1613,7 +1613,7 @@ export function AiVisionPage({
         title={isBn ? 'Maya AI ভয়েস, ছবি ও Anti-NSFW' : 'Maya Multimodal Voice & Vision'}
         subtitle={
           isBn
-            ? 'মায়া ভয়েস মেসেজ শুনে বাংলায় উত্তর দেবে, ছবি দেখে বুঝবে এবং গ্রুপের ১৮+/আপত্তিকর ছবি অটো ডিলিট করবে।'
+            ? 'মায়া ভয়েস মেসেজ শুনে বাংলায় উত্তর দেবে, ছবি দেখে বুঝবে এবং গ্রুপের আপত্তিকর ছবি অটো ডিলিট করবে।'
             : 'Voice note understanding, image analysis, and AI-powered NSFW photo moderation.'
         }
         isBn={isBn}
@@ -1621,104 +1621,99 @@ export function AiVisionPage({
       />
 
       {!hasGeminiKey && (
-        <div className="mb-4 p-3.5 rounded-2xl bg-amber-50 border border-amber-200 flex items-center justify-between gap-3 flex-wrap">
-          <p className="text-xs font-bold text-amber-900">
+        <div className="subpanel-soft mb-3 flex items-center justify-between gap-2.5 flex-wrap">
+          <p className="text-[11px] font-bold text-[#0f291e]">
             {isBn
               ? 'ভয়েস ও ছবি প্রসেস করার জন্য কমপক্ষে একটি সচল Gemini API Key প্রয়োজন।'
               : 'At least one active Gemini API key is required for voice/image processing.'}
           </p>
           <button type="button" onClick={onGoToKeys} className="btn primary">
-            <Plug size={12} /> {isBn ? 'API কী যোগ করুন' : 'Add Gemini Key'}
+            <Plug size={11} /> {isBn ? 'API কী যোগ করুন' : 'Add Gemini Key'}
           </button>
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-col justify-between gap-3">
+      <div className="card">
+        <div className="card-head">
           <div>
-            <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center mb-3">
-              <AudioLines size={20} />
-            </div>
-            <h3 className="text-sm font-extrabold text-slate-900">
-              {isBn ? 'ভয়েস মেসেজ শোনা ও উত্তর' : 'Voice Note Reader'}
+            <h3 className="font-extrabold text-[13px]">
+              {isBn ? 'মাল্টিমোডাল ভয়েস ও ভিশন সেটিংস' : 'Multimodal Voice & Vision Controls'}
             </h3>
-            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+            <p>
               {isBn
-                ? 'ইনবক্সে কেউ ভয়েস নোট পাঠালে বা গ্রুপে মায়াকে রিপ্লাই/মেনশন করে ভয়েস দিলে মায়া অডিও শুনে উত্তর দেবে।'
+                ? 'অডিও নোট পড়া, ছবি বিশ্লেষণ ও NSFW ফিল্টার এখান থেকে চালু/বন্ধ করুন।'
+                : 'Enable voice reply, image reading, and automatic explicit photo filtering.'}
+            </p>
+          </div>
+          <div className="symbol sg">
+            <ScanEye size={15} />
+          </div>
+        </div>
+
+        <div className="toggle-row">
+          <div className="toggle-info">
+            <h4>{isBn ? 'ভয়েস মেসেজ শোনা ও উত্তর' : 'Voice Note Reader'}</h4>
+            <p>
+              {isBn
+                ? 'ইনবক্সে কেউ ভয়েস নোট পাঠালে বা গ্রুপে মায়াকে মেনশন করে ভয়েস দিলে অডিও শুনে উত্তর দেবে।'
                 : 'Maya listens to WhatsApp audio voice notes via Gemini and replies naturally.'}
             </p>
           </div>
-          <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-            <span className={`text-xs font-bold ${settings.mayaVoiceEnabled ? 'text-emerald-700' : 'text-slate-400'}`}>
-              {settings.mayaVoiceEnabled ? (isBn ? 'সক্রিয়' : 'ACTIVE') : isBn ? 'বন্ধ' : 'OFF'}
-            </span>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={Boolean(settings.mayaVoiceEnabled)}
-                onChange={(e) => onToggle('mayaVoiceEnabled', e.target.checked)}
-              />
-              <span className="slider"></span>
-            </label>
-          </div>
+          <label className="switch">
+            <input
+              type="checkbox"
+              checked={Boolean(settings.mayaVoiceEnabled)}
+              onChange={(e) => onToggle('mayaVoiceEnabled', e.target.checked)}
+            />
+            <span className="slider"></span>
+          </label>
         </div>
 
-        <div className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-col justify-between gap-3">
-          <div>
-            <div className="w-10 h-10 rounded-xl bg-sky-50 text-sky-700 flex items-center justify-center mb-3">
-              <ScanEye size={20} />
-            </div>
-            <h3 className="text-sm font-extrabold text-slate-900">
-              {isBn ? 'ছবি দেখে বোঝা (Vision AI)' : 'Image Vision AI'}
-            </h3>
-            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+        <div className="toggle-row">
+          <div className="toggle-info">
+            <h4>{isBn ? 'ছবি দেখে বোঝা (Vision AI)' : 'Image Vision AI'}</h4>
+            <p>
               {isBn
-                ? 'ইনবক্সে ছবি পাঠালে বা গ্রুপে ছবির ক্যাপশনে "Maya/মায়া" লিখলে ছবি দেখে বিস্তারিত উত্তর দেবে।'
+                ? 'ইনবক্সে ছবি পাঠালে বা গ্রুপে ছবির ক্যাপশনে "Maya/মায়া" লিখলে ছবি দেখে উত্তর দেবে।'
                 : 'Reads screenshots, homework, memes, or photos and responds intelligently.'}
             </p>
           </div>
-          <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-            <span className={`text-xs font-bold ${settings.mayaVisionEnabled ? 'text-emerald-700' : 'text-slate-400'}`}>
-              {settings.mayaVisionEnabled ? (isBn ? 'সক্রিয়' : 'ACTIVE') : isBn ? 'বন্ধ' : 'OFF'}
-            </span>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={Boolean(settings.mayaVisionEnabled)}
-                onChange={(e) => onToggle('mayaVisionEnabled', e.target.checked)}
-              />
-              <span className="slider"></span>
-            </label>
-          </div>
+          <label className="switch">
+            <input
+              type="checkbox"
+              checked={Boolean(settings.mayaVisionEnabled)}
+              onChange={(e) => onToggle('mayaVisionEnabled', e.target.checked)}
+            />
+            <span className="slider"></span>
+          </label>
         </div>
 
-        <div className="bg-white rounded-2xl border border-slate-200 p-4 flex flex-col justify-between gap-3">
-          <div>
-            <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-700 flex items-center justify-center mb-3">
-              <ShieldAlert size={20} />
-            </div>
-            <h3 className="text-sm font-extrabold text-slate-900">
-              {isBn ? 'AI Anti-NSFW ছবি ফিল্টার' : 'AI Anti-NSFW Filter'}
-            </h3>
-            <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+        <div className="toggle-row">
+          <div className="toggle-info">
+            <h4>{isBn ? 'AI Anti-NSFW ছবি ফিল্টার' : 'AI Anti-NSFW Filter'}</h4>
+            <p>
               {isBn
                 ? 'গ্রুপে কেউ অশ্লীল, ১৮+ বা আপত্তিকর ছবি পাঠালে AI সাথে সাথে শনাক্ত করে ডিলিট ও ওয়ার্নিং দেবে।'
                 : 'Automatically scans group images and deletes explicit/NSFW photos.'}
             </p>
           </div>
-          <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-            <span className={`text-xs font-bold ${settings.antiNsfwImage ? 'text-rose-600' : 'text-slate-400'}`}>
-              {settings.antiNsfwImage ? (isBn ? 'সুরক্ষা চালু' : 'BLOCKING') : isBn ? 'বন্ধ' : 'OFF'}
-            </span>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={Boolean(settings.antiNsfwImage)}
-                onChange={(e) => onSaveAntiNsfwToggle(onToggle, e.target.checked)}
-              />
-              <span className="slider"></span>
-            </label>
-          </div>
+          <label className="switch">
+            <input
+              type="checkbox"
+              checked={Boolean(settings.antiNsfwImage)}
+              onChange={(e) => onSaveAntiNsfwToggle(onToggle, e.target.checked)}
+            />
+            <span className="slider"></span>
+          </label>
+        </div>
+
+        <div className="policy-box">
+          <h4>{isBn ? 'মাল্টিমোডাল সুরক্ষা নীতি' : 'Multimodal Safety Policy'}</h4>
+          <p>
+            {isBn
+              ? 'ভয়েস নোট, ছবি এবং অশ্লীল কনটেন্ট স্ক্যান রিয়েল-টাইমে Gemini API কী পুল ব্যবহার করে প্রসেস হয়।'
+              : 'Voice notes, images, and NSFW checks process in real time via active Gemini API keys.'}
+          </p>
         </div>
       </div>
     </section>
@@ -1788,10 +1783,11 @@ export function ActivityRankPage({
         }
       />
 
-      <div className="bg-white rounded-2xl border border-slate-200 p-4 mb-4 space-y-3">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="text-xs font-bold text-slate-700">
-            {isBn ? 'মেম্বার অ্যাক্টিভিটি ট্র্যাকিং ও .top কমান্ড' : 'Activity Tracking & .top Command'}
+      <div className="card mb-3.5">
+        <div className="toggle-row">
+          <div className="toggle-info">
+            <h4>{isBn ? 'মেম্বার অ্যাক্টিভিটি ট্র্যাকিং ও .top কমান্ড' : 'Activity Tracking & .top Command'}</h4>
+            <p>{isBn ? 'গ্রুপের ভালো মেসেজ অটো গণনা করে লিডারবোর্ড তৈরি করবে' : 'Counts clean group messages for ranking'}</p>
           </div>
           <label className="switch">
             <input
@@ -1803,9 +1799,9 @@ export function ActivityRankPage({
           </label>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-slate-100">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-3">
           <div>
-            <label className="block text-[10.5px] font-bold text-slate-500 mb-1">
+            <label className="block text-[10px] font-bold text-[#5f7368] mb-1">
               {isBn ? 'গ্রুপ সিলেক্ট করুন' : 'Filter Group'}
             </label>
             <select
@@ -1822,7 +1818,7 @@ export function ActivityRankPage({
             </select>
           </div>
           <div>
-            <label className="block text-[10.5px] font-bold text-slate-500 mb-1">
+            <label className="block text-[10px] font-bold text-[#5f7368] mb-1">
               {isBn ? 'Ghost (নিষ্ক্রিয়) দিনসীমা' : 'Inactive Threshold'}
             </label>
             <select
@@ -1836,9 +1832,9 @@ export function ActivityRankPage({
               <option value={30}>{isBn ? '৩০+ দিন মেসেজ নেই' : '30+ days inactive'}</option>
             </select>
           </div>
-          <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
-            <span className="text-[11px] text-slate-600 font-bold">{isBn ? 'মোট মেসেজ' : 'Total Msgs'}</span>
-            <span className="text-base font-extrabold text-emerald-700 tabular-nums">{report.totalMessages}</span>
+          <div className="subpanel-soft flex items-center justify-between">
+            <span className="text-[11px] text-[#145339] font-bold">{isBn ? 'মোট মেসেজ' : 'Total Msgs'}</span>
+            <span className="text-[15px] font-extrabold text-[#087f55] tabular-nums">{report.totalMessages}</span>
           </div>
         </div>
       </div>
@@ -1848,20 +1844,20 @@ export function ActivityRankPage({
         <button
           type="button"
           onClick={() => setTab('top')}
-          className={`flex-1 min-h-[42px] rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer ${
-            tab === 'top' ? 'bg-[#087f55] text-white' : 'bg-white border border-slate-200 text-slate-700'
+          className={`flex-1 min-h-[34px] rounded-[10px] text-[11px] font-extrabold flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${
+            tab === 'top' ? 'bg-[#087f55] text-white' : 'bg-white border border-emerald-950/[0.08] text-[#0f291e]'
           }`}
         >
-          <Trophy size={14} /> {isBn ? `টপ অ্যাক্টিভ (${report.topActive.length})` : `Top Active (${report.topActive.length})`}
+          <Trophy size={13} /> {isBn ? `টপ অ্যাক্টিভ (${report.topActive.length})` : `Top Active (${report.topActive.length})`}
         </button>
         <button
           type="button"
           onClick={() => setTab('ghost')}
-          className={`flex-1 min-h-[42px] rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer ${
-            tab === 'ghost' ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-700'
+          className={`flex-1 min-h-[34px] rounded-[10px] text-[11px] font-extrabold flex items-center justify-center gap-1.5 cursor-pointer transition-colors ${
+            tab === 'ghost' ? 'bg-[#087f55] text-white' : 'bg-white border border-emerald-950/[0.08] text-[#0f291e]'
           }`}
         >
-          <Ghost size={14} /> {isBn ? `Ghost মেম্বার (${report.ghostMembers.length})` : `Ghosts (${report.ghostMembers.length})`}
+          <Ghost size={13} /> {isBn ? `Ghost মেম্বার (${report.ghostMembers.length})` : `Ghosts (${report.ghostMembers.length})`}
         </button>
       </div>
 
@@ -1980,14 +1976,12 @@ export function KeywordsPage({
         onBack={onBack}
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <form onSubmit={handleSubmit} className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-            <div>
-              <h3 className="text-sm font-extrabold text-slate-900">
-                {isBn ? 'কীওয়ার্ড অটো-রিপ্লাই চালু' : 'Enable Auto-Responder'}
-              </h3>
-              <p className="text-[11px] text-slate-500">{isBn ? 'গ্রুপ ও ইনবক্স উভয় জায়গায় কাজ করে' : 'Works in groups & DMs'}</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+        <form onSubmit={handleSubmit} className="card space-y-2.5">
+          <div className="toggle-row">
+            <div className="toggle-info">
+              <h4>{isBn ? 'কীওয়ার্ড অটো-রিপ্লাই চালু' : 'Enable Auto-Responder'}</h4>
+              <p>{isBn ? 'গ্রুপ ও ইনবক্স উভয় জায়গায় কাজ করে' : 'Works in groups & DMs'}</p>
             </div>
             <label className="switch">
               <input
@@ -2000,7 +1994,7 @@ export function KeywordsPage({
           </div>
 
           <div>
-            <label className="block text-[11px] font-bold text-slate-600 mb-1">
+            <label className="block text-[10px] font-bold text-[#5f7368] mb-1">
               {isBn ? 'ট্রিগার কীওয়ার্ড (কমা দিয়ে একাধিক শব্দ লিখতে পারেন)' : 'Trigger Keyword(s)'}
             </label>
             <input
@@ -2013,7 +2007,7 @@ export function KeywordsPage({
           </div>
 
           <div>
-            <label className="block text-[11px] font-bold text-slate-600 mb-1">
+            <label className="block text-[10px] font-bold text-[#5f7368] mb-1">
               {isBn ? 'ম্যাচ করার ধরন' : 'Match Type'}
             </label>
             <select
@@ -2027,7 +2021,7 @@ export function KeywordsPage({
           </div>
 
           <div>
-            <label className="block text-[11px] font-bold text-slate-600 mb-1">
+            <label className="block text-[10px] font-bold text-[#5f7368] mb-1">
               {isBn ? 'বট যে উত্তর দেবে' : 'Auto Reply Text'}
             </label>
             <textarea
@@ -2035,25 +2029,25 @@ export function KeywordsPage({
               value={reply}
               onChange={(e) => setReply(e.target.value)}
               placeholder={isBn ? 'বটের ফিক্সড উত্তর এখানে লিখুন...' : 'Type the fixed reply...'}
-              className="w-full p-2.5 rounded-xl border border-slate-200 text-xs outline-none focus:border-emerald-500 bg-slate-50 focus:bg-white"
+              className="w-full p-2.5 rounded-[10px] border border-emerald-950/[0.1] text-[11px] outline-none focus:border-[#087f55] bg-[#f7faf8] focus:bg-white"
             />
           </div>
 
           <button
             type="submit"
             disabled={!kw.trim() || !reply.trim()}
-            className="w-full min-h-[44px] rounded-xl bg-[#087f55] disabled:opacity-50 text-white text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
+            className="btn primary w-full justify-center"
           >
-            <Plus size={14} /> {isBn ? 'নতুন কীওয়ার্ড যোগ করুন' : 'Add Auto-Reply Rule'}
+            <Plus size={12} /> {isBn ? 'নতুন কীওয়ার্ড যোগ করুন' : 'Add Auto-Reply Rule'}
           </button>
         </form>
 
-        <div className="bg-white rounded-2xl border border-slate-200 p-4">
+        <div className="card">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-extrabold text-slate-900">
+            <h3 className="text-[13px] font-extrabold text-[#0f291e]">
               {isBn ? 'সেভ করা কীওয়ার্ড রুলস' : 'Saved Keyword Rules'}
             </h3>
-            <span className="text-xs font-extrabold text-emerald-700 tabular-nums">{keywords.length}</span>
+            <span className="text-[11px] font-extrabold text-[#087f55] tabular-nums">{keywords.length}</span>
           </div>
 
           {keywords.length > 0 ? (
@@ -2150,20 +2144,20 @@ export function PinLockPage({
         onBack={onBack}
       />
 
-      <div className="max-w-lg bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 space-y-4">
-        <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100">
+      <div className="max-w-lg card space-y-3.5">
+        <div className="flex items-center justify-between gap-3 pb-2.5 border-b border-emerald-950/[0.06]">
           <div>
-            <h3 className="text-sm font-extrabold text-slate-900">
+            <h3 className="text-[13px] font-extrabold text-[#0f291e]">
               {isBn ? 'পিন লক স্ট্যাটাস' : 'PIN Protection Status'}
             </h3>
-            <p className="text-xs mt-0.5 font-bold">
-              <span className={pinEnabled ? 'text-emerald-700' : 'text-slate-500'}>
+            <p className="text-[11px] mt-0.5 font-bold">
+              <span className={pinEnabled ? 'text-[#087f55]' : 'text-[#5f7368]'}>
                 {pinEnabled
                   ? isBn
-                    ? '🔒 বর্তমানে পিন লক চালু আছে'
+                    ? 'বর্তমানে পিন লক চালু আছে'
                     : 'Locked & Protected'
                   : isBn
-                  ? '🔓 বর্তমানে পিন লক বন্ধ আছে'
+                  ? 'বর্তমানে পিন লক বন্ধ আছে'
                   : 'Currently Unlocked (No PIN)'}
               </span>
             </p>
@@ -2174,13 +2168,13 @@ export function PinLockPage({
               onClick={onLockNow}
               className="btn outline shrink-0"
             >
-              <Lock size={13} /> {isBn ? 'এখনই লক করুন' : 'Lock Now'}
+              <Lock size={12} /> {isBn ? 'লক করুন' : 'Lock Now'}
             </button>
           )}
         </div>
 
         <div>
-          <label className="block text-[11px] font-bold text-slate-600 mb-1.5">
+          <label className="block text-[10px] font-bold text-[#5f7368] mb-1">
             {isBn
               ? pinEnabled
                 ? 'নতুন পিন কোড দিন (পরিবর্তন করতে চাইলে)'
@@ -2193,26 +2187,26 @@ export function PinLockPage({
               value={newPin}
               onChange={(e) => setNewPin(e.target.value)}
               placeholder={isBn ? 'যেমন: 4580 বা গোপন কোড' : 'e.g. 4580'}
-              className="w-full min-h-[44px] px-3.5 pr-10 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-emerald-600 outline-none text-sm font-mono"
+              className="field pr-9 font-mono"
             />
             <button
               type="button"
               onClick={() => setShowPin((p) => !p)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-slate-500"
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center text-[#5f7368]"
             >
-              {showPin ? <EyeOff size={16} /> : <Eye size={16} />}
+              {showPin ? <EyeOff size={14} /> : <Eye size={14} />}
             </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <button
             type="button"
             disabled={saving || (!pinEnabled && newPin.trim().length < 4)}
             onClick={() => handleSave(true)}
-            className="min-h-[44px] px-4 rounded-xl bg-[#087f55] disabled:opacity-50 text-white text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
+            className="btn primary w-full justify-center"
           >
-            <Check size={14} /> {isBn ? 'পিন সেভ ও চালু করুন' : 'Save & Enable PIN'}
+            <Check size={12} /> {isBn ? 'পিন সেভ ও চালু করুন' : 'Save & Enable PIN'}
           </button>
 
           {pinEnabled && (
@@ -2220,9 +2214,9 @@ export function PinLockPage({
               type="button"
               disabled={saving}
               onClick={() => handleSave(false)}
-              className="min-h-[44px] px-4 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer"
+              className="btn danger w-full justify-center"
             >
-              <Unlock size={14} /> {isBn ? 'পিন লক বন্ধ করুন' : 'Disable PIN Lock'}
+              <Unlock size={12} /> {isBn ? 'পিন লক বন্ধ করুন' : 'Disable PIN Lock'}
             </button>
           )}
         </div>
@@ -2328,7 +2322,7 @@ export function MemberBlockPage({
       ) : (
         <div className="space-y-3.5">
           {/* Controls Card */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
+          <div className="bg-white rounded-[20px] border border-emerald-950/[0.07] shadow-[0_4px_18px_rgba(10,56,36,0.04)] p-4 space-y-3">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="block text-[11px] font-bold text-slate-600 mb-1">
@@ -2547,13 +2541,13 @@ export function MemberBlockPage({
                           type="button"
                           disabled={isBusy}
                           onClick={() => onUnblockMember(selectedGroupId, m.jid)}
-                          className="min-h-[40px] px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer"
+                          className="btn primary"
                         >
-                          <CheckCircle2 size={13} />
+                          <CheckCircle2 size={12} />
                           <span>{isBn ? 'ব্লক তুলুন' : 'Unblock'}</span>
                         </button>
                       ) : isProtectedAdmin ? (
-                        <span className="text-[10.5px] font-bold text-slate-400 px-2">
+                        <span className="text-[10.5px] font-bold text-[#5f7368] px-2">
                           {isBn ? 'সুরক্ষিত' : 'Protected'}
                         </span>
                       ) : (
@@ -2561,12 +2555,12 @@ export function MemberBlockPage({
                           type="button"
                           disabled={isBusy}
                           onClick={() => onBlockMember(m, durationMinutes, draftNotice)}
-                          className="min-h-[40px] px-3 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer"
+                          className="btn danger"
                         >
                           {isBusy ? (
-                            <RefreshCw size={13} className="animate-spin" />
+                            <RefreshCw size={12} className="animate-spin" />
                           ) : (
-                            <VolumeX size={13} />
+                            <VolumeX size={12} />
                           )}
                           <span>{isBn ? `${durationMinutes} মি. ব্লক` : `Block ${durationMinutes}m`}</span>
                         </button>
@@ -2738,7 +2732,7 @@ export function CompanionBotPage({
       </div>
 
       {/* 1. Connection Card for 2nd Account */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 mb-4">
+      <div className="bg-white rounded-[20px] border border-emerald-950/[0.07] shadow-[0_4px_18px_rgba(10,56,36,0.04)] p-4 sm:p-5 mb-4">
         <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
           <div>
             <h2 className="text-sm sm:text-base font-extrabold text-slate-900">
@@ -2835,83 +2829,69 @@ export function CompanionBotPage({
                 type="button"
                 disabled={isPairing || !phoneInput.trim()}
                 onClick={() => onPair(phoneInput)}
-                className="btn primary min-h-[44px]"
+                className="btn primary"
               >
-                {isPairing ? <RefreshCw size={14} className="animate-spin" /> : <Smartphone size={14} />}
+                {isPairing ? <RefreshCw size={12} className="animate-spin" /> : <Smartphone size={12} />}
                 <span>{isPairing ? (isBn ? 'কোড তৈরি হচ্ছে...' : 'Generating...') : isBn ? '৮-ডিজিট কোড নিন' : 'Get Pairing Code'}</span>
               </button>
             </div>
 
             {pairingError && (
-              <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold">
+              <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-[11px] font-bold">
                 {pairingError}
               </div>
             )}
 
             {modeTab === 'code' && status.pairingCode && (
-              <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-center space-y-2">
-                <div className="text-[11px] font-bold text-emerald-800">
+              <div className="policy-box text-center space-y-2">
+                <div className="text-[11px] font-bold text-[#145339]">
                   {isBn
                     ? `আপনার ২য় ফোনের WhatsApp > Linked Devices > Link with phone number-এ নিচের কোডটি লিখুন (${status.remainingSeconds} সে.)`
                     : `Enter this code in WhatsApp > Linked Devices (${status.remainingSeconds}s)`}
                 </div>
-                <div className="font-mono text-2xl sm:text-3xl font-black tracking-[0.22em] text-emerald-900 select-all">
+                <div className="font-mono text-2xl font-black tracking-[0.22em] text-[#087f55] select-all">
                   {status.pairingCode}
                 </div>
                 <button type="button" onClick={copyPairingCode} className="btn outline">
-                  {copiedCode ? <Check size={13} className="text-emerald-700" /> : <Copy size={13} />}
+                  {copiedCode ? <Check size={12} className="text-[#087f55]" /> : <Copy size={12} />}
                   <span>{copiedCode ? (isBn ? 'কপি হয়েছে!' : 'Copied!') : isBn ? 'কোড কপি করুন' : 'Copy Code'}</span>
                 </button>
               </div>
             )}
 
             {modeTab === 'qr' && status.qrCode && (
-              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex flex-col items-center gap-2">
+              <div className="subpanel-soft flex flex-col items-center gap-2">
                 <img
                   src={status.qrCode}
                   alt="Companion WhatsApp QR"
-                  className="w-48 h-48 rounded-lg border border-slate-200 bg-white p-1"
+                  className="w-44 h-44 rounded-lg border border-emerald-950/[0.08] bg-white p-1"
                 />
-                <span className="text-[11px] text-slate-500">
+                <span className="text-[10.5px] text-[#5f7368]">
                   {isBn ? '২য় WhatsApp থেকে QR স্ক্যান করুন' : 'Scan QR from your 2nd WhatsApp'}
                 </span>
               </div>
             )}
 
-            <div className="p-3 rounded-xl bg-amber-50/80 border border-amber-200 text-[11px] text-amber-950 leading-relaxed space-y-1">
-              <div className="font-extrabold text-amber-900">
-                {isBn ? 'নম্বর ব্যান থেকে বাঁচতে জরুরি নিয়ম:' : 'Anti-Ban Safety Tips:'}
-              </div>
-              <ul className="list-disc pl-4 space-y-0.5">
-                <li>
-                  {isBn
-                    ? 'একদম নতুন খোলা WhatsApp নম্বরে সরাসরি বট লিংক করবেন না—অন্তত ২-৪ সপ্তাহ পুরোনো ও নিয়মিত চ্যাট করা নম্বর ব্যবহার করুন।'
-                    : 'Use an aged, warmed-up account (at least 2–4 weeks old with normal chats).'}
-                </li>
-                <li>
-                  {isBn
-                    ? 'ঘন ঘন কোড রিকোয়েস্ট করবেন না এবং সম্ভব হলে ৮-ডিজিট কোডের বদলে QR স্ক্যান ব্যবহার করুন।'
-                    : 'Avoid spamming pairing requests; prefer QR scan when possible.'}
-                </li>
-                <li>
-                  {isBn
-                    ? 'নতুন আপডেট আগে আপনার Railway সার্ভারে Push করে সেখান থেকেই লিংক করুন—AI Studio ও Railway-তে একই নম্বর একসাথে চালাবেন না।'
-                    : 'Deploy to Railway first and connect only on your main host.'}
-                </li>
-              </ul>
+            <div className="policy-box space-y-1">
+              <h4>{isBn ? 'নম্বর ব্যান থেকে বাঁচতে জরুরি নিয়ম:' : 'Anti-Ban Safety Tips:'}</h4>
+              <p>
+                {isBn
+                  ? '• একদম নতুন খোলা WhatsApp নম্বরে লিংক করবেন না—অন্তত ২-৪ সপ্তাহ পুরোনো ও চ্যাট করা নম্বর ব্যবহার করুন\n• ঘন ঘন কোড রিকোয়েস্ট না করে সম্ভব হলে QR স্ক্যান ব্যবহার করুন'
+                  : 'Use an aged account (2–4 weeks old) and prefer QR scan.'}
+              </p>
             </div>
           </div>
         )}
       </div>
 
       {/* 2. Channel, Personality & Anti-Hallucination Settings */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 mb-4 space-y-4">
-        <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-100">
+      <div className="card mb-3.5 space-y-3">
+        <div className="card-head">
           <div>
-            <h2 className="text-sm sm:text-base font-extrabold text-slate-900">
+            <h3 className="font-extrabold text-[13px]">
               {isBn ? '২. গার্ল পারসোনালিটি, রোমান্টিক ও নির্ভুলতা সেটিংস' : '2. Personality, Romantic Tone & Accuracy'}
-            </h2>
-            <p className="text-[11px] text-slate-500 mt-0.5">
+            </h3>
+            <p>
               {isBn
                 ? 'কথা বলার ধরন, ইনবক্স/গ্রুপ কন্ট্রোল ও ভুল উত্তর রোধের নিয়ম সেট করুন'
                 : 'Configure voice tone, chat channels & zero-hallucination guardrails'}
@@ -2921,23 +2901,18 @@ export function CompanionBotPage({
             type="button"
             disabled={isSaving}
             onClick={handleSave}
-            className="btn primary"
+            className="btn primary shrink-0"
           >
-            {isSaving ? <RefreshCw size={13} className="animate-spin" /> : <Save size={13} />}
+            {isSaving ? <RefreshCw size={12} className="animate-spin" /> : <Save size={12} />}
             <span>{isBn ? 'সেটিংস সেভ' : 'Save Settings'}</span>
           </button>
         </div>
 
-        {/* Quick Toggles */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-          <div className="p-3 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
-            <div>
-              <div className="text-xs font-extrabold text-slate-900">
-                {isBn ? '২য় অ্যাকাউন্ট রিপ্লাই চালু' : 'Enable 2nd Bot Replies'}
-              </div>
-              <div className="text-[10.5px] text-slate-500">
-                {isBn ? 'বন্ধ থাকলে কারো মেসেজে উত্তর দেবে না' : 'Master reply switch for 2nd account'}
-              </div>
+        <div>
+          <div className="toggle-row">
+            <div className="toggle-info">
+              <h4>{isBn ? '২য় অ্যাকাউন্ট রিপ্লাই চালু' : 'Enable 2nd Bot Replies'}</h4>
+              <p>{isBn ? 'বন্ধ থাকলে কারো মেসেজে উত্তর দেবে না' : 'Master reply switch for 2nd account'}</p>
             </div>
             <label className="switch shrink-0">
               <input type="checkbox" checked={companionEnabled} onChange={(e) => setCompanionEnabled(e.target.checked)} />
@@ -2945,14 +2920,10 @@ export function CompanionBotPage({
             </label>
           </div>
 
-          <div className="p-3 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
-            <div>
-              <div className="text-xs font-extrabold text-slate-900">
-                {isBn ? 'কঠোর নির্ভুলতা (কোনো ভুল উত্তর নয়)' : 'Strict Zero-Hallucination Accuracy'}
-              </div>
-              <div className="text-[10.5px] text-slate-500">
-                {isBn ? 'না জানা থাকলে মনগড়া উল্টাপাল্টা কিছু বানাবে না' : 'Prevents guessing or fake facts'}
-              </div>
+          <div className="toggle-row">
+            <div className="toggle-info">
+              <h4>{isBn ? 'কঠোর নির্ভুলতা (কোনো ভুল উত্তর নয়)' : 'Strict Zero-Hallucination Accuracy'}</h4>
+              <p>{isBn ? 'না জানা থাকলে মনগড়া উল্টাপাল্টা কিছু বানাবে না' : 'Prevents guessing or fake facts'}</p>
             </div>
             <label className="switch shrink-0">
               <input
@@ -2964,14 +2935,10 @@ export function CompanionBotPage({
             </label>
           </div>
 
-          <div className="p-3 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
-            <div>
-              <div className="text-xs font-extrabold text-slate-900">
-                {isBn ? 'ইনবক্স (Private DM) রিপ্লাই' : 'Private Inbox Auto-Reply'}
-              </div>
-              <div className="text-[10.5px] text-slate-500">
-                {isBn ? 'ব্যক্তিগত ইনবক্সে কেউ মেসেজ দিলে মিষ্টি ও রোমান্টিক উত্তর' : 'Sweet 1-on-1 DM replies'}
-              </div>
+          <div className="toggle-row">
+            <div className="toggle-info">
+              <h4>{isBn ? 'ইনবক্স (Private DM) রিপ্লাই' : 'Private Inbox Auto-Reply'}</h4>
+              <p>{isBn ? 'ব্যক্তিগত ইনবক্সে কেউ মেসেজ দিলে মিষ্টি ও রোমান্টিক উত্তর' : 'Sweet 1-on-1 DM replies'}</p>
             </div>
             <label className="switch shrink-0">
               <input
@@ -2983,14 +2950,10 @@ export function CompanionBotPage({
             </label>
           </div>
 
-          <div className="p-3 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
-            <div>
-              <div className="text-xs font-extrabold text-slate-900">
-                {isBn ? 'গ্রুপ চ্যাট রিপ্লাই' : 'Group Chat Auto-Reply'}
-              </div>
-              <div className="text-[10.5px] text-slate-500">
-                {isBn ? 'গ্রুপে শুধু কথা ও প্রশ্নের উত্তর দেবে (কোনো কিক/ডিলিট নয়)' : 'Chats in groups without moderating'}
-              </div>
+          <div className="toggle-row">
+            <div className="toggle-info">
+              <h4>{isBn ? 'গ্রুপ চ্যাট রিপ্লাই' : 'Group Chat Auto-Reply'}</h4>
+              <p>{isBn ? 'গ্রুপে শুধু কথা ও প্রশ্নের উত্তর দেবে (কোনো কিক/ডিলিট নয়)' : 'Chats in groups without moderating'}</p>
             </div>
             <label className="switch shrink-0">
               <input
@@ -3116,7 +3079,7 @@ export function CompanionBotPage({
 
       {/* 3. Live Test Chat & Recent Replies */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
+        <div className="bg-white rounded-[20px] border border-emerald-950/[0.07] shadow-[0_4px_18px_rgba(10,56,36,0.04)] p-4 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <div>
               <h3 className="text-sm font-extrabold text-slate-900">
@@ -3175,7 +3138,7 @@ export function CompanionBotPage({
           )}
         </div>
 
-        <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
+        <div className="bg-white rounded-[20px] border border-emerald-950/[0.07] shadow-[0_4px_18px_rgba(10,56,36,0.04)] p-4 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <div>
               <h3 className="text-sm font-extrabold text-slate-900">

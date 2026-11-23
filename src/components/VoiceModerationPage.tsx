@@ -432,22 +432,24 @@ export function VoiceModerationPage({
   return (
     <div className="space-y-4 pb-8">
       {/* Header */}
-      <div className="mb-2 pb-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2.5">
-        <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={onBack}
-            className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-2 rounded-xl bg-white border border-slate-200 hover:border-emerald-400 text-xs font-bold text-slate-700 transition-colors cursor-pointer"
-          >
-            <ArrowLeft size={14} className="text-emerald-700" />
-            <span>{isBn ? 'হোম পেজ' : 'Back Home'}</span>
-          </button>
+      <div className="mb-3 pb-2.5 border-b border-emerald-950/[0.06] flex flex-wrap items-center justify-between gap-2">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onBack}
+              className="sub-back-btn"
+            >
+              <ArrowLeft size={12} className="text-[#087f55]" />
+              <span>{isBn ? 'হোম পেজ' : 'Back Home'}</span>
+            </button>
+          </div>
           <div>
-            <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
-              <AudioLines size={19} className="text-emerald-700" />
+            <h1 className="text-[15px] sm:text-[17px] font-extrabold text-[#0f291e] tracking-tight flex items-center gap-1.5">
+              <AudioLines size={16} className="text-[#087f55]" />
               <span>{isBn ? 'অফলাইন ভয়েস AI অ্যান্টি-অ্যাবিউজ v2' : 'Offline AI Voice Anti-Abuse v2'}</span>
             </h1>
-            <p className="text-[11px] sm:text-xs text-slate-500">
+            <p className="text-[10.5px] sm:text-[11px] text-[#5f7368] mt-0.5 leading-relaxed">
               {isBn
                 ? 'Whisper.cpp + সেমান্টিক + ফোনেটিক + সিলেটি ডায়ালেক্ট বিশ্লেষণ · পেইড API ছাড়াই অশ্লীল ভয়েস শনাক্ত ও ডিলিট'
                 : 'Whisper.cpp + Semantic & Phonetic + Sylheti Dialect Analysis · Zero Paid APIs'}
@@ -455,23 +457,23 @@ export function VoiceModerationPage({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={() => onRefresh()}
             disabled={isLoading}
-            className="btn text-xs font-bold"
+            className="btn outline"
           >
-            <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
+            <RefreshCw size={12} className={isLoading ? 'animate-spin' : ''} />
             <span>{isBn ? 'রিফ্রেশ' : 'Refresh'}</span>
           </button>
           <button
             type="button"
             onClick={handleSave}
             disabled={isSaving}
-            className="btn primary text-xs font-extrabold"
+            className="btn primary"
           >
-            <Save size={13} />
+            <Save size={12} />
             <span>{isSaving ? (isBn ? 'সেভ হচ্ছে...' : 'Saving...') : isBn ? 'সেটিংস সেভ' : 'Save Settings'}</span>
           </button>
         </div>
@@ -546,36 +548,32 @@ export function VoiceModerationPage({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         {/* Left: Admin Controls */}
         <div className="lg:col-span-7 space-y-4">
-          <div className="card p-4 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <ShieldCheck size={17} className="text-emerald-700" />
-                <h2 className="text-sm font-extrabold text-slate-900">
+          <div className="card space-y-2.5">
+            <div className="card-head">
+              <div>
+                <h3 className="font-extrabold text-[13px]">
                   {isBn ? 'ভয়েস অ্যান্টি-অ্যাবিউজ অ্যাডমিন কন্ট্রোল' : 'Voice Protection Controls'}
-                </h2>
+                </h3>
+                <p>
+                  {isBn
+                    ? 'ভয়েস ফিল্টারিং, ডায়ালেক্ট এবং অস্পষ্ট অডিও রিভিউ কিউ নিয়ন্ত্রণ করুন।'
+                    : 'Configure offline transcription, dialects, and review queue.'}
+                </p>
               </div>
-              <span
-                className={`text-[10px] font-extrabold px-2 py-1 rounded-md border ${
-                  enabled
-                    ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                    : 'bg-slate-100 text-slate-600 border-slate-200'
-                }`}
-              >
-                {enabled ? (isBn ? 'চালু (সক্রিয়)' : 'ACTIVE') : isBn ? 'বন্ধ' : 'OFF'}
-              </span>
+              <div className="symbol sg">
+                <ShieldCheck size={15} />
+              </div>
             </div>
 
             {/* Master Switch */}
             <div className="toggle-row">
-              <div>
-                <div className="text-xs font-extrabold text-slate-900">
-                  {isBn ? 'Voice Protection (মাস্টার সুইচ)' : 'Voice Protection (Master ON/OFF)'}
-                </div>
-                <div className="text-[11px] text-slate-500">
+              <div className="toggle-info">
+                <h4>{isBn ? 'Voice Protection (মাস্টার সুইচ)' : 'Voice Protection (Master ON/OFF)'}</h4>
+                <p>
                   {isBn
                     ? 'গ্রুপে ইনকামিং ভয়েস মেসেজ অফলাইনে শুনে গালি ও কনটেক্সট বুঝে অটো ডিলিট করবে'
                     : 'Automatically transcribes group voice notes offline and deletes abusive audio'}
-                </div>
+                </p>
               </div>
               <label className="switch">
                 <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
@@ -584,17 +582,14 @@ export function VoiceModerationPage({
             </div>
 
             {/* Gemini API Smart Voice Evaluation Switch */}
-            <div className="toggle-row pt-2 border-t border-slate-100">
-              <div>
-                <div className="text-xs font-extrabold text-emerald-950 flex items-center gap-1.5">
-                  <Sparkles size={14} className="text-emerald-700" />
-                  <span>{isBn ? 'Gemini API Smart Voice Evaluation (এআই API ভিত্তিক)' : 'Gemini API Smart Voice Evaluation'}</span>
-                </div>
-                <div className="text-[11px] text-slate-500">
+            <div className="toggle-row">
+              <div className="toggle-info">
+                <h4>{isBn ? 'Gemini API Smart Voice Evaluation' : 'Gemini API Smart Voice Evaluation'}</h4>
+                <p>
                   {isBn
-                    ? 'সরাসরি Gemini API ব্যবহার করে গালি ও ভালো ব্যবহার বুদ্ধিমত্তার সাথে বুঝবে; ভালো/স্বাভাবিক ভয়েস কখনো ডিলিট করবে না।'
-                    : 'Uses Gemini API to intelligently understand context and profanity; never deletes polite or good voice messages.'}
-                </div>
+                    ? 'সরাসরি Gemini API ব্যবহার করে গালি ও ভালো ব্যবহার বুদ্ধিমত্তার সাথে বুঝবে।'
+                    : 'Uses Gemini API to intelligently understand context and profanity.'}
+                </p>
               </div>
               <label className="switch">
                 <input type="checkbox" checked={useGeminiApi} onChange={(e) => setUseGeminiApi(e.target.checked)} />
@@ -602,17 +597,56 @@ export function VoiceModerationPage({
               </label>
             </div>
 
+            {/* Smart Review Queue & Hardware Auto-Model Toggles */}
+            <div className="toggle-row">
+              <div className="toggle-info">
+                <h4>{isBn ? 'অস্পষ্ট অডিও Admin Review Queue' : 'Admin Review Queue for Unclear Audio'}</h4>
+                <p>
+                  {isBn
+                    ? 'অস্পষ্ট বা সন্দেহজনক ভয়েস সাথে সাথে ডিলিট না করে অ্যাডমিন রিভিউ কিউ-তে রাখবে'
+                    : 'Routes unclear audio to Admin Review Queue instead of false deletion'}
+                </p>
+              </div>
+              <label className="switch">
+                <input
+                  type="checkbox"
+                  checked={reviewUnclearEnabled}
+                  onChange={(e) => setReviewUnclearEnabled(e.target.checked)}
+                />
+                <span className="slider" />
+              </label>
+            </div>
+
+            <div className="toggle-row">
+              <div className="toggle-info">
+                <h4>{isBn ? 'হার্ডওয়্যার অনুযায়ী Auto Model নির্বাচন' : 'Auto Select Model by Server RAM/CPU'}</h4>
+                <p>
+                  {isBn
+                    ? `সার্ভার রিসোর্স কম হলে নিরাপদ মডেল (${overview?.hardware.recommendedModelId || 'base-q5_1'}) ব্যবহার করবে`
+                    : `Automatically selects safest model for current RAM (${overview?.hardware.recommendedModelId || 'base-q5_1'})`}
+                </p>
+              </div>
+              <label className="switch">
+                <input
+                  type="checkbox"
+                  checked={autoSelectModel}
+                  onChange={(e) => setAutoSelectModel(e.target.checked)}
+                />
+                <span className="slider" />
+              </label>
+            </div>
+
             {/* Language & Dialect Toggles */}
-            <div className="pt-2 border-t border-slate-100 space-y-2.5">
-              <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-800">
-                <Languages size={15} className="text-emerald-700" />
+            <div className="subpanel-soft space-y-2">
+              <div className="flex items-center gap-1.5 text-[11px] font-extrabold text-[#0f291e]">
+                <Languages size={13} className="text-[#087f55]" />
                 <span>{isBn ? 'ভাষা ও আঞ্চলিক ডায়ালেক্ট শনাক্তকরণ' : 'Language & Dialect Modules'}</span>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <label className="flex items-center justify-between gap-2 p-2.5 rounded-xl border border-slate-200 bg-slate-50/70 cursor-pointer">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <label className="flex items-center justify-between gap-2 p-2 rounded-[10px] border border-emerald-950/[0.08] bg-white cursor-pointer">
                   <div>
-                    <div className="text-xs font-bold text-slate-900">{isBn ? 'বাংলা (Bangla)' : 'Bangla Detection'}</div>
-                    <div className="text-[10px] text-slate-500">
+                    <div className="text-[11px] font-bold text-[#0f291e]">{isBn ? 'বাংলা (Bangla)' : 'Bangla Detection'}</div>
+                    <div className="text-[9.5px] text-[#5f7368]">
                       {isBn ? 'শুদ্ধ বাংলা ও কনটেক্সট ফ্রেম' : 'Bengali script & semantic frames'}
                     </div>
                   </div>
@@ -620,16 +654,16 @@ export function VoiceModerationPage({
                     type="checkbox"
                     checked={detectBangla}
                     onChange={(e) => setDetectBangla(e.target.checked)}
-                    className="w-4 h-4 accent-emerald-700"
+                    className="w-4 h-4 accent-[#087f55]"
                   />
                 </label>
 
-                <label className="flex items-center justify-between gap-2 p-2.5 rounded-xl border border-emerald-200 bg-emerald-50/40 cursor-pointer">
+                <label className="flex items-center justify-between gap-2 p-2 rounded-[10px] border border-emerald-950/[0.08] bg-white cursor-pointer">
                   <div>
-                    <div className="text-xs font-bold text-emerald-950">
+                    <div className="text-[11px] font-bold text-[#0f291e]">
                       {isBn ? 'সিলেটি আঞ্চলিক (Sylheti)' : 'Sylheti Dialect Detection'}
                     </div>
-                    <div className="text-[10px] text-emerald-700">
+                    <div className="text-[9.5px] text-[#5f7368]">
                       {isBn ? 'সিলেটি উচ্চারণ ও ফোনেটিক ম্যাচ' : 'Sylheti phonetic shifts & slurs'}
                     </div>
                   </div>
@@ -637,80 +671,34 @@ export function VoiceModerationPage({
                     type="checkbox"
                     checked={detectSylheti}
                     onChange={(e) => setDetectSylheti(e.target.checked)}
-                    className="w-4 h-4 accent-emerald-700"
+                    className="w-4 h-4 accent-[#087f55]"
                   />
                 </label>
 
-                <label className="flex items-center justify-between gap-2 p-2.5 rounded-xl border border-slate-200 bg-slate-50/70 cursor-pointer">
+                <label className="flex items-center justify-between gap-2 p-2 rounded-[10px] border border-emerald-950/[0.08] bg-white cursor-pointer">
                   <div>
-                    <div className="text-xs font-bold text-slate-900">{isBn ? 'বাংলিশ (Banglish)' : 'Banglish Detection'}</div>
-                    <div className="text-[10px] text-slate-500">{isBn ? 'রোমান হরফে বাংলা/সিলেটি গালি' : 'Phonetic Banglish'}</div>
+                    <div className="text-[11px] font-bold text-[#0f291e]">{isBn ? 'বাংলিশ (Banglish)' : 'Banglish Detection'}</div>
+                    <div className="text-[9.5px] text-[#5f7368]">{isBn ? 'রোমান হরফে বাংলা/সিলেটি গালি' : 'Phonetic Banglish'}</div>
                   </div>
                   <input
                     type="checkbox"
                     checked={detectBanglish}
                     onChange={(e) => setDetectBanglish(e.target.checked)}
-                    className="w-4 h-4 accent-emerald-700"
+                    className="w-4 h-4 accent-[#087f55]"
                   />
                 </label>
 
-                <label className="flex items-center justify-between gap-2 p-2.5 rounded-xl border border-slate-200 bg-slate-50/70 cursor-pointer">
+                <label className="flex items-center justify-between gap-2 p-2 rounded-[10px] border border-emerald-950/[0.08] bg-white cursor-pointer">
                   <div>
-                    <div className="text-xs font-bold text-slate-900">{isBn ? 'ইংরেজি (English)' : 'English Detection'}</div>
-                    <div className="text-[10px] text-slate-500">{isBn ? 'ইংরেজি গালি ও স্ল্যাং' : 'English profanity'}</div>
+                    <div className="text-[11px] font-bold text-[#0f291e]">{isBn ? 'ইংরেজি (English)' : 'English Detection'}</div>
+                    <div className="text-[9.5px] text-[#5f7368]">{isBn ? 'ইংরেজি গালি ও স্ল্যাং' : 'English profanity'}</div>
                   </div>
                   <input
                     type="checkbox"
                     checked={detectEnglish}
                     onChange={(e) => setDetectEnglish(e.target.checked)}
-                    className="w-4 h-4 accent-emerald-700"
+                    className="w-4 h-4 accent-[#087f55]"
                   />
-                </label>
-              </div>
-            </div>
-
-            {/* Smart Review Queue & Hardware Auto-Model Toggles */}
-            <div className="pt-2 border-t border-slate-100 space-y-2.5">
-              <div className="toggle-row">
-                <div>
-                  <div className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
-                    <Eye size={14} className="text-amber-600" />
-                    <span>{isBn ? 'অস্পষ্ট অডিও Admin Review Queue' : 'Admin Review Queue for Unclear Audio'}</span>
-                  </div>
-                  <div className="text-[11px] text-slate-500">
-                    {isBn
-                      ? 'অস্পষ্ট বা সন্দেহজনক ভয়েস সাথে সাথে ডিলিট না করে অ্যাডমিন রিভিউ কিউ-তে রাখবে (ভুল ডিলিট প্রতিরোধ)'
-                      : 'Routes unclear or borderline audio to Admin Review Queue instead of false deletion'}
-                  </div>
-                </div>
-                <label className="switch">
-                  <input
-                    type="checkbox"
-                    checked={reviewUnclearEnabled}
-                    onChange={(e) => setReviewUnclearEnabled(e.target.checked)}
-                  />
-                  <span className="slider" />
-                </label>
-              </div>
-
-              <div className="toggle-row">
-                <div>
-                  <div className="text-xs font-extrabold text-slate-900">
-                    {isBn ? 'হার্ডওয়্যার অনুযায়ী Auto Model নির্বাচন' : 'Auto Select Model by Server RAM/CPU'}
-                  </div>
-                  <div className="text-[11px] text-slate-500">
-                    {isBn
-                      ? `সার্ভার রিসোর্স কম হলে স্বয়ংক্রিয়ভাবে নিরাপদ মডেল (${overview?.hardware.recommendedModelId || 'base-q5_1'}) ব্যবহার করবে`
-                      : `Automatically selects safest model for current RAM (${overview?.hardware.recommendedModelId || 'base-q5_1'})`}
-                  </div>
-                </div>
-                <label className="switch">
-                  <input
-                    type="checkbox"
-                    checked={autoSelectModel}
-                    onChange={(e) => setAutoSelectModel(e.target.checked)}
-                  />
-                  <span className="slider" />
                 </label>
               </div>
             </div>
@@ -913,13 +901,13 @@ export function VoiceModerationPage({
               </div>
             </div>
 
-            <div className="p-2.5 rounded-xl bg-emerald-50/70 border border-emerald-200 text-[11px] text-emerald-900 font-semibold flex items-start gap-2">
-              <Sparkles size={14} className="text-emerald-700 shrink-0 mt-0.5" />
-              <span>
+            <div className="policy-box flex items-start gap-2">
+              <Sparkles size={13} className="text-[#087f55] shrink-0 mt-0.5" />
+              <p>
                 {isBn
                   ? 'ডুয়াল-পাস + ডিকশনারি-মুক্ত এআই: অস্পষ্ট অডিওতে বাংলা/সিলেটি ডায়ালেক্ট ২য় পাস চলে; ফোনেটিক ও সেমান্টিক ফ্রেম দিয়ে অজানা গালি ধরে এবং টেম্প ফাইল সাথে সাথে মুছে ফেলে।'
                   : 'Dual-pass Bangla/Sylheti STT + phonetic/semantic scoring with zero paid APIs and instant temp audio cleanup.'}
-              </span>
+              </p>
             </div>
 
             {/* Whisper Quantized Model Picker */}

@@ -65,56 +65,56 @@ const TOOL_META: Record<
   }
 > = {
   sec_links: {
-    titleBn: '🎱 অ্যান্টি-লিংক ও Carrom Pool লিংক টুল',
-    titleEn: '🎱 Anti-Link & Carrom Pool Link Tool',
+    titleBn: 'অ্যান্টি-লিংক ও Carrom Pool লিংক টুল',
+    titleEn: 'Anti-Link & Carrom Pool Link Tool',
     subBn: 'গ্রুপের সব বাজে/স্প্যাম লিংক বন্ধ রাখুন — এবং চাইলে শুধু Carrom Pool রুম লিংক (carrom.co) চালু রাখুন।',
     subEn: 'Block unwanted URLs while optionally allowing Carrom Pool invite links (carrom.co).',
   },
   sec_shield: {
-    titleBn: '🛡️ অ্যাডমিন শিল্ড ও ৩-স্ট্রাইক অটো কিক',
-    titleEn: '🛡️ Admin Shield & 3-Strike Auto Kick',
+    titleBn: 'অ্যাডমিন শিল্ড ও ৩-স্ট্রাইক অটো কিক',
+    titleEn: 'Admin Shield & 3-Strike Auto Kick',
     subBn: 'গ্রুপ অ্যাডমিনদের সুরক্ষা এবং ৩ বার নিয়ম ভঙ্গ করলে অটো-কিক নিয়ন্ত্রণ করুন।',
     subEn: 'Protect group admins from bot penalties and configure 3-warning auto-kick.',
   },
   sec_welcome: {
-    titleBn: '🌸 অটো ওয়েলকাম মেসেজ (@Mention)',
-    titleEn: '🌸 Auto Welcome New Members (@Mention)',
+    titleBn: 'অটো ওয়েলকাম মেসেজ (@Mention)',
+    titleEn: 'Auto Welcome New Members (@Mention)',
     subBn: 'গ্রুপে নতুন কেউ যুক্ত হলে অটো @মেনশন দিয়ে ওয়েলকাম জানানো ও কাস্টম মেসেজ সেট করুন।',
     subEn: 'Automatically greet newly added members with @mention and custom template.',
   },
   sec_stickers: {
-    titleBn: '⚡ অ্যান্টি-স্টিকার ও হাই-প্রায়োরিটি স্প্যাম কিউ',
-    titleEn: '⚡ Anti-Sticker & Spam Queue Control',
+    titleBn: 'অ্যান্টি-স্টিকার ও হাই-প্রায়োরিটি স্প্যাম কিউ',
+    titleEn: 'Anti-Sticker & Spam Queue Control',
     subBn: 'একসাথে অতিরিক্ত স্টিকার পাঠালে ১০ মি. ব্লক, সব স্টিকার ডিলিট এবং লাইভ কিউ মনিটর করুন।',
     subEn: 'Configure burst sticker limits, block duration, all-sticker block, and live deletion queue.',
   },
   sec_media: {
-    titleBn: '👁️ ভিউ-ওয়ান্স, GIF, ভিডিও ও ছবি ব্লক',
-    titleEn: '👁️ Anti-View Once, GIF, Video & Photo',
+    titleBn: 'ভিউ-ওয়ান্স, GIF, ভিডিও ও ছবি ব্লক',
+    titleEn: 'Anti-View Once, GIF, Video & Photo',
     subBn: 'গ্রুপে View Once মিডিয়া, GIF, ভিডিও বা সাধারণ ছবি পাঠানো আলাদাভাবে চালু বা বন্ধ করুন।',
     subEn: 'Toggle blocking rules for View Once media, GIFs, videos, and photos.',
   },
   sec_badwords: {
-    titleBn: '🤬 অ্যান্টি-গালি ও কাস্টম শব্দ ফিল্টার',
-    titleEn: '🤬 Anti-Badword & Custom Slur Filter',
+    titleBn: 'অ্যান্টি-গালি ও কাস্টম শব্দ ফিল্টার',
+    titleEn: 'Anti-Badword & Custom Slur Filter',
     subBn: 'বাংলা, বাংলিশ, হিন্দি ও ইংরেজি গালি অটো ডিলিট এবং নিজের কাস্টম নিষিদ্ধ শব্দ যোগ করুন।',
     subEn: 'Multilingual profanity filter, AI badword check, and custom blocked words editor.',
   },
   sec_mention: {
-    titleBn: '📢 বস ও অ্যাডমিন মেনশন অটো রিপ্লাই',
-    titleEn: '📢 Boss & Admin Mention Auto-Reply',
+    titleBn: 'বস ও অ্যাডমিন মেনশন অটো রিপ্লাই',
+    titleEn: 'Boss & Admin Mention Auto-Reply',
     subBn: 'কেউ বস অ্যাডমিন (+8801632222592) বা গ্রুপ অ্যাডমিনকে @মেনশন করলে বট কী উত্তর দেবে তা সেট করুন।',
     subEn: 'Configure automatic reply when someone @mentions Boss Admin or any group admin.',
   },
   sec_replies: {
-    titleBn: '🕌 অটো সালাম, টাইপিং ও সাইলেন্ট মোড',
-    titleEn: '🕌 Auto Salam, Typing & Silent Mode',
+    titleBn: 'অটো সালাম, টাইপিং ও সাইলেন্ট মোড',
+    titleEn: 'Auto Salam, Typing & Silent Mode',
     subBn: 'API ছাড়াই অটো সালামের উত্তর, বটের Typing... ইন্ডিকেটর, সাইলেন্ট মোড ও মায়া মেনশন রিপ্লাই।',
     subEn: 'Manage Zero-API Salam replies, typing presence, silent moderation, and Maya AI triggers.',
   },
   sec_bossalert: {
-    titleBn: '🚨 বস ইনবক্স অ্যালার্ট ও সার্ভার নোটিশ',
-    titleEn: '🚨 Boss Inbox Fight Alert & Server Notice',
+    titleBn: 'বস ইনবক্স অ্যালার্ট ও সার্ভার নোটিশ',
+    titleEn: 'Boss Inbox Fight Alert & Server Notice',
     subBn: 'গ্রুপে ঝগড়া/গালি বা সার্ভারে সমস্যা হলে সরাসরি বস ইনবক্সে সতর্কবার্তা পাঠানোর সেটিংস।',
     subEn: 'Single Boss Admin inbox alert for heated group fights and server health warnings.',
   },
@@ -147,31 +147,31 @@ export function SecurityToolPage({
 
   return (
     <section className="page active" id={toolId}>
-      <div className="mb-4 pb-3 border-b border-slate-200">
-        <div className="flex items-center justify-between gap-2 mb-2.5 flex-wrap">
+      <div className="mb-3 pb-2.5 border-b border-emerald-950/[0.06]">
+        <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
           <button
             type="button"
             onClick={onBack}
-            className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-2 rounded-xl bg-white border border-slate-200 hover:border-emerald-400 text-xs font-bold text-slate-700 transition-colors cursor-pointer"
+            className="sub-back-btn"
           >
-            <ArrowLeft size={14} className="text-emerald-700" />
+            <ArrowLeft size={12} className="text-[#087f55]" />
             <span>{isBn ? 'হোম পেজ' : 'Back Home'}</span>
           </button>
 
           <button
             type="button"
             onClick={() => onNavigate('security')}
-            className="inline-flex items-center gap-1.5 min-h-[38px] px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 hover:border-emerald-400 text-[11px] font-bold text-emerald-800 transition-colors cursor-pointer"
+            className="btn soft"
           >
-            <ShieldCheck size={13} />
-            <span>{isBn ? 'সব সিকিউরিটি রুলস দেখুন' : 'All Security Rules'}</span>
+            <ShieldCheck size={12} />
+            <span>{isBn ? 'সব সিকিউরিটি রুলস' : 'All Security Rules'}</span>
           </button>
         </div>
 
-        <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-snug">
+        <h1 className="text-[15px] sm:text-[17px] font-extrabold text-[#0f291e] tracking-tight leading-snug">
           {isBn ? meta.titleBn : meta.titleEn}
         </h1>
-        <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 leading-relaxed">
+        <p className="text-[10.5px] sm:text-[11px] text-[#5f7368] mt-0.5 leading-relaxed">
           {isBn ? meta.subBn : meta.subEn}
         </p>
       </div>
@@ -191,7 +191,7 @@ export function SecurityToolPage({
               </p>
             </div>
             <div className="symbol sg">
-              <LinkIcon size={16} />
+              <LinkIcon size={15} />
             </div>
           </div>
 
@@ -200,9 +200,6 @@ export function SecurityToolPage({
               <h4>
                 <span className="flex items-center gap-1.5 flex-wrap">
                   {t.antiLinkTitle}
-                  <span className={`badge ${settings.antiLink ? 'badge-green' : 'badge-amber'}`}>
-                    {settings.antiLink ? 'BLOCKED' : 'OFF'}
-                  </span>
                   {renderInfoBtn('antiLink')}
                 </span>
               </h4>
@@ -221,16 +218,11 @@ export function SecurityToolPage({
           <div className="toggle-row">
             <div className="toggle-info">
               <h4>
-                <span className="flex items-center gap-1.5 flex-wrap">
-                  {isBn ? '🎱 Carrom Pool লিংক চালু (carrom.co রিমুভ হবে না)' : '🎱 Allow Carrom Pool Links (carrom.co)'}
-                  <span className={`badge ${settings.allowCarromLinks !== false ? 'badge-green' : 'badge-amber'}`}>
-                    {settings.allowCarromLinks !== false ? (isBn ? 'চালু (ALLOWED)' : 'ALLOWED') : 'BLOCKED'}
-                  </span>
-                </span>
+                {isBn ? 'Carrom Pool লিংক চালু (carrom.co রিমুভ হবে না)' : 'Allow Carrom Pool Links (carrom.co)'}
               </h4>
               <p>
                 {isBn
-                  ? 'চালু থাকলে শুধু Carrom Pool রুম ইনভাইট লিংক (https://carrom.co/?party=...) গ্রুপে থাকবে — বাকি সব লিংক আগের মতোই ডিলিট ও ওয়ার্নিং হবে।'
+                  ? 'চালু থাকলে শুধু Carrom Pool রুম ইনভাইট লিংক (https://carrom.co/?party=...) গ্রুপে থাকবে।'
                   : 'Keeps official Carrom Pool match links (carrom.co) safe while still removing all other links.'}
               </p>
             </div>
@@ -244,13 +236,11 @@ export function SecurityToolPage({
             </label>
           </div>
 
-          <div className="mt-3 p-3 rounded-xl bg-emerald-50/70 border border-emerald-200 text-[11px] text-emerald-950 leading-relaxed">
-            <div className="font-extrabold mb-1">
-              {isBn ? 'কীভাবে কাজ করে:' : 'How it works:'}
-            </div>
+          <div className="policy-box">
+            <h4>{isBn ? 'লিংক প্রোটেকশন পলিসি' : 'Link Protection Policy'}</h4>
             <p>
               {isBn
-                ? '• গ্রুপে কেউ Carrom Pool ম্যাচের রুম লিংক (carrom.co) দিলে সেটি ডিলিট হবে না ও কোনো ওয়ার্নিং পাবে না।\n• অন্য যেকোনো ওয়েবসাইট, টেলিগ্রাম, ইউটিউব, ফেসবুক বা হোয়াটসঅ্যাপ গ্রুপ লিংক পাঠালে সাথে সাথে ডিলিট ও সতর্কবার্তা হবে।'
+                ? '• Carrom Pool ম্যাচের রুম লিংক (carrom.co) ডিলিট হবে না ও কোনো ওয়ার্নিং পাবে না\n• অন্য যেকোনো ওয়েবসাইট, টেলিগ্রাম, ইউটিউব, ফেসবুক বা হোয়াটসঅ্যাপ লিংক সাথে সাথে ডিলিট হবে'
                 : 'Allows only verified carrom.co host URLs while blocking all other domains.'}
             </p>
           </div>
@@ -275,9 +265,6 @@ export function SecurityToolPage({
               <h4>
                 <span className="flex items-center gap-1.5 flex-wrap">
                   {t.adminShieldTitle}
-                  <span className={`badge ${settings.adminShield ? 'badge-green' : 'badge-amber'}`}>
-                    {settings.adminShield ? 'ON' : 'OFF'}
-                  </span>
                   {renderInfoBtn('adminShield')}
                 </span>
               </h4>
@@ -298,9 +285,6 @@ export function SecurityToolPage({
               <h4>
                 <span className="flex items-center gap-1.5 flex-wrap">
                   {t.autoKickTitle}
-                  <span className={`badge ${settings.autoKick3Warnings ? 'badge-green' : 'badge-amber'}`}>
-                    {settings.autoKick3Warnings ? 'ACTIVE' : 'OFF'}
-                  </span>
                   {renderInfoBtn('autoKick3Warnings')}
                 </span>
               </h4>
@@ -316,9 +300,18 @@ export function SecurityToolPage({
             </label>
           </div>
 
-          <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap gap-2">
+          <div className="policy-box">
+            <h4>{isBn ? 'ডিফল্ট ভায়োলেশন পলিসি' : 'Default violation policy'}</h4>
+            <p>
+              {isBn
+                ? '১ম ভায়োলেশন · সতর্কবার্তা · ২য় ভায়োলেশন · চূড়ান্ত সতর্কতা · ৩য় ভায়োলেশন · অটো কিক (অ্যাডমিন পারমিশন সহ)'
+                : '1st violation · Warning · 2nd violation · Final warning · 3rd violation · Auto Kick'}
+            </p>
+          </div>
+
+          <div className="mt-3 pt-2.5 border-t border-emerald-950/[0.06] flex flex-wrap gap-2">
             <button type="button" className="btn soft" onClick={() => onNavigate('warnings')}>
-              {isBn ? `সক্রিয় সতর্কবার্তা দেখুন (${activeWarningsCount})` : `View Active Warnings (${activeWarningsCount})`}
+              {isBn ? `সক্রিয় সতর্কবার্তা (${activeWarningsCount})` : `Active Warnings (${activeWarningsCount})`}
             </button>
             <button type="button" className="btn outline" onClick={() => onNavigate('logs')}>
               {isBn ? 'লাইভ লগ দেখুন' : 'View Live Logs'}
@@ -342,19 +335,14 @@ export function SecurityToolPage({
               </p>
             </div>
             <div className="symbol sg">
-              <Sparkles size={16} />
+              <Sparkles size={15} />
             </div>
           </div>
 
           <div className="toggle-row">
             <div className="toggle-info">
               <h4>
-                <span className="flex items-center gap-1.5 flex-wrap">
-                  {isBn ? 'অটো ওয়েলকাম মেসেজ (@Mention সহ)' : 'Auto Welcome New Members (@Mention)'}
-                  <span className={`badge ${settings.autoWelcome !== false ? 'badge-green' : 'badge-amber'}`}>
-                    {settings.autoWelcome !== false ? 'ACTIVE' : 'OFF'}
-                  </span>
-                </span>
+                {isBn ? 'অটো ওয়েলকাম মেসেজ (@Mention সহ)' : 'Auto Welcome New Members (@Mention)'}
               </h4>
               <p>
                 {isBn
@@ -373,8 +361,8 @@ export function SecurityToolPage({
           </div>
 
           {settings.autoWelcome !== false && (
-            <div className="mt-3 pt-3 border-t border-slate-100">
-              <label className="block text-[11px] font-bold text-slate-600 mb-1.5">
+            <div className="subpanel-soft mt-3">
+              <label className="block text-[10.5px] font-bold text-[#0f291e] mb-1.5">
                 {isBn
                   ? 'কাস্টম ওয়েলকাম মেসেজ (ঐচ্ছিক — {user} ও {group} ব্যবহার করতে পারেন)'
                   : 'Custom Welcome Template (optional — supports {user} & {group})'}
@@ -428,9 +416,6 @@ export function SecurityToolPage({
               <h4>
                 <span className="flex items-center gap-1.5 flex-wrap">
                   {t.antiStickerSpamTitle}
-                  <span className={`badge ${settings.antiStickerSpam ? 'badge-green' : 'badge-amber'}`}>
-                    {settings.antiStickerSpam ? 'ACTIVE' : 'OFF'}
-                  </span>
                   {renderInfoBtn('antiStickerSpam')}
                 </span>
               </h4>
@@ -451,9 +436,6 @@ export function SecurityToolPage({
               <h4>
                 <span className="flex items-center gap-1.5 flex-wrap">
                   {t.antiStickerTitle}
-                  <span className={`badge ${settings.antiSticker ? 'badge-red' : 'badge-blue'}`}>
-                    {settings.antiSticker ? 'BLOCKED' : 'ALLOWED'}
-                  </span>
                   {renderInfoBtn('antiSticker')}
                 </span>
               </h4>
@@ -469,12 +451,11 @@ export function SecurityToolPage({
             </label>
           </div>
 
-          <div className="my-3 p-3 rounded-xl border border-emerald-200 bg-emerald-50/40 space-y-3">
+          <div className="subpanel-soft mt-3 space-y-3">
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div>
-                <h4 className="text-xs font-extrabold text-emerald-950 flex items-center gap-1.5 flex-wrap">
-                  <span>{isBn ? '⚡ হাই-প্রায়োরিটি স্টিকার স্প্যাম কনফিগ ও লাইভ কিউ' : '⚡ Sticker Spam Window & Queue'}</span>
-                  <span className="badge badge-green">{isBn ? '০-বিলম্ব কিউ' : 'Zero-AI Queue'}</span>
+                <h4 className="text-[11.5px] font-extrabold text-[#0f291e]">
+                  {isBn ? 'হাই-প্রায়োরিটি স্টিকার স্প্যাম কনফিগ ও লাইভ কিউ' : 'Sticker Spam Window & Queue'}
                 </h4>
               </div>
               <div className="flex items-center gap-1.5">
@@ -633,9 +614,6 @@ export function SecurityToolPage({
               <h4>
                 <span className="flex items-center gap-1.5 flex-wrap">
                   {t.antiViewOnceTitle}
-                  <span className={`badge ${settings.antiViewOnce ? 'badge-green' : 'badge-amber'}`}>
-                    {settings.antiViewOnce ? 'BLOCKED' : 'ALLOWED'}
-                  </span>
                   {renderInfoBtn('antiViewOnce')}
                 </span>
               </h4>
@@ -656,9 +634,6 @@ export function SecurityToolPage({
               <h4>
                 <span className="flex items-center gap-1.5 flex-wrap">
                   {t.antiGifTitle}
-                  <span className={`badge ${settings.antiGif ? 'badge-green' : 'badge-amber'}`}>
-                    {settings.antiGif ? 'BLOCKED' : 'ALLOWED'}
-                  </span>
                   {renderInfoBtn('antiGif')}
                 </span>
               </h4>
@@ -679,9 +654,6 @@ export function SecurityToolPage({
               <h4>
                 <span className="flex items-center gap-1.5 flex-wrap">
                   {t.antiVideoTitle}
-                  <span className={`badge ${settings.antiVideo ? 'badge-red' : 'badge-blue'}`}>
-                    {settings.antiVideo ? 'BLOCKED' : 'ALLOWED'}
-                  </span>
                   {renderInfoBtn('antiVideo')}
                 </span>
               </h4>
@@ -702,9 +674,6 @@ export function SecurityToolPage({
               <h4>
                 <span className="flex items-center gap-1.5 flex-wrap">
                   {t.antiImageTitle}
-                  <span className={`badge ${settings.antiImage ? 'badge-red' : 'badge-blue'}`}>
-                    {settings.antiImage ? 'BLOCKED' : 'ALLOWED'}
-                  </span>
                   {renderInfoBtn('antiImage')}
                 </span>
               </h4>
@@ -737,7 +706,7 @@ export function SecurityToolPage({
               </p>
             </div>
             <div className="symbol sr">
-              <Ban size={16} />
+              <Ban size={15} />
             </div>
           </div>
 
@@ -746,9 +715,6 @@ export function SecurityToolPage({
               <h4>
                 <span className="flex items-center gap-1.5 flex-wrap">
                   {t.antiBadwordTitle}
-                  <span className={`badge ${settings.antiBadword ? 'badge-green' : 'badge-amber'}`}>
-                    {settings.antiBadword ? 'ACTIVE' : 'OFF'}
-                  </span>
                   {renderInfoBtn('antiBadword')}
                 </span>
               </h4>
@@ -766,14 +732,7 @@ export function SecurityToolPage({
 
           <div className="toggle-row">
             <div className="toggle-info">
-              <h4>
-                <span className="flex items-center gap-1.5 flex-wrap">
-                  {t.aiBadwordTitle}
-                  <span className={`badge ${settings.aiBadwordDetection ? 'badge-green' : 'badge-amber'}`}>
-                    {settings.aiBadwordDetection ? 'ACTIVE' : 'OFF'}
-                  </span>
-                </span>
-              </h4>
+              <h4>{t.aiBadwordTitle}</h4>
               <p>{t.aiBadwordDesc}</p>
             </div>
             <label className="switch">
@@ -790,26 +749,23 @@ export function SecurityToolPage({
             <div className="toggle-info">
               <h4>
                 <span className="flex items-center gap-1.5 flex-wrap">
-                  <AudioLines size={14} className="text-emerald-700" />
+                  <AudioLines size={13} className="text-[#087f55]" />
                   {isBn ? 'অফলাইন ভয়েস গালি গার্ড (Voice Anti-Abuse)' : 'Offline Voice Anti-Abuse (Whisper.cpp)'}
-                  <span className={`badge ${settings.voiceModerationEnabled !== false ? 'badge-green' : 'badge-amber'}`}>
-                    {settings.voiceModerationEnabled !== false ? 'ACTIVE' : 'OFF'}
-                  </span>
                   {renderInfoBtn('voiceModerationEnabled')}
                 </span>
               </h4>
               <p>
                 {isBn
-                  ? 'পেইড API ছাড়াই গ্রুপের ভয়েস মেসেজ শুনে বাংলা/ইংরেজি/বাংলিশ গালি থাকলে অটো ডিলিট করবে।'
+                  ? 'পেইড API ছাড়াই গ্রুপের ভয়েস মেসেজ শুনে বাংলা/ইংরেজি গালি থাকলে অটো ডিলিট করবে।'
                   : 'Transcribes incoming group voice notes offline via Whisper.cpp and deletes profanity.'}
               </p>
               <button
                 type="button"
                 onClick={() => onNavigate('voicemod')}
-                className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-extrabold text-emerald-700 hover:text-emerald-800 cursor-pointer"
+                className="mt-1 inline-flex items-center gap-1 text-[10.5px] font-bold text-[#087f55] hover:underline cursor-pointer"
               >
-                <span>{isBn ? 'ভয়েস সেটিংস, টেস্টার ও হিস্ট্রি খুলুন' : 'Open Voice Guard Settings & History'}</span>
-                <ArrowRight size={12} />
+                <span>{isBn ? 'ভয়েস সেটিংস ও হিস্ট্রি খুলুন' : 'Open Voice Guard Settings'}</span>
+                <ArrowRight size={11} />
               </button>
             </div>
             <label className="switch">
@@ -822,22 +778,22 @@ export function SecurityToolPage({
             </label>
           </div>
 
-          <div className="form-group mt-3 pt-3 border-t border-slate-100">
+          <div className="subpanel-soft mt-3">
             <div className="flex items-center gap-1.5 mb-1">
-              <label className="mb-0">{t.customBadwordsLabel}</label>
+              <label className="text-[11px] font-bold text-[#0f291e] mb-0">{t.customBadwordsLabel}</label>
               {renderInfoBtn('customBadwords')}
             </div>
-            <p className="hint mb-2">{t.customBadwordsHint}</p>
+            <p className="text-[10px] text-[#5f7368] mb-2">{t.customBadwordsHint}</p>
             <textarea
               className="field"
-              style={{ height: '84px', padding: '8px 10px', resize: 'vertical' }}
+              style={{ height: '78px', padding: '8px 10px', resize: 'vertical' }}
               value={customBadwordsText}
               onChange={(e) => setCustomBadwordsText(e.target.value)}
               placeholder="badword1, badword2, ..."
             />
-            <div className="form-actions mt-2">
+            <div className="mt-2">
               <button type="button" className="btn primary" onClick={onSaveBadwords}>
-                <Save size={13} /> {t.saveBadwordsBtn}
+                <Save size={12} /> {t.saveBadwordsBtn}
               </button>
             </div>
           </div>
@@ -859,19 +815,14 @@ export function SecurityToolPage({
               </p>
             </div>
             <div className="symbol sg">
-              <MessageSquareHeart size={16} />
+              <MessageSquareHeart size={15} />
             </div>
           </div>
 
           <div className="toggle-row">
             <div className="toggle-info">
               <h4>
-                <span className="flex items-center gap-1.5 flex-wrap">
-                  {isBn ? 'অ্যাডমিনকে মেনশন করলে অটো রিপ্লাই' : 'Admin Mention Auto-Reply (Zero API)'}
-                  <span className={`badge ${settings.adminMentionReplyEnabled !== false ? 'badge-green' : 'badge-amber'}`}>
-                    {settings.adminMentionReplyEnabled !== false ? 'ACTIVE' : 'OFF'}
-                  </span>
-                </span>
+                {isBn ? 'অ্যাডমিনকে মেনশন করলে অটো রিপ্লাই' : 'Admin Mention Auto-Reply (Zero API)'}
               </h4>
               <p>
                 {isBn
@@ -890,18 +841,18 @@ export function SecurityToolPage({
           </div>
 
           {settings.adminMentionReplyEnabled !== false && (
-            <div className="mt-3 p-3 rounded-xl border border-emerald-200 bg-emerald-50/40 space-y-2.5">
+            <div className="subpanel-soft mt-3 space-y-2.5">
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                <span className="text-[11px] font-bold text-emerald-950">
-                  {isBn ? '🛡️ অ্যাডমিন মেনশন রিপ্লাই কাস্টমাইজ করুন' : '🛡️ Customize Admin Mention Reply'}
+                <span className="text-[11px] font-bold text-[#0f291e]">
+                  {isBn ? 'অ্যাডমিন মেনশন রিপ্লাই কাস্টমাইজ করুন' : 'Customize Admin Mention Reply'}
                 </span>
                 <button type="button" className="btn primary" onClick={onSaveAdminMentionConfig}>
                   <Save size={11} /> {isBn ? 'সেভ করুন' : 'Save'}
                 </button>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <div className="bg-white p-2 rounded-lg border border-slate-200">
-                  <label className="block text-[9.5px] font-bold text-slate-500 mb-1">
+                <div className="bg-white p-2 rounded-[10px] border border-emerald-950/[0.08]">
+                  <label className="block text-[9.5px] font-bold text-[#5f7368] mb-1">
                     {isBn ? 'কাকে মেনশন করলে বলবে' : 'Trigger Target'}
                   </label>
                   <select
@@ -910,14 +861,14 @@ export function SecurityToolPage({
                       const nextTarget = e.target.value === 'boss_only' ? 'boss_only' : 'all_admins';
                       onUpdateToggle('adminMentionReplyTarget', nextTarget);
                     }}
-                    className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-bold bg-white"
+                    className="field"
                   >
                     <option value="all_admins">{isBn ? 'যেকোনো গ্রুপ অ্যাডমিন' : 'Any Group Admin'}</option>
                     <option value="boss_only">{isBn ? 'শুধু বস অ্যাডমিনকে' : 'Boss Admin Only'}</option>
                   </select>
                 </div>
-                <div className="sm:col-span-2 bg-white p-2 rounded-lg border border-slate-200">
-                  <label className="block text-[9.5px] font-bold text-slate-500 mb-1">
+                <div className="sm:col-span-2 bg-white p-2 rounded-[10px] border border-emerald-950/[0.08]">
+                  <label className="block text-[9.5px] font-bold text-[#5f7368] mb-1">
                     {isBn
                       ? 'মেনশন করলে বট যা লিখবে ({{admin}} = অ্যাডমিন, {{user}} = যে মেনশন করেছে)'
                       : 'Auto-Reply Message ({{admin}} = admin, {{user}} = sender)'}
@@ -931,7 +882,7 @@ export function SecurityToolPage({
                     onChange={(e) =>
                       setSettings((prev: any) => ({ ...prev, adminMentionReplyMessage: e.target.value }))
                     }
-                    className="w-full px-2 py-1 border border-slate-300 rounded text-xs outline-none focus:border-emerald-500"
+                    className="w-full px-2 py-1.5 border border-emerald-950/[0.1] rounded-lg text-[11px] outline-none focus:border-[#087f55]"
                   />
                 </div>
               </div>
@@ -955,19 +906,14 @@ export function SecurityToolPage({
               </p>
             </div>
             <div className="symbol sb">
-              <Bot size={16} />
+              <Bot size={15} />
             </div>
           </div>
 
           <div className="toggle-row">
             <div className="toggle-info">
               <h4>
-                <span className="flex items-center gap-1.5 flex-wrap">
-                  {isBn ? 'অটো সালাম উত্তর (গ্রুপে শুধু সালামের জবাব)' : 'Auto Salam Reply (Zero API)'}
-                  <span className={`badge ${settings.autoSalamReplyEnabled !== false ? 'badge-green' : 'badge-amber'}`}>
-                    {settings.autoSalamReplyEnabled !== false ? 'ACTIVE' : 'OFF'}
-                  </span>
-                </span>
+                {isBn ? 'অটো সালাম উত্তর (গ্রুপে শুধু সালামের জবাব)' : 'Auto Salam Reply (Zero API)'}
               </h4>
               <p>
                 {isBn
@@ -988,12 +934,7 @@ export function SecurityToolPage({
           <div className="toggle-row">
             <div className="toggle-info">
               <h4>
-                <span className="flex items-center gap-1.5 flex-wrap">
-                  {isBn ? 'বট টাইপিং ইন্ডিকেটর (Typing...)' : 'Bot Typing Indicator'}
-                  <span className={`badge ${settings.botTypingEnabled !== false ? 'badge-green' : 'badge-amber'}`}>
-                    {settings.botTypingEnabled !== false ? 'ACTIVE' : 'OFF'}
-                  </span>
-                </span>
+                {isBn ? 'বট টাইপিং ইন্ডিকেটর (Typing...)' : 'Bot Typing Indicator'}
               </h4>
               <p>
                 {isBn
@@ -1016,9 +957,6 @@ export function SecurityToolPage({
               <h4>
                 <span className="flex items-center gap-1.5 flex-wrap">
                   {t.silentModTitle}
-                  <span className={`badge ${settings.silentModeration ? 'badge-red' : 'badge-blue'}`}>
-                    {settings.silentModeration ? 'SILENT' : 'LOUD'}
-                  </span>
                   {renderInfoBtn('warningManagement')}
                 </span>
               </h4>
@@ -1039,9 +977,6 @@ export function SecurityToolPage({
               <h4>
                 <span className="flex items-center gap-1.5 flex-wrap">
                   {t.botReplyTitle}
-                  <span className={`badge ${settings.botReply ? 'badge-green' : 'badge-amber'}`}>
-                    {settings.botReply ? 'ACTIVE' : 'OFF'}
-                  </span>
                   {renderInfoBtn('botReply')}
                 </span>
               </h4>
@@ -1065,7 +1000,7 @@ export function SecurityToolPage({
           <div className="card-head">
             <div>
               <h3 className="font-extrabold text-[13px]">
-                {isBn ? '🚨 বস ইনবক্স অ্যালার্ট ও অটো সার্ভার নোটিশ' : '🚨 Boss Inbox Fight Alert & Server Notice'}
+                {isBn ? 'বস ইনবক্স অ্যালার্ট ও অটো সার্ভার নোটিশ' : 'Boss Inbox Fight Alert & Server Notice'}
               </h3>
               <p>
                 {isBn
@@ -1074,26 +1009,48 @@ export function SecurityToolPage({
               </p>
             </div>
             <div className="symbol so">
-              <BellRing size={16} />
+              <BellRing size={15} />
             </div>
           </div>
 
-          <div className="p-3 rounded-xl border border-indigo-200 bg-indigo-50/40 space-y-3">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <span className="badge badge-blue">{isBn ? 'API ছাড়া কাজ করে' : 'Zero-API'}</span>
-              <div className="flex items-center gap-1.5">
-                <button type="button" className="btn outline" onClick={onTestBossAlert}>
-                  <Send size={11} /> {isBn ? 'বস টেস্ট' : 'Test Boss'}
-                </button>
-                <button type="button" className="btn primary" onClick={onSaveBossAndNoticeConfig}>
-                  <Save size={11} /> {isBn ? 'সেভ করুন' : 'Save'}
-                </button>
-              </div>
+          <div className="toggle-row">
+            <div className="toggle-info">
+              <h4>{isBn ? 'গ্রুপ ঝগড়া ও গালি অ্যালার্ট' : 'Group Fight Inbox Alert'}</h4>
+              <p>{isBn ? 'একাধিক সদস্য একসাথে গালি বা ঝগড়া শুরু করলে সাথে সাথে বস ইনবক্সে জানাবে।' : 'Instant Boss alert when heated group arguments start.'}</p>
             </div>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={settings.bossFightAlertEnabled !== false}
+                onChange={(e) =>
+                  setSettings((prev: any) => ({ ...prev, bossFightAlertEnabled: e.target.checked }))
+                }
+              />
+              <span className="slider"></span>
+            </label>
+          </div>
 
+          <div className="toggle-row">
+            <div className="toggle-info">
+              <h4>{isBn ? 'অটো সার্ভার হেলথ নোটিশ' : 'Auto Server Health Notice'}</h4>
+              <p>{isBn ? 'সার্ভারে ডিসকানেক্ট বা মেমোরি সমস্যা দেখা দিলে স্বয়ংক্রিয় সতর্কবার্তা পাঠাবে।' : 'Automatic notification on server issues or disconnections.'}</p>
+            </div>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={settings.serverErrorNoticeEnabled !== false}
+                onChange={(e) =>
+                  setSettings((prev: any) => ({ ...prev, serverErrorNoticeEnabled: e.target.checked }))
+                }
+              />
+              <span className="slider"></span>
+            </label>
+          </div>
+
+          <div className="subpanel-soft mt-3 space-y-2.5">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">
+              <div className="bg-white p-2 rounded-[10px] border border-emerald-950/[0.08]">
+                <label className="block text-[9.5px] font-bold text-[#5f7368] mb-1">
                   {isBn ? 'শুধুমাত্র এই একজন বস অ্যাডমিন নম্বর' : 'Single Boss Admin WhatsApp Number'}
                 </label>
                 <input
@@ -1101,11 +1058,11 @@ export function SecurityToolPage({
                   value={settings.bossAdminNumber ?? '8801632222592'}
                   onChange={(e) => setSettings((prev: any) => ({ ...prev, bossAdminNumber: e.target.value }))}
                   placeholder="8801632222592"
-                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-xs font-mono font-bold"
+                  className="field font-mono font-bold"
                 />
               </div>
-              <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">
+              <div className="bg-white p-2 rounded-[10px] border border-emerald-950/[0.08]">
+                <label className="block text-[9.5px] font-bold text-[#5f7368] mb-1">
                   {isBn ? 'সার্ভার সমস্যা হলে কোথায় নোটিশ যাবে' : 'Server Problem Notice Target'}
                 </label>
                 <select
@@ -1116,7 +1073,7 @@ export function SecurityToolPage({
                       serverErrorNoticeTarget: e.target.value as 'boss_inbox' | 'groups' | 'both',
                     }))
                   }
-                  className="w-full px-2 py-1.5 border border-slate-300 rounded text-xs font-bold bg-white"
+                  className="field font-bold"
                 >
                   <option value="boss_inbox">{isBn ? 'শুধু বস অ্যাডমিনের ইনবক্সে' : 'Boss Inbox Only'}</option>
                   <option value="groups">{isBn ? 'সক্রিয় গ্রুপগুলোতে' : 'Active Groups'}</option>
@@ -1125,29 +1082,9 @@ export function SecurityToolPage({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <label className="bg-white p-2.5 rounded-lg border border-slate-200 flex items-center justify-between gap-2 cursor-pointer">
-                <span className="text-[10.5px] font-bold text-slate-700">{isBn ? 'ঝগড়া অ্যালার্ট' : 'Fight Alert'}</span>
-                <input
-                  type="checkbox"
-                  checked={settings.bossFightAlertEnabled !== false}
-                  onChange={(e) =>
-                    setSettings((prev: any) => ({ ...prev, bossFightAlertEnabled: e.target.checked }))
-                  }
-                />
-              </label>
-              <label className="bg-white p-2.5 rounded-lg border border-slate-200 flex items-center justify-between gap-2 cursor-pointer">
-                <span className="text-[10.5px] font-bold text-slate-700">{isBn ? 'সার্ভার নোটিশ' : 'Server Notice'}</span>
-                <input
-                  type="checkbox"
-                  checked={settings.serverErrorNoticeEnabled !== false}
-                  onChange={(e) =>
-                    setSettings((prev: any) => ({ ...prev, serverErrorNoticeEnabled: e.target.checked }))
-                  }
-                />
-              </label>
-              <div className="bg-white p-2 rounded-lg border border-slate-200">
-                <label className="block text-[9.5px] font-bold text-slate-500 mb-0.5">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-white p-2 rounded-[10px] border border-emerald-950/[0.08]">
+                <label className="block text-[9.5px] font-bold text-[#5f7368] mb-0.5">
                   {isBn ? 'কতজন গালি/ঝগড়া করলে' : 'Min Offenders'}
                 </label>
                 <input
@@ -1158,11 +1095,11 @@ export function SecurityToolPage({
                   onChange={(e) =>
                     setSettings((prev: any) => ({ ...prev, bossFightMinPeople: Number(e.target.value || 3) }))
                   }
-                  className="w-full px-1.5 py-1 border border-slate-300 rounded text-xs font-bold"
+                  className="field font-bold"
                 />
               </div>
-              <div className="bg-white p-2 rounded-lg border border-slate-200">
-                <label className="block text-[9.5px] font-bold text-slate-500 mb-0.5">
+              <div className="bg-white p-2 rounded-[10px] border border-emerald-950/[0.08]">
+                <label className="block text-[9.5px] font-bold text-[#5f7368] mb-0.5">
                   {isBn ? 'সময় উইন্ডো (মিনিট)' : 'Window (min)'}
                 </label>
                 <input
@@ -1173,9 +1110,18 @@ export function SecurityToolPage({
                   onChange={(e) =>
                     setSettings((prev: any) => ({ ...prev, bossFightWindowMinutes: Number(e.target.value || 5) }))
                   }
-                  className="w-full px-1.5 py-1 border border-slate-300 rounded text-xs font-bold"
+                  className="field font-bold"
                 />
               </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-1.5 pt-1">
+              <button type="button" className="btn outline" onClick={onTestBossAlert}>
+                <Send size={11} /> {isBn ? 'বস টেস্ট' : 'Test Boss'}
+              </button>
+              <button type="button" className="btn primary" onClick={onSaveBossAndNoticeConfig}>
+                <Save size={11} /> {isBn ? 'সেভ করুন' : 'Save'}
+              </button>
             </div>
           </div>
         </div>

@@ -2468,29 +2468,34 @@ export default function App() {
       {/* Toast Notification */}
       {showToast && <div className="toast block">{toastMessage}</div>}
 
-      {/* Compact Header */}
+      {/* Clean Frosted Header */}
       <header className="header">
         <div className="brand">
           <div className="brandmark">
-            <ShieldCheck size={20} />
+            <ShieldCheck size={17} />
           </div>
-          <div className="brandname">
-            WA<span>Guard</span>
+          <div className="min-w-0">
+            <div className="brandname">
+              WA<span>Guard</span>
+            </div>
+            <div className="text-[8.5px] font-bold tracking-[0.12em] uppercase text-[#64748b] leading-none mt-0.5 hidden sm:block">
+              WHATSAPP BOT CONTROL
+            </div>
           </div>
         </div>
         <div className="header-right">
           <div
-            className={`flex items-center gap-1 px-1.5 sm:px-2 py-1 text-[10px] sm:text-[11px] font-semibold whitespace-nowrap shrink-0 rounded-md ${
+            className={`flex items-center gap-1.5 px-2 py-1 text-[10px] font-bold whitespace-nowrap shrink-0 rounded-lg border ${
               liveStatus.online
-                ? 'bg-[#e9f7ef] text-[#108255]'
+                ? 'bg-[#e8f8f0] text-[#07774e] border-emerald-200/80'
                 : liveStatus.status === 'pairing'
-                ? 'bg-amber-100 text-amber-800'
-                : 'bg-gray-100 text-gray-600'
+                ? 'bg-amber-50 text-amber-800 border-amber-200/80'
+                : 'bg-slate-100/90 text-slate-600 border-slate-200/80'
             }`}
           >
             <span
-              className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full shrink-0 ${
-                liveStatus.online ? 'bg-[#108255]' : liveStatus.status === 'pairing' ? 'bg-amber-500' : 'bg-gray-400'
+              className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                liveStatus.online ? 'bg-[#10b975]' : liveStatus.status === 'pairing' ? 'bg-amber-500' : 'bg-slate-400'
               }`}
             ></span>
             <span>
@@ -2504,7 +2509,7 @@ export default function App() {
 
           {/* Bengali / English Language Switcher Button */}
           <button
-            className="flex items-center gap-1 px-2 py-1 rounded-md border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-[10px] sm:text-xs font-extrabold transition-colors cursor-pointer shadow-xs shrink-0 whitespace-nowrap"
+            className="flex items-center gap-1 px-2 py-1 rounded-lg border border-emerald-200 bg-emerald-50/80 hover:bg-emerald-100 text-emerald-900 text-[10px] font-extrabold transition-colors cursor-pointer shrink-0 whitespace-nowrap"
             onClick={toggleUiLang}
             title={isBn ? 'Switch UI to English' : 'বাংলায় পরিবর্তন করুন'}
           >
@@ -2517,9 +2522,9 @@ export default function App() {
             onClick={() => navigateToPage(activePage)}
             title={t.refresh}
           >
-            <RefreshCw size={15} />
+            <RefreshCw size={14} />
           </button>
-          <div className="avatar text-xs font-bold">W</div>
+          <div className="avatar text-[10.5px] font-extrabold">WG</div>
         </div>
       </header>
 
@@ -2529,73 +2534,73 @@ export default function App() {
         <aside className="sidebar">
           <div className="side-label">{t.mainMenu}</div>
           <button className={`nav ${activePage === 'home' ? 'active' : ''}`} onClick={() => navigateToPage('home')}>
-            <LayoutDashboard size={16} /> {t.home}
+            <LayoutDashboard size={15} /> {t.home}
           </button>
           <button className={`nav ${activePage === 'inbox' ? 'active' : ''}`} onClick={() => navigateToPage('inbox')}>
-            <Inbox size={16} /> {isBn ? 'গ্রুপ ইনবক্স' : 'Group Inbox'}
+            <Inbox size={15} /> {isBn ? 'গ্রুপ ইনবক্স' : 'Group Inbox'}
           </button>
           <button className={`nav ${activePage === 'security' ? 'active' : ''}`} onClick={() => navigateToPage('security')}>
-            <ShieldCheck size={16} /> {t.security}
+            <ShieldCheck size={15} /> {t.security}
           </button>
           <button className={`nav ${activePage === 'warnings' ? 'active' : ''}`} onClick={() => navigateToPage('warnings')}>
-            <AlertTriangle size={16} /> {isBn ? 'সতর্কবার্তা' : 'Warnings'}
+            <AlertTriangle size={15} /> {isBn ? 'সতর্কবার্তা' : 'Warnings'}
           </button>
           <button className={`nav ${activePage === 'blocks' ? 'active' : ''}`} onClick={() => navigateToPage('blocks')}>
-            <Lock size={16} /> {isBn ? '১০ মি. ব্লক' : '10M Blocks'}
+            <Lock size={15} /> {isBn ? '১০ মি. ব্লক' : '10M Blocks'}
           </button>
           <button className={`nav ${activePage === 'memberblock' ? 'active' : ''}`} onClick={() => navigateToPage('memberblock')}>
-            <UserX size={16} /> {isBn ? 'মেম্বার লিস্ট ব্লক' : 'Member Block'}
+            <UserX size={15} /> {isBn ? 'মেম্বার লিস্ট ব্লক' : 'Member Block'}
           </button>
           <button className={`nav ${activePage === 'logs' ? 'active' : ''}`} onClick={() => navigateToPage('logs')}>
-            <Activity size={16} /> {isBn ? 'লাইভ লগ' : 'Live Logs'}
+            <Activity size={15} /> {isBn ? 'লাইভ লগ' : 'Live Logs'}
           </button>
 
           <div className="side-label mt-3">{isBn ? 'স্মার্ট ফিচার' : 'SMART FEATURES'}</div>
           <button className={`nav ${activePage === 'nightmode' ? 'active' : ''}`} onClick={() => navigateToPage('nightmode')}>
-            <Moon size={16} /> {isBn ? 'নাইট মোড' : 'Night Mode'}
+            <Moon size={15} /> {isBn ? 'নাইট মোড' : 'Night Mode'}
           </button>
           <button className={`nav ${activePage === 'anticall' ? 'active' : ''}`} onClick={() => navigateToPage('anticall')}>
-            <PhoneOff size={16} /> {isBn ? 'অ্যান্টি-কল' : 'Anti-Call'}
+            <PhoneOff size={15} /> {isBn ? 'অ্যান্টি-কল' : 'Anti-Call'}
           </button>
           <button className={`nav ${activePage === 'aivision' ? 'active' : ''}`} onClick={() => navigateToPage('aivision')}>
-            <ScanEye size={16} /> {isBn ? 'ভয়েস ও ছবি AI' : 'Voice & Vision'}
+            <ScanEye size={15} /> {isBn ? 'ভয়েস ও ছবি AI' : 'Voice & Vision'}
           </button>
           <button className={`nav ${activePage === 'voicemod' ? 'active' : ''}`} onClick={() => navigateToPage('voicemod')}>
-            <AudioLines size={16} /> {isBn ? 'ভয়েস গালি গার্ড' : 'Voice Abuse AI'}
+            <AudioLines size={15} /> {isBn ? 'ভয়েস গালি গার্ড' : 'Voice Abuse AI'}
           </button>
           <button className={`nav ${activePage === 'activity' ? 'active' : ''}`} onClick={() => navigateToPage('activity')}>
-            <Trophy size={16} /> {isBn ? 'অ্যাক্টিভিটি র‍্যাংক' : 'Activity Rank'}
+            <Trophy size={15} /> {isBn ? 'অ্যাক্টিভিটি র‍্যাংক' : 'Activity Rank'}
           </button>
           <button className={`nav ${activePage === 'keywords' ? 'active' : ''}`} onClick={() => navigateToPage('keywords')}>
-            <Hash size={16} /> {isBn ? 'কীওয়ার্ড উত্তর' : 'Keywords'}
+            <Hash size={15} /> {isBn ? 'কীওয়ার্ড উত্তর' : 'Keywords'}
           </button>
           <button className={`nav ${activePage === 'pinlock' ? 'active' : ''}`} onClick={() => navigateToPage('pinlock')}>
-            <KeyRound size={16} /> {isBn ? 'অ্যাডমিন পিন' : 'Admin PIN'}
+            <KeyRound size={15} /> {isBn ? 'অ্যাডমিন পিন' : 'Admin PIN'}
           </button>
 
           <div className="side-label mt-3">{isBn ? 'সিস্টেম ও বট' : 'SYSTEM & BOT'}</div>
           <button className={`nav ${activePage === 'maya' ? 'active' : ''}`} onClick={() => navigateToPage('maya')}>
-            <Heart size={16} /> {t.maya}
+            <Heart size={15} /> {t.maya}
           </button>
           <button className={`nav ${activePage === 'companion' ? 'active' : ''}`} onClick={() => navigateToPage('companion')}>
-            <Sparkles size={16} /> {isBn ? '২য় AI অ্যাকাউন্ট' : '2nd Female AI'}
+            <Sparkles size={15} /> {isBn ? '২য় AI অ্যাকাউন্ট' : '2nd Female AI'}
           </button>
           <button className={`nav ${activePage === 'integrations' ? 'active' : ''}`} onClick={() => navigateToPage('integrations')}>
-            <Plug size={16} /> {t.integrations}
+            <Plug size={15} /> {t.integrations}
           </button>
           <button className={`nav ${activePage === 'storagecleanup' ? 'active' : ''}`} onClick={() => navigateToPage('storagecleanup')}>
-            <HardDrive size={16} /> {isBn ? 'স্টোরেজ ও ক্লিনআপ' : 'Storage Cleanup'}
+            <HardDrive size={15} /> {isBn ? 'স্টোরেজ ও ক্লিনআপ' : 'Storage Cleanup'}
           </button>
           <button className={`nav ${activePage === 'groups' ? 'active' : ''}`} onClick={() => navigateToPage('groups')}>
-            <Users size={16} /> {t.groups}
+            <Users size={15} /> {t.groups}
           </button>
           <button className={`nav ${activePage === 'pairing' ? 'active' : ''}`} onClick={() => navigateToPage('pairing')}>
-            <Smartphone size={16} /> {t.connect}
+            <Smartphone size={15} /> {t.connect}
           </button>
 
           <div className="side-bottom">
-            <div className="flex items-center gap-1.5">
-              <Radio size={16} className="text-[#087f55]" />
+            <div className="flex items-center gap-2">
+              <Radio size={15} className="text-[#087f55] shrink-0" />
               <strong>REAL BAILEYS</strong>
             </div>
             <p className="mt-1 text-[10px]">
@@ -2611,28 +2616,35 @@ export default function App() {
             <section className="page active" id="home">
               <div className="page-head">
                 <div>
+                  <div className="text-[10px] font-bold tracking-[0.09em] uppercase text-[#64748b] mb-0.5">
+                    {isBn ? 'স্বাগতম' : 'WELCOME BACK'}
+                  </div>
                   <h1>{t.overviewTitle}</h1>
-                  <p>{t.overviewDesc}</p>
                 </div>
-                <button className="btn outline" onClick={loadDashboard}>
-                  <RefreshCw size={13} />
-                  <span className="btn-text">{t.refresh}</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-[#64748b] hidden sm:inline">
+                    {isBn ? 'লাইভ ওভারভিউ' : 'LIVE OVERVIEW'}
+                  </span>
+                  <button className="btn outline" onClick={loadDashboard}>
+                    <RefreshCw size={12} />
+                    <span className="btn-text">{t.refresh}</span>
+                  </button>
+                </div>
               </div>
 
               {/* Static Host Backend Warning */}
               {isStaticHost && !baileysUrl && (
-                <div className="mb-5 p-4  border border-rose-200 bg-rose-50 text-rose-900 flex items-start gap-3 shadow-sm">
-                  <div className="w-8 h-8  bg-rose-100 flex items-center justify-center shrink-0 text-rose-600">
-                    <Plug size={18} />
+                <div className="mb-4 p-3.5 rounded-2xl border border-rose-200 bg-rose-50 text-rose-900 flex items-start gap-2.5 shadow-sm">
+                  <div className="w-8 h-8 rounded-xl bg-rose-100 flex items-center justify-center shrink-0 text-rose-600">
+                    <Plug size={16} />
                   </div>
                   <div className="flex-1">
-                    <h4 className="font-bold text-sm">ব্যাকএন্ড সার্ভার কানেক্ট করা নেই!</h4>
-                    <p className="text-xs mt-1 leading-relaxed opacity-90">
+                    <h4 className="font-bold text-xs">ব্যাকএন্ড সার্ভার কানেক্ট করা নেই!</h4>
+                    <p className="text-[11px] mt-0.5 leading-relaxed opacity-90">
                       এই অ্যাপটি সরাসরি আপনার <b>Google Cloud Run</b> অথবা ফোনের <b>Termux (127.0.0.1:3000)</b> সার্ভারের সাথে কাজ করে। ফ্রি Render লিংক WhatsApp ব্যান ঝুঁকি বাড়ায়—তাই <b>Integrations</b> পেজে আপনার Google Cloud Run বা লোকাল সার্ভার লিংক সেভ করুন।
                     </p>
-                    <button 
-                      className="mt-3 px-3 py-1.5 bg-rose-600 text-white text-[10px] font-bold  hover:bg-rose-700 transition-colors"
+                    <button
+                      className="mt-2.5 px-3 py-1.5 rounded-xl bg-rose-600 text-white text-[11px] font-bold hover:bg-rose-700 transition-colors"
                       onClick={() => navigateToPage('integrations')}
                     >
                       কানেক্ট ব্যাকএন্ড
@@ -2641,151 +2653,151 @@ export default function App() {
                 </div>
               )}
 
-              {/* CATEGORY 0: OVERVIEW & QUICK STATS */}
-              <div className="category-system-header mt-8 mb-4 px-1">
-                 <div className="flex items-center gap-2 mb-1">
-                    <div className="w-1.5 h-1.5  bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
-                    <span className="text-[10px] font-black text-blue-600 uppercase tracking-[0.2em]">System 0</span>
-                 </div>
-                 <h2 className="text-sm font-black text-slate-800 uppercase tracking-tight opacity-90">{isBn ? 'ড্যাশবোর্ড ওভারভিউ' : 'Dashboard Overview & Stats'}</h2>
+              {/* Compact Low-Height Emerald Hero Card (Full Width, No Security Card on Home) */}
+              <div className="hero flex items-center justify-between gap-2.5 sm:gap-4">
+                <div className="hero-content flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white/15 border border-white/25 text-[8.5px] font-bold tracking-wide uppercase">
+                      <span
+                        className="w-1.5 h-1.5 rounded-full shrink-0"
+                        style={{
+                          background: liveStatus.online ? '#86efac' : liveStatus.status === 'pairing' ? '#fde047' : '#facc15',
+                        }}
+                      />
+                      <span>
+                        {liveStatus.online
+                          ? t.connected
+                          : liveStatus.status === 'pairing'
+                          ? t.pairingActive
+                          : t.disconnected}
+                      </span>
+                    </div>
+                    {renderInfoBtn('botConnection')}
+                  </div>
+
+                  <h3 className="text-white mt-1.5">{t.botConnTitle}</h3>
+                  <p className="line-clamp-2">
+                    {liveStatus.online
+                      ? t.botConnDescConnected(liveStatus.user?.name || liveStatus.phoneNumber || 'Connected')
+                      : t.botConnDescDisconnected}
+                  </p>
+
+                  <div className="hero-status">
+                    <span
+                      className="dot"
+                      style={{
+                        background: liveStatus.online ? '#4ade80' : liveStatus.status === 'pairing' ? '#facc15' : '#e2e8f0',
+                      }}
+                    ></span>
+                    <span className="truncate">{liveStatus.stepMessage}</span>
+                  </div>
+
+                  <div className="hero-actions">
+                    {liveStatus.online ? (
+                      <>
+                        <button
+                          className="btn bg-rose-600 hover:bg-rose-700 text-white"
+                          onClick={handleDisconnect}
+                        >
+                          <LogOut size={11} /> {t.disconnectWa}
+                        </button>
+                        <button
+                          className="btn bg-white/20 text-white"
+                          onClick={openSessionBackupSection}
+                        >
+                          <Download size={11} /> {isBn ? 'ব্যাকআপ' : 'Backup'}
+                        </button>
+                      </>
+                    ) : (
+                      <button className="btn" onClick={() => navigateToPage('pairing')}>
+                        <LinkIcon size={11} /> {t.connectWa}
+                      </button>
+                    )}
+                    <button className="btn bg-white/20 text-white" onClick={loadDashboard}>
+                      <RefreshCw size={11} /> {t.syncStatus}
+                    </button>
+                  </div>
+
+                  {!liveStatus.online && (liveStatus.latestDisconnect || liveStatus.lastError) && (
+                    <div className="mt-1.5 px-2 py-1 rounded-lg bg-black/20 border border-white/15 text-left text-[9.5px] leading-tight text-white/95 truncate">
+                      <span className="font-extrabold text-amber-200 mr-1">
+                        {isBn ? 'কারণ:' : 'Cause:'}
+                      </span>
+                      <span>
+                        {liveStatus.latestDisconnect
+                          ? isBn
+                            ? liveStatus.latestDisconnect.titleBn
+                            : liveStatus.latestDisconnect.titleEn
+                          : liveStatus.lastError}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Friendly AI Bot Emblem Graphic (Visible on BOTH Mobile and Desktop) */}
+                <div className="flex flex-col items-center justify-center shrink-0 relative z-10 pointer-events-none select-none" aria-hidden="true">
+                  <svg className="w-[62px] h-[62px] sm:w-[82px] sm:h-[82px] drop-shadow-[0_4px_10px_rgba(6,78,52,0.24)]" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <line x1="60" y1="15" x2="60" y2="33" stroke="white" strokeWidth="5" strokeLinecap="round" strokeOpacity="0.95" />
+                    <circle cx="60" cy="13" r="5" fill="white" />
+                    <rect x="24" y="33" width="72" height="54" rx="18" fill="white" />
+                    <rect x="12" y="49" width="8" height="22" rx="4" fill="white" fillOpacity="0.88" />
+                    <rect x="100" y="49" width="8" height="22" rx="4" fill="white" fillOpacity="0.88" />
+                    <rect x="34" y="43" width="52" height="34" rx="11" fill="#087f55" />
+                    <circle cx="48" cy="56" r="4.2" fill="white" />
+                    <circle cx="72" cy="56" r="4.2" fill="white" />
+                    <path d="M49 67C53 71.5 67 71.5 71 67" stroke="white" strokeWidth="3.5" strokeLinecap="round" />
+                    <rect x="40" y="91" width="12" height="10" rx="5" fill="white" fillOpacity="0.9" />
+                    <rect x="68" y="91" width="12" height="10" rx="5" fill="white" fillOpacity="0.9" />
+                  </svg>
+                  <span className="mt-0.5 px-1.5 py-0.5 rounded-full bg-white/18 border border-white/25 text-[7.5px] font-extrabold tracking-widest text-white uppercase">
+                    AI GUARD
+                  </span>
+                </div>
               </div>
 
-              {/* Compact Stats */}
+              {/* Server Statistics Header & 4-Card KPI Grid */}
+              <div className="flex items-center justify-between gap-2 mt-4 mb-2.5 px-0.5">
+                <h2 className="text-[13.5px] sm:text-[15px] font-extrabold text-[#0f291e] tracking-tight">
+                  {isBn ? 'সার্ভার পরিসংখ্যান' : 'Server statistics'}
+                </h2>
+                <span className="text-[10.5px] font-semibold text-[#64748b]">
+                  {isBn ? 'রিয়েল-টাইম ব্যাকএন্ড ডাটা' : 'Verified backend data'}
+                </span>
+              </div>
+
+              {/* Compact 4-Card Stats (Matching Demo Image Layout: Icon top-left, Value, Label) */}
               <div className="stats">
                 <div className="stat">
-                  <div className="stat-top">
-                    <small>{t.messagesChecked}</small>
-                    <div className="symbol sg">
-                      <MessagesSquare size={16} />
-                    </div>
+                  <div className="symbol sg">
+                    <MessagesSquare size={16} />
                   </div>
                   <h2>{overview.messagesChecked}</h2>
+                  <small>{t.messagesChecked}</small>
                   <p>{t.realtimeEngine}</p>
                 </div>
                 <div className="stat">
-                  <div className="stat-top">
-                    <small>{t.warnings}</small>
-                    <div className="symbol so">
-                      <AlertTriangle size={16} />
-                    </div>
+                  <div className="symbol so">
+                    <AlertTriangle size={16} />
                   </div>
                   <h2>{overview.warnings}</h2>
+                  <small>{t.warnings}</small>
                   <p>{t.activeWarnings}</p>
                 </div>
                 <div className="stat">
-                  <div className="stat-top">
-                    <small>{t.blockedItems}</small>
-                    <div className="symbol sr">
-                      <Ban size={16} />
-                    </div>
+                  <div className="symbol sr">
+                    <Ban size={16} />
                   </div>
                   <h2>{overview.blockedWords}</h2>
+                  <small>{t.blockedItems}</small>
                   <p>{t.deletedViolations}</p>
                 </div>
                 <div className="stat">
-                  <div className="stat-top">
-                    <small>{t.activeGroups}</small>
-                    <div className="symbol sb">
-                      <Users size={16} />
-                    </div>
+                  <div className="symbol sb">
+                    <Users size={16} />
                   </div>
                   <h2>{overview.groups || groups.length}</h2>
+                  <small>{t.activeGroups}</small>
                   <p>{t.protectedGroups}</p>
-                </div>
-              </div>
-
-              {/* Hero Status Card */}
-              <div className="grid2 !mt-5">
-                <div className="hero">
-                  <div className="hero-content">
-                    <div className="flex items-center justify-between gap-2">
-                      <h3 className="font-bold text-sm text-white">{t.botConnTitle}</h3>
-                      {renderInfoBtn('botConnection')}
-                    </div>
-                    <p className="text-xs mt-1">
-                      {liveStatus.online
-                        ? t.botConnDescConnected(liveStatus.user?.name || liveStatus.phoneNumber || 'Connected')
-                        : t.botConnDescDisconnected}
-                    </p>
-
-                    <div className="hero-status">
-                      <span
-                        className="dot"
-                        style={{
-                          background: liveStatus.online ? '#4ade80' : liveStatus.status === 'pairing' ? '#facc15' : '#e2e8f0',
-                        }}
-                      ></span>
-                      <span>{liveStatus.stepMessage}</span>
-                    </div>
-
-                    <div className="hero-actions">
-                      {liveStatus.online ? (
-                        <>
-                          <button
-                            className="btn bg-rose-600 hover:bg-rose-700 text-white"
-                            onClick={handleDisconnect}
-                          >
-                            <LogOut size={13} /> {t.disconnectWa}
-                          </button>
-                          <button
-                            className="btn bg-white/20 text-white"
-                            onClick={openSessionBackupSection}
-                          >
-                            <Download size={13} /> {isBn ? 'সেশন ব্যাকআপ' : 'Session Backup'}
-                          </button>
-                        </>
-                      ) : (
-                        <button className="btn" onClick={() => navigateToPage('pairing')}>
-                          <LinkIcon size={13} /> {t.connectWa}
-                        </button>
-                      )}
-                      <button className="btn bg-white/20 text-white" onClick={loadDashboard}>
-                        <RefreshCw size={13} /> {t.syncStatus}
-                      </button>
-                    </div>
-
-                    {!liveStatus.online && (liveStatus.latestDisconnect || liveStatus.lastError) && (
-                      <div className="mt-3 p-2.5 rounded-xl bg-black/25 border border-white/20 text-left">
-                        <span className="text-[10.5px] font-extrabold text-amber-200 block">
-                          {isBn
-                            ? `⚠️ ডিসকানেক্ট কারণ (${liveStatus.latestDisconnect?.sourceLabelBn || 'বট'}):`
-                            : '⚠️ Disconnect Cause:'}
-                        </span>
-                        <div className="text-[11px] font-bold text-white mt-0.5 leading-snug">
-                          {liveStatus.latestDisconnect
-                            ? isBn
-                              ? liveStatus.latestDisconnect.titleBn
-                              : liveStatus.latestDisconnect.titleEn
-                            : liveStatus.lastError}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="card" style={{ marginBottom: 0 }}>
-                  <div className="card-head">
-                    <div>
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <h3>{t.groupSecTitle}</h3>
-                        {renderInfoBtn('adminShield')}
-                      </div>
-                      <p>Active Moderation Shield</p>
-                    </div>
-                    <div className="symbol sp">
-                      <ShieldCheck size={16} />
-                    </div>
-                  </div>
-                  <p className="hint text-xs leading-relaxed">
-                    {t.groupSecDesc}
-                  </p>
-                  <button
-                    className="btn soft full"
-                    style={{ marginTop: '12px' }}
-                    onClick={() => navigateToPage('security')}
-                  >
-                    {t.manageRulesBtn} <ArrowRight size={13} />
-                  </button>
                 </div>
               </div>
 
@@ -3074,21 +3086,21 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => navigateToPage('home')}
-                    className="inline-flex items-center gap-1.5 mb-2 px-2.5 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-700 cursor-pointer"
+                    className="sub-back-btn mb-2 cursor-pointer"
                   >
-                    <ArrowLeft size={13} className="text-emerald-700" /> {isBn ? 'হোম পেজ' : 'Home'}
+                    <ArrowLeft size={12} className="text-[#087f55]" /> {isBn ? 'হোম পেজ' : 'Home'}
                   </button>
                   <h1>{t.securityTitle}</h1>
                   <p>{t.securitySub}</p>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-1.5">
                   <button className="btn outline" onClick={loadModerationData} disabled={isLogsLoading}>
-                    <RefreshCw size={13} className={isLogsLoading ? 'animate-spin' : ''} />
+                    <RefreshCw size={12} className={isLogsLoading ? 'animate-spin' : ''} />
                     <span className="btn-text">{t.refreshRules}</span>
                   </button>
                   <div className="flex items-center gap-1">
                     <button className="btn danger" onClick={resetAllWarnings}>
-                      <RotateCcw size={13} />
+                      <RotateCcw size={12} />
                       <span className="btn-text">{t.resetWarningsBtn}</span>
                     </button>
                     {renderInfoBtn('warningManagement')}
@@ -3096,21 +3108,23 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Separate Quick Navigation Button Cards on Security Page */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-5">
+              {/* Quick Navigation Cards on Security Page */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-4">
                 <button
                   type="button"
                   onClick={() => jumpToSecuritySection('warnings')}
-                  className="text-left p-3 bg-white border border-amber-200 rounded-xl shadow-2xs hover:border-amber-400 transition-colors cursor-pointer"
+                  className="text-left p-3 bg-white border border-emerald-950/[0.065] rounded-[16px] shadow-[0_2px_10px_rgba(10,56,36,0.03)] hover:border-amber-400 transition-all cursor-pointer"
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <AlertTriangle size={16} className="text-amber-600" />
-                    <span className="badge badge-amber">{activeWarnings.length}</span>
+                    <span className="w-7 h-7 rounded-[8px] bg-amber-50 text-amber-600 flex items-center justify-center">
+                      <AlertTriangle size={14} />
+                    </span>
+                    <span className="text-[13px] font-extrabold text-amber-700 tabular-nums">{activeWarnings.length}</span>
                   </div>
-                  <div className="text-xs font-extrabold text-slate-900">
+                  <div className="text-[11.5px] font-extrabold text-[#0f291e]">
                     {isBn ? 'সতর্কবার্তা (Warnings)' : 'Active Warnings'}
                   </div>
-                  <p className="text-[10px] text-slate-500 mt-0.5">
+                  <p className="text-[10px] text-[#64748b] mt-0.5 truncate">
                     {isBn ? 'সদস্যদের ১/৩, ২/৩ ওয়ার্নিং' : 'Member strike counters'}
                   </p>
                 </button>
@@ -3118,16 +3132,18 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => jumpToSecuritySection('blocks')}
-                  className="text-left p-3 bg-white border border-rose-200 rounded-xl shadow-2xs hover:border-rose-400 transition-colors cursor-pointer"
+                  className="text-left p-3 bg-white border border-emerald-950/[0.065] rounded-[16px] shadow-[0_2px_10px_rgba(10,56,36,0.03)] hover:border-rose-400 transition-all cursor-pointer"
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <Lock size={16} className="text-rose-600" />
-                    <span className="badge badge-red">{restrictedUsers.length + groupLocks.length}</span>
+                    <span className="w-7 h-7 rounded-[8px] bg-rose-50 text-rose-600 flex items-center justify-center">
+                      <Lock size={14} />
+                    </span>
+                    <span className="text-[13px] font-extrabold text-rose-600 tabular-nums">{restrictedUsers.length + groupLocks.length}</span>
                   </div>
-                  <div className="text-xs font-extrabold text-slate-900">
+                  <div className="text-[11.5px] font-extrabold text-[#0f291e]">
                     {isBn ? '১০ মি. ব্লক ও লক' : '10-Min Blocks'}
                   </div>
-                  <p className="text-[10px] text-slate-500 mt-0.5">
+                  <p className="text-[10px] text-[#64748b] mt-0.5 truncate">
                     {isBn ? 'গ্রুপ লক ও মিউট তালিকা' : 'Timers & unblock'}
                   </p>
                 </button>
@@ -3135,16 +3151,18 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => jumpToSecuritySection('logs')}
-                  className="text-left p-3 bg-white border border-blue-200 rounded-xl shadow-2xs hover:border-blue-400 transition-colors cursor-pointer"
+                  className="text-left p-3 bg-white border border-emerald-950/[0.065] rounded-[16px] shadow-[0_2px_10px_rgba(10,56,36,0.03)] hover:border-sky-400 transition-all cursor-pointer"
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <Activity size={16} className="text-blue-600" />
-                    <span className="badge badge-blue">{activityLogs.length}</span>
+                    <span className="w-7 h-7 rounded-[8px] bg-sky-50 text-sky-600 flex items-center justify-center">
+                      <Activity size={14} />
+                    </span>
+                    <span className="text-[13px] font-extrabold text-sky-700 tabular-nums">{activityLogs.length}</span>
                   </div>
-                  <div className="text-xs font-extrabold text-slate-900">
+                  <div className="text-[11.5px] font-extrabold text-[#0f291e]">
                     {isBn ? 'মডারেশন লগ' : 'Moderation Logs'}
                   </div>
-                  <p className="text-[10px] text-slate-500 mt-0.5">
+                  <p className="text-[10px] text-[#64748b] mt-0.5 truncate">
                     {isBn ? 'ব্লক ও ডিলিটের ইতিহাস' : 'Filter by category'}
                   </p>
                 </button>
@@ -3152,41 +3170,39 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => jumpToSecuritySection('rules')}
-                  className="text-left p-3 bg-white border border-emerald-200 rounded-xl shadow-2xs hover:border-emerald-400 transition-colors cursor-pointer"
+                  className="text-left p-3 bg-white border border-emerald-950/[0.065] rounded-[16px] shadow-[0_2px_10px_rgba(10,56,36,0.03)] hover:border-emerald-400 transition-all cursor-pointer"
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <ShieldCheck size={16} className="text-emerald-600" />
-                    <span className="badge badge-green">ON</span>
+                    <span className="w-7 h-7 rounded-[8px] bg-[#e9f7f0] text-[#087f55] flex items-center justify-center">
+                      <ShieldCheck size={14} />
+                    </span>
+                    <span className="text-[11px] font-extrabold text-[#087f55]">ON</span>
                   </div>
-                  <div className="text-xs font-extrabold text-slate-900">
+                  <div className="text-[11.5px] font-extrabold text-[#0f291e]">
                     {isBn ? 'সিকিউরিটি রুলস' : 'Security Rules'}
                   </div>
-                  <p className="text-[10px] text-slate-500 mt-0.5">
+                  <p className="text-[10px] text-[#64748b] mt-0.5 truncate">
                     {isBn ? 'স্টিকার, লিংক ও গালি ফিল্টার' : 'Toggle protection rules'}
                   </p>
                 </button>
               </div>
 
-              {/* CATEGORY A: SECURITY & PROTECTION */}
-              <div ref={rulesCardRef} className="category-system-header mt-6 mb-4 px-1">
-                 <div className="flex items-center gap-2 mb-1">
-                    <div className="w-1.5 h-1.5  bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                    <span className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.2em]">System A</span>
-                 </div>
-                 <h2 className="text-sm font-black text-slate-800 uppercase tracking-tight opacity-90">{isBn ? 'সিকিউরিটি ও সুরক্ষা' : 'Security & Protection System'}</h2>
+              {/* SECURITY & PROTECTION */}
+              <div ref={rulesCardRef} className="category-system-header mt-4 mb-2 px-0.5">
+                 <h2>{isBn ? 'সিকিউরিটি ও সুরক্ষা সেটিংস' : 'Security & Protection'}</h2>
               </div>
-              
+
               <div className="card">
                 <div className="card-head">
                   <div>
                     <div className="flex items-center gap-1">
-                      <h3 className="font-extrabold text-[13px]">{t.sec1Title}</h3>
+                      <h3>{t.sec1Title}</h3>
                       {renderInfoBtn('adminShield')}
                     </div>
                     <p>{t.sec1Sub}</p>
                   </div>
                   <div className="symbol sg">
-                    <ShieldAlert size={16} />
+                    <ShieldAlert size={15} />
                   </div>
                 </div>
 
@@ -3194,13 +3210,8 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      <span className="flex items-center gap-1.5 flex-wrap">
-                        {t.adminShieldTitle}
-                        <span className={`badge ${settings.adminShield ? 'badge-green' : 'badge-amber'}`}>
-                          {settings.adminShield ? 'ON' : 'OFF'}
-                        </span>
-                        {renderInfoBtn('adminShield')}
-                      </span>
+                      <span>{t.adminShieldTitle}</span>
+                      {renderInfoBtn('adminShield')}
                     </h4>
                     <p>{t.adminShieldDesc}</p>
                   </div>
@@ -3218,13 +3229,8 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      <span className="flex items-center gap-1.5 flex-wrap">
-                        {t.autoKickTitle}
-                        <span className={`badge ${settings.autoKick3Warnings ? 'badge-green' : 'badge-amber'}`}>
-                          {settings.autoKick3Warnings ? 'ACTIVE' : 'OFF'}
-                        </span>
-                        {renderInfoBtn('autoKick3Warnings')}
-                      </span>
+                      <span>{t.autoKickTitle}</span>
+                      {renderInfoBtn('autoKick3Warnings')}
                     </h4>
                     <p>{t.autoKickDesc}</p>
                   </div>
@@ -3241,17 +3247,10 @@ export default function App() {
                 {/* Auto Welcome New Member with @Mention */}
                 <div className="toggle-row">
                   <div className="toggle-info">
-                    <h4>
-                      <span className="flex items-center gap-1.5 flex-wrap">
-                        {isBn ? 'অটো ওয়েলকাম মেসেজ (@Mention সহ)' : 'Auto Welcome New Members (@Mention)'}
-                        <span className={`badge ${settings.autoWelcome ? 'badge-green' : 'badge-amber'}`}>
-                          {settings.autoWelcome ? 'ACTIVE' : 'OFF'}
-                        </span>
-                      </span>
-                    </h4>
+                    <h4>{isBn ? 'অটো ওয়েলকাম মেসেজ (@Mention)' : 'Auto Welcome New Members (@Mention)'}</h4>
                     <p>
                       {isBn
-                        ? 'গ্রুপে নতুন কোনো সদস্য যুক্ত হলে বট স্বয়ংক্রিয়ভাবে @মেনশন দিয়ে সুন্দর ওয়েলকাম জানাবে।'
+                        ? 'গ্রুপে নতুন কোনো সদস্য যুক্ত হলে বট স্বয়ংক্রিয়ভাবে @মেনশন দিয়ে ওয়েলকাম জানাবে।'
                         : 'Automatically greet newly added group members with @mention.'}
                     </p>
                   </div>
@@ -3266,11 +3265,11 @@ export default function App() {
                 </div>
 
                 {settings.autoWelcome !== false && (
-                  <div className="mt-2 pt-2 border-t border-slate-100">
-                    <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                  <div className="subpanel-soft">
+                    <label className="block text-[10px] font-bold text-[#334155] mb-1.5">
                       {isBn
-                        ? 'কাস্টম ওয়েলকাম মেসেজ (ঐচ্ছিক — {user} ও {group} ব্যবহার করতে পারেন)'
-                        : 'Custom Welcome Template (optional — supports {user} & {group})'}
+                        ? 'কাস্টম ওয়েলকাম মেসেজ ({user} ও {group} সাপোর্টেড)'
+                        : 'Custom Welcome Template (supports {user} & {group})'}
                     </label>
                     <div className="flex flex-col sm:flex-row gap-2">
                       <input
@@ -3289,32 +3288,40 @@ export default function App() {
                         className="btn soft shrink-0"
                         onClick={() => updateSettingToggle('welcomeMessage', settings.welcomeMessage || '')}
                       >
-                        <Save size={12} /> {isBn ? 'সেভ করুন' : 'Save'}
+                        <Save size={12} /> {isBn ? 'সেভ' : 'Save'}
                       </button>
                     </div>
                   </div>
                 )}
+
+                <div className="policy-box">
+                  <h4>{isBn ? 'ডিফল্ট ভায়োলেশন পলিসি' : 'Default violation policy'}</h4>
+                  <div className="space-y-0.5 text-[10.5px]">
+                    <div>{isBn ? '১ম বার ভঙ্গ · প্রথম সতর্কবার্তা (Warning)' : '1st violation · Warning'}</div>
+                    <div>{isBn ? '২য় বার ভঙ্গ · চূড়ান্ত সতর্কবার্তা (Final warning)' : '2nd violation · Final warning'}</div>
+                    <div>{isBn ? '৩য় বার ভঙ্গ · অটো কিক (শুধু বট অ্যাডমিন হলে)' : '3rd violation · Auto Kick (only with admin permission)'}</div>
+                  </div>
+                </div>
               </div>
 
 
 
-              {/* CATEGORY B: ANTI-SPAM PROTECTION */}
-              <div className="category-system-header mt-8 mb-4 px-1">
-                 <span className="badge badge-amber !text-[10px] !px-3 !py-1 ! font-black tracking-widest uppercase shadow-sm">System B</span>
-                 <h2 className="text-sm font-black text-slate-700 mt-1 uppercase tracking-tight opacity-80">{isBn ? 'অ্যান্টি-স্প্যাম সুরক্ষা' : 'Anti-Spam Protection System'}</h2>
+              {/* ANTI-SPAM PROTECTION */}
+              <div className="category-system-header mt-5 mb-2 px-0.5">
+                 <h2>{isBn ? 'অ্যান্টি-স্প্যাম ও মিডিয়া সুরক্ষা' : 'Anti-Spam & Media Protection'}</h2>
               </div>
 
               <div className="card">
                 <div className="card-head">
                   <div>
                     <div className="flex items-center gap-1">
-                      <h3 className="font-extrabold text-[13px]">{t.sec2Title}</h3>
+                      <h3>{t.sec2Title}</h3>
                       {renderInfoBtn('antiStickerSpam')}
                     </div>
                     <p>{t.sec2Sub}</p>
                   </div>
                   <div className="symbol so">
-                    <Lock size={16} />
+                    <Lock size={15} />
                   </div>
                 </div>
 
@@ -3322,13 +3329,8 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      <span className="flex items-center gap-1.5 flex-wrap">
-                        {t.antiStickerSpamTitle}
-                        <span className={`badge ${settings.antiStickerSpam ? 'badge-green' : 'badge-amber'}`}>
-                          {settings.antiStickerSpam ? 'ACTIVE' : 'OFF'}
-                        </span>
-                        {renderInfoBtn('antiStickerSpam')}
-                      </span>
+                      <span>{t.antiStickerSpamTitle}</span>
+                      {renderInfoBtn('antiStickerSpam')}
                     </h4>
                     <p>{t.antiStickerSpamDesc}</p>
                   </div>
@@ -3346,13 +3348,8 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      <span className="flex items-center gap-1.5 flex-wrap">
-                        {t.antiStickerTitle}
-                        <span className={`badge ${settings.antiSticker ? 'badge-red' : 'badge-blue'}`}>
-                          {settings.antiSticker ? 'BLOCKED' : 'ALLOWED'}
-                        </span>
-                        {renderInfoBtn('antiSticker')}
-                      </span>
+                      <span>{t.antiStickerTitle}</span>
+                      {renderInfoBtn('antiSticker')}
                     </h4>
                     <p>{t.antiStickerDesc}</p>
                   </div>
@@ -3367,14 +3364,11 @@ export default function App() {
                 </div>
 
                 {/* Configurable Sticker Spam Thresholds & High-Priority Queue Monitor */}
-                <div className="my-3 p-3 rounded-xl border border-emerald-200 bg-emerald-50/40 space-y-3">
+                <div className="subpanel-soft space-y-2.5 my-2">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <div>
-                      <h4 className="text-xs font-extrabold text-emerald-950 flex items-center gap-1.5 flex-wrap">
-                        <span>{isBn ? '⚡ হাই-প্রায়োরিটি স্টিকার স্প্যাম কনফিগ ও লাইভ কিউ' : '⚡ Sticker Spam Window & High-Priority Queue'}</span>
-                        <span className="badge badge-green">
-                          {isBn ? '০-বিলম্ব কিউ' : 'Zero-AI Queue'}
-                        </span>
+                      <h4 className="text-[11.5px] font-extrabold text-[#0f291e] flex items-center gap-1.5 flex-wrap">
+                        <span>{isBn ? '⚡ স্টিকার স্প্যাম কনফিগ ও লাইভ কিউ' : '⚡ Sticker Spam Window & Queue'}</span>
                       </h4>
                       <p className="text-[10px] text-slate-600 mt-0.5">
                         {isBn
@@ -3529,13 +3523,8 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      <span className="flex items-center gap-1.5 flex-wrap">
-                        {t.antiGifTitle}
-                        <span className={`badge ${settings.antiGif ? 'badge-green' : 'badge-amber'}`}>
-                          {settings.antiGif ? 'BLOCKED' : 'ALLOWED'}
-                        </span>
-                        {renderInfoBtn('antiGif')}
-                      </span>
+                      <span>{t.antiGifTitle}</span>
+                      {renderInfoBtn('antiGif')}
                     </h4>
                     <p>{t.antiGifDesc}</p>
                   </div>
@@ -3553,13 +3542,8 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      <span className="flex items-center gap-1.5 flex-wrap">
-                        {t.antiVideoTitle}
-                        <span className={`badge ${settings.antiVideo ? 'badge-red' : 'badge-blue'}`}>
-                          {settings.antiVideo ? 'BLOCKED' : 'ALLOWED'}
-                        </span>
-                        {renderInfoBtn('antiVideo')}
-                      </span>
+                      <span>{t.antiVideoTitle}</span>
+                      {renderInfoBtn('antiVideo')}
                     </h4>
                     <p>{t.antiVideoDesc}</p>
                   </div>
@@ -3577,13 +3561,8 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      <span className="flex items-center gap-1.5 flex-wrap">
-                        {t.antiImageTitle}
-                        <span className={`badge ${settings.antiImage ? 'badge-red' : 'badge-blue'}`}>
-                          {settings.antiImage ? 'BLOCKED' : 'ALLOWED'}
-                        </span>
-                        {renderInfoBtn('antiImage')}
-                      </span>
+                      <span>{t.antiImageTitle}</span>
+                      {renderInfoBtn('antiImage')}
                     </h4>
                     <p>{t.antiImageDesc}</p>
                   </div>
@@ -3601,13 +3580,8 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      <span className="flex items-center gap-1.5 flex-wrap">
-                        {t.antiViewOnceTitle}
-                        <span className={`badge ${settings.antiViewOnce ? 'badge-green' : 'badge-amber'}`}>
-                          {settings.antiViewOnce ? 'BLOCKED' : 'ALLOWED'}
-                        </span>
-                        {renderInfoBtn('antiViewOnce')}
-                      </span>
+                      <span>{t.antiViewOnceTitle}</span>
+                      {renderInfoBtn('antiViewOnce')}
                     </h4>
                     <p>{t.antiViewOnceDesc}</p>
                   </div>
@@ -3908,41 +3882,31 @@ export default function App() {
                 })()}
               </div>
 
-              {/* CATEGORY C: MESSAGE MODERATION */}
-              <div className="category-system-header mt-8 mb-4 px-1">
-                 <div className="flex items-center gap-2 mb-1">
-                    <div className="w-1.5 h-1.5  bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]" />
-                    <span className="text-[10px] font-black text-red-600 uppercase tracking-[0.2em]">System C</span>
-                 </div>
-                 <h2 className="text-sm font-black text-slate-800 uppercase tracking-tight opacity-90">{isBn ? 'মেসেজ মডারেশন' : 'Message Moderation Engine'}</h2>
+              {/* MESSAGE MODERATION */}
+              <div className="category-system-header mt-5 mb-2 px-0.5">
+                 <h2>{isBn ? 'মেসেজ ও রিপ্লাই মডারেশন' : 'Message & Reply Moderation'}</h2>
               </div>
 
               <div className="card">
                 <div className="card-head">
                   <div>
                     <div className="flex items-center gap-1">
-                      <h3 className="font-extrabold text-[13px]">{t.sec3Title}</h3>
+                      <h3>{t.sec3Title}</h3>
                       {renderInfoBtn('antiBadword')}
                     </div>
                     <p>{t.sec3Sub}</p>
                   </div>
                   <div className="symbol sr">
-                    <Ban size={16} />
+                    <Ban size={15} />
                   </div>
                 </div>
-
 
                 {/* Anti-Badword */}
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      <span className="flex items-center gap-1.5 flex-wrap">
-                        {t.antiBadwordTitle}
-                        <span className={`badge ${settings.antiBadword ? 'badge-green' : 'badge-amber'}`}>
-                          {settings.antiBadword ? 'ACTIVE' : 'OFF'}
-                        </span>
-                        {renderInfoBtn('antiBadword')}
-                      </span>
+                      <span>{t.antiBadwordTitle}</span>
+                      {renderInfoBtn('antiBadword')}
                     </h4>
                     <p>{t.antiBadwordDesc}</p>
                   </div>
@@ -3960,13 +3924,8 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      <span className="flex items-center gap-1.5 flex-wrap">
-                        {t.antiLinkTitle}
-                        <span className={`badge ${settings.antiLink ? 'badge-green' : 'badge-amber'}`}>
-                          {settings.antiLink ? 'BLOCKED' : 'OFF'}
-                        </span>
-                        {renderInfoBtn('antiLink')}
-                      </span>
+                      <span>{t.antiLinkTitle}</span>
+                      {renderInfoBtn('antiLink')}
                     </h4>
                     <p>{t.antiLinkDesc}</p>
                   </div>
@@ -3983,18 +3942,11 @@ export default function App() {
                 {/* Carrom Pool Link Allowlist */}
                 <div className="toggle-row">
                   <div className="toggle-info">
-                    <h4>
-                      <span className="flex items-center gap-1.5 flex-wrap">
-                        {isBn ? 'Carrom Pool লিংক অনুমোদিত (carrom.co)' : 'Allow Carrom Pool Match Links (carrom.co)'}
-                        <span className={`badge ${settings.allowCarromLinks !== false ? 'badge-green' : 'badge-amber'}`}>
-                          {settings.allowCarromLinks !== false ? 'ALLOWED' : 'BLOCKED'}
-                        </span>
-                      </span>
-                    </h4>
+                    <h4>{isBn ? 'Carrom Pool লিংক অনুমোদিত (carrom.co)' : 'Allow Carrom Pool Links (carrom.co)'}</h4>
                     <p>
                       {isBn
-                        ? 'চালু থাকলে শুধু Carrom Pool রুম ইনভাইট লিংক (carrom.co) রিমুভ হবে না — বাকি সব লিংক আগের মতোই ডিলিট ও ওয়ার্নিং হবে।'
-                        : 'Keeps official Carrom Pool match invite links (carrom.co) safe while still deleting all other links.'}
+                        ? 'শুধু Carrom Pool রুম ইনভাইট লিংক নিরাপদ থাকবে — বাকি সব লিংক ডিলিট ও ওয়ার্নিং হবে।'
+                        : 'Keeps official Carrom Pool invite links safe while deleting other URLs.'}
                     </p>
                   </div>
                   <label className="switch">
@@ -4011,13 +3963,8 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      <span className="flex items-center gap-1.5 flex-wrap">
-                        {t.aiBadwordTitle}
-                        <span className={`badge ${settings.aiBadwordDetection ? 'badge-green' : 'badge-amber'}`}>
-                          {settings.aiBadwordDetection ? 'ACTIVE' : 'OFF'}
-                        </span>
-                        {renderInfoBtn('antiBadword')}
-                      </span>
+                      <span>{t.aiBadwordTitle}</span>
+                      {renderInfoBtn('antiBadword')}
                     </h4>
                     <p>{t.aiBadwordDesc}</p>
                   </div>
@@ -4035,27 +3982,21 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      <span className="flex items-center gap-1.5 flex-wrap">
-                        <AudioLines size={14} className="text-emerald-700" />
-                        {isBn ? 'অফলাইন ভয়েস গালি গার্ড (Voice Anti-Abuse)' : 'Offline Voice Anti-Abuse (Whisper.cpp)'}
-                        <span className={`badge ${settings.voiceModerationEnabled !== false ? 'badge-green' : 'badge-amber'}`}>
-                          {settings.voiceModerationEnabled !== false ? 'ACTIVE' : 'OFF'}
-                        </span>
-                        {renderInfoBtn('voiceModerationEnabled')}
-                      </span>
+                      <span>{isBn ? 'অফলাইন ভয়েস গালি গার্ড (Voice AI)' : 'Voice Anti-Abuse Filter'}</span>
+                      {renderInfoBtn('voiceModerationEnabled')}
                     </h4>
                     <p>
                       {isBn
-                        ? 'পেইড API ছাড়াই Whisper.cpp দিয়ে ভয়েস মেসেজ শুনে বাংলা/ইংরেজি গালি থাকলে অটো ডিলিট করবে।'
-                        : 'Offline Whisper.cpp profanity filter for group voice messages (zero paid APIs).'}
+                        ? 'ভয়েস মেসেজ শুনে বাংলা/ইংরেজি গালি থাকলে অটো ডিলিট করবে — ভালো ভয়েস অক্ষত রাখবে।'
+                        : 'Detects & deletes abusive group voice messages while keeping clean speech safe.'}
                     </p>
                     <button
                       type="button"
                       onClick={() => navigateToPage('voicemod')}
-                      className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-extrabold text-emerald-700 hover:text-emerald-800 cursor-pointer"
+                      className="mt-1 inline-flex items-center gap-1 text-[10.5px] font-bold text-[#087f55] hover:underline cursor-pointer"
                     >
-                      <span>{isBn ? 'ভয়েস সেটিংস, টেস্টার ও হিস্ট্রি খুলুন' : 'Open Voice Settings, Tester & History'}</span>
-                      <ArrowRight size={12} />
+                      <span>{isBn ? 'ভয়েস সেটিংস ও টেস্টার খুলুন' : 'Open Voice Settings & Tester'}</span>
+                      <ArrowRight size={11} />
                     </button>
                   </div>
                   <label className="switch">
@@ -4072,13 +4013,8 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      <span className="flex items-center gap-1.5 flex-wrap">
-                        {t.silentModTitle}
-                        <span className={`badge ${settings.silentModeration ? 'badge-red' : 'badge-blue'}`}>
-                          {settings.silentModeration ? 'SILENT' : 'LOUD'}
-                        </span>
-                        {renderInfoBtn('warningManagement')}
-                      </span>
+                      <span>{t.silentModTitle}</span>
+                      {renderInfoBtn('warningManagement')}
                     </h4>
                     <p>{t.silentModDesc}</p>
                   </div>
@@ -4096,13 +4032,8 @@ export default function App() {
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
-                      <span className="flex items-center gap-1.5 flex-wrap">
-                        {t.botReplyTitle}
-                        <span className={`badge ${settings.botReply ? 'badge-green' : 'badge-amber'}`}>
-                          {settings.botReply ? 'ACTIVE' : 'OFF'}
-                        </span>
-                        {renderInfoBtn('botReply')}
-                      </span>
+                      <span>{t.botReplyTitle}</span>
+                      {renderInfoBtn('botReply')}
                     </h4>
                     <p>{t.botReplyDesc}</p>
                   </div>
@@ -4116,44 +4047,14 @@ export default function App() {
                   </label>
                 </div>
 
-                {/* Custom Badword List Editor */}
-                <div className="form-group" style={{ marginTop: '12px' }}>
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <label className="mb-0">{t.customBadwordsLabel}</label>
-                    {renderInfoBtn('customBadwords')}
-                  </div>
-                  <p className="hint" style={{ marginBottom: '6px' }}>
-                    {t.customBadwordsHint}
-                  </p>
-                  <textarea
-                    className="field"
-                    style={{ height: '60px', padding: '6px 10px', resize: 'vertical' }}
-                    value={customBadwordsText}
-                    onChange={(e) => setCustomBadwordsText(e.target.value)}
-                    placeholder="badword1, badword2, ..."
-                  />
-                  <div className="form-actions mt-2">
-                    <button className="btn primary" onClick={saveCustomBadwords}>
-                      <Save size={13} /> {t.saveBadwordsBtn}
-                    </button>
-                  </div>
-                </div>
-
                 {/* Auto Salam Reply (Zero API) */}
                 <div className="toggle-row">
                   <div className="toggle-info">
-                    <h4>
-                      <span className="flex items-center gap-1.5 flex-wrap">
-                        {isBn ? 'অটো সালাম উত্তর (গ্রুপে শুধু সালামের জবাব)' : 'Auto Salam Reply (Zero API)'}
-                        <span className={`badge ${settings.autoSalamReplyEnabled !== false ? 'badge-green' : 'badge-amber'}`}>
-                          {settings.autoSalamReplyEnabled !== false ? 'ACTIVE' : 'OFF'}
-                        </span>
-                      </span>
-                    </h4>
+                    <h4>{isBn ? 'অটো সালাম উত্তর (API ছাড়া)' : 'Auto Salam Reply (Zero API)'}</h4>
                     <p>
                       {isBn
-                        ? 'গ্রুপে কেউ সালাম দিলে কোনো AI API ছাড়াই স্বয়ংক্রিয়ভাবে সালামের উত্তর দেবে—অন্য কোনো বাড়তি কথা বলবে না।'
-                        : 'Automatically replies to Salam in groups with zero AI API key required.'}
+                        ? 'গ্রুপে কেউ সালাম দিলে স্বয়ংক্রিয়ভাবে ভদ্র সালামের উত্তর দেবে।'
+                        : 'Automatically replies to Salam in groups with zero AI API key.'}
                     </p>
                   </div>
                   <label className="switch">
@@ -4169,18 +4070,11 @@ export default function App() {
                 {/* Bot Typing Indicator */}
                 <div className="toggle-row">
                   <div className="toggle-info">
-                    <h4>
-                      <span className="flex items-center gap-1.5 flex-wrap">
-                        {isBn ? 'বট টাইপিং ইন্ডিকেটর (Typing...)' : 'Bot Typing Indicator'}
-                        <span className={`badge ${settings.botTypingEnabled !== false ? 'badge-green' : 'badge-amber'}`}>
-                          {settings.botTypingEnabled !== false ? 'ACTIVE' : 'OFF'}
-                        </span>
-                      </span>
-                    </h4>
+                    <h4>{isBn ? 'বট টাইপিং ইন্ডিকেটর (Typing...)' : 'Bot Typing Indicator'}</h4>
                     <p>
                       {isBn
-                        ? 'বট কোনো উত্তর বা সতর্কবার্তা/নোটিশ লেখার আগে WhatsApp-এ "typing..." (লিখছে) দেখাবে।'
-                        : 'Displays live WhatsApp typing presence before sending replies or notices.'}
+                        ? 'উত্তর বা সতর্কবার্তা পাঠানোর আগে WhatsApp-এ "typing..." দেখাবে।'
+                        : 'Displays live WhatsApp typing indicator before sending replies.'}
                     </p>
                   </div>
                   <label className="switch">
@@ -4196,18 +4090,11 @@ export default function App() {
                 {/* Admin Mention Auto-Reply (Zero API) */}
                 <div className="toggle-row">
                   <div className="toggle-info">
-                    <h4>
-                      <span className="flex items-center gap-1.5 flex-wrap">
-                        {isBn ? 'অ্যাডমিনকে মেনশন করলে অটো রিপ্লাই (Admin Mention)' : 'Admin Mention Auto-Reply (Zero API)'}
-                        <span className={`badge ${settings.adminMentionReplyEnabled !== false ? 'badge-green' : 'badge-amber'}`}>
-                          {settings.adminMentionReplyEnabled !== false ? 'ACTIVE' : 'OFF'}
-                        </span>
-                      </span>
-                    </h4>
+                    <h4>{isBn ? 'অ্যাডমিন মেনশন অটো রিপ্লাই' : 'Admin Mention Auto-Reply'}</h4>
                     <p>
                       {isBn
-                        ? 'গ্রুপে কেউ কোনো অ্যাডমিনকে @মেনশন করলে কোন অ্যাডমিনকে ডাকা হয়েছে তা উল্লেখ করে বট স্বয়ংক্রিয়ভাবে ভদ্র রিপ্লাই দেবে।'
-                        : 'Automatically responds in group when a member @mentions an admin (zero AI API needed).'}
+                        ? 'কেউ অ্যাডমিনকে @মেনশন করলে বট স্বয়ংক্রিয়ভাবে ভদ্র উত্তর দেবে।'
+                        : 'Responds automatically when someone @mentions an admin.'}
                     </p>
                   </div>
                   <label className="switch">
@@ -4221,19 +4108,19 @@ export default function App() {
                 </div>
 
                 {settings.adminMentionReplyEnabled !== false && (
-                  <div className="mt-2 p-3 rounded-xl border border-emerald-200 bg-emerald-50/40 space-y-2.5">
+                  <div className="subpanel-soft space-y-2.5">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <span className="text-[11px] font-bold text-emerald-950">
-                        {isBn ? '🛡️ অ্যাডমিন মেনশন রিপ্লাই কাস্টমাইজ করুন' : '🛡️ Customize Admin Mention Reply'}
+                      <span className="text-[11px] font-bold text-[#0f291e]">
+                        {isBn ? 'অ্যাডমিন মেনশন রিপ্লাই কাস্টমাইজ করুন' : 'Customize Admin Mention Reply'}
                       </span>
                       <button type="button" className="btn primary" onClick={handleSaveAdminMentionConfig}>
-                        <Save size={11} /> {isBn ? 'সেভ করুন' : 'Save'}
+                        <Save size={11} /> {isBn ? 'সেভ' : 'Save'}
                       </button>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      <div className="bg-white p-2 rounded-lg border border-slate-200">
-                        <label className="block text-[9.5px] font-bold text-slate-500 mb-1">
-                          {isBn ? 'কাকে মেনশন করলে বলবে' : 'Trigger Target'}
+                      <div>
+                        <label className="block text-[9.5px] font-bold text-[#526359] mb-1">
+                          {isBn ? 'কাকে মেনশন করলে' : 'Trigger Target'}
                         </label>
                         <select
                           value={settings.adminMentionReplyTarget === 'boss_only' ? 'boss_only' : 'all_admins'}
@@ -4241,17 +4128,17 @@ export default function App() {
                             const nextTarget = e.target.value === 'boss_only' ? 'boss_only' : 'all_admins';
                             updateSettingToggle('adminMentionReplyTarget', nextTarget as any);
                           }}
-                          className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-bold bg-white"
+                          className="field !bg-white"
                         >
                           <option value="all_admins">{isBn ? 'যেকোনো গ্রুপ অ্যাডমিন' : 'Any Group Admin'}</option>
-                          <option value="boss_only">{isBn ? 'শুধু বস অ্যাডমিনকে' : 'Boss Admin Only'}</option>
+                          <option value="boss_only">{isBn ? 'শুধু বস অ্যাডমিন' : 'Boss Admin Only'}</option>
                         </select>
                       </div>
-                      <div className="sm:col-span-2 bg-white p-2 rounded-lg border border-slate-200">
-                        <label className="block text-[9.5px] font-bold text-slate-500 mb-1">
+                      <div className="sm:col-span-2">
+                        <label className="block text-[9.5px] font-bold text-[#526359] mb-1">
                           {isBn
-                            ? 'মেনশন করলে বট যা লিখবে ({{admin}} = অ্যাডমিন, {{user}} = যে মেনশন করেছে)'
-                            : 'Auto-Reply Message ({{admin}} = admin, {{user}} = sender)'}
+                            ? 'রিপ্লাই মেসেজ ({{admin}} ও {{user}} ব্যবহার করা যাবে)'
+                            : 'Auto-Reply Message ({{admin}}, {{user}})'}
                         </label>
                         <textarea
                           rows={2}
@@ -4262,20 +4149,40 @@ export default function App() {
                           onChange={(e) =>
                             setSettings((prev) => ({ ...prev, adminMentionReplyMessage: e.target.value }))
                           }
-                          className="w-full px-2 py-1 border border-slate-300 rounded text-xs outline-none focus:border-emerald-500"
+                          className="w-full px-2.5 py-1.5 border border-emerald-950/[0.1] rounded-[9px] text-[11px] bg-white outline-none focus:border-emerald-500"
                         />
                       </div>
                     </div>
                   </div>
                 )}
 
+                {/* Custom Badword List Editor */}
+                <div className="subpanel-soft">
+                  <div className="flex items-center gap-1.5 mb-0.5">
+                    <label className="text-[11px] font-bold text-[#0f291e] mb-0">{t.customBadwordsLabel}</label>
+                    {renderInfoBtn('customBadwords')}
+                  </div>
+                  <p className="hint mb-2">{t.customBadwordsHint}</p>
+                  <textarea
+                    className="w-full px-2.5 py-1.5 border border-emerald-950/[0.1] rounded-[9px] text-[11px] bg-white outline-none focus:border-emerald-500"
+                    rows={2}
+                    value={customBadwordsText}
+                    onChange={(e) => setCustomBadwordsText(e.target.value)}
+                    placeholder="badword1, badword2, ..."
+                  />
+                  <div className="form-actions mt-2">
+                    <button className="btn primary" onClick={saveCustomBadwords}>
+                      <Save size={12} /> {t.saveBadwordsBtn}
+                    </button>
+                  </div>
+                </div>
+
                 {/* Boss Admin Fight Alert & Zero-API Server Health Notice */}
-                <div className="mt-3 p-3 rounded-xl border border-indigo-200 bg-indigo-50/40 space-y-3">
+                <div className="subpanel-soft space-y-2.5">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <div>
-                      <h4 className="text-xs font-extrabold text-indigo-950 flex items-center gap-1.5 flex-wrap">
-                        <span>{isBn ? '🚨 বস অ্যাডমিন ইনবক্স অ্যালার্ট ও অটো সার্ভার নোটিশ' : '🚨 Boss Inbox Fight Alert & Zero-API Server Notice'}</span>
-                        <span className="badge badge-blue">{isBn ? 'API ছাড়া' : 'Zero-API'}</span>
+                      <h4 className="text-[11.5px] font-extrabold text-[#0f291e] flex items-center gap-1.5 flex-wrap">
+                        <span>{isBn ? 'বস অ্যাডমিন ইনবক্স অ্যালার্ট ও সার্ভার নোটিশ' : 'Boss Inbox Fight Alert & Server Notice'}</span>
                       </h4>
                       <p className="text-[10px] text-slate-600 mt-0.5">
                         {isBn
@@ -4378,13 +4285,9 @@ export default function App() {
                 </div>
               </div>
 
-              {/* CATEGORY E: LOGS & STATUS */}
-              <div ref={logsCardRef} className="category-system-header mt-8 mb-4 px-1">
-                 <div className="flex items-center gap-2 mb-1">
-                    <div className="w-1.5 h-1.5  bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
-                    <span className="text-[10px] font-black text-blue-600 uppercase tracking-[0.2em]">System E</span>
-                 </div>
-                 <h2 className="text-sm font-black text-slate-800 uppercase tracking-tight opacity-90">{isBn ? 'লগ ও সিস্টেম স্ট্যাটাস' : 'Logs & System Status'}</h2>
+              {/* LOGS & STATUS */}
+              <div ref={logsCardRef} className="category-system-header mt-7 mb-3 px-1">
+                 <h2 className="text-sm sm:text-base font-extrabold text-[#0f291e] tracking-tight">{isBn ? 'লগ ও অ্যাক্টিভিটি' : 'Logs & Activity'}</h2>
               </div>
 
               <div className="card">
@@ -4539,26 +4442,22 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => navigateToPage('home')}
-                    className="inline-flex items-center gap-1.5 mb-2 px-2.5 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-700 cursor-pointer"
+                    className="sub-back-btn mb-2 cursor-pointer"
                   >
-                    <ArrowLeft size={13} className="text-emerald-700" /> {isBn ? 'হোম পেজ' : 'Home'}
+                    <ArrowLeft size={12} className="text-[#087f55]" /> {isBn ? 'হোম পেজ' : 'Home'}
                   </button>
                   <h1>{t.mayaTitle}</h1>
                   <p>{t.mayaSub}</p>
                 </div>
                 <button className="btn outline" onClick={loadModerationData}>
-                  <RefreshCw size={13} />
+                  <RefreshCw size={12} />
                   <span className="btn-text">{t.refreshRules}</span>
                 </button>
               </div>
 
-              {/* CATEGORY D: MAYA AI COMPANION */}
-              <div className="category-system-header mt-8 mb-4 px-1">
-                 <div className="flex items-center gap-2 mb-1">
-                    <div className="w-1.5 h-1.5  bg-teal-500 shadow-[0_0_8px_rgba(20,184,166,0.5)]" />
-                    <span className="text-[10px] font-black text-teal-600 uppercase tracking-[0.2em]">System D</span>
-                 </div>
-                 <h2 className="text-sm font-black text-slate-800 uppercase tracking-tight opacity-90">{isBn ? 'মায়া এআই ইঞ্জিন' : 'Maya AI Core & Companion'}</h2>
+              {/* MAYA AI COMPANION */}
+              <div className="category-system-header mt-4 mb-2 px-0.5">
+                 <h2>{isBn ? 'মায়া এআই সেটিংস' : 'Maya AI Core & Companion'}</h2>
               </div>
 
               <div className="grid2">
@@ -4569,7 +4468,7 @@ export default function App() {
                       <p>{t.mayaCoreSub}</p>
                     </div>
                     <div className="symbol sp">
-                      <Heart size={16} />
+                      <Heart size={15} />
                     </div>
                   </div>
 
@@ -4577,11 +4476,8 @@ export default function App() {
                   <div className="toggle-row">
                     <div className="toggle-info">
                       <h4>
-                        <span className="flex items-center gap-1.5 flex-wrap">
-                          {t.mayaEngineTitle}
-                          <span className={`badge ${settings.mayaAiEnabled ? 'badge-green' : 'badge-amber'}`}>{settings.mayaAiEnabled ? 'ACTIVE' : 'OFF'}</span>
-                          {renderInfoBtn('mayaEngine')}
-                        </span>
+                        <span>{t.mayaEngineTitle}</span>
+                        {renderInfoBtn('mayaEngine')}
                       </h4>
                       <p>{t.mayaEngineDesc}</p>
                     </div>
@@ -4599,11 +4495,8 @@ export default function App() {
                   <div className="toggle-row">
                     <div className="toggle-info">
                       <h4>
-                        <span className="flex items-center gap-1.5 flex-wrap">
-                          {t.privateInboxAiTitle}
-                          <span className={`badge ${settings.mayaPrivateReply ? 'badge-green' : 'badge-amber'}`}>{settings.mayaPrivateReply ? 'ACTIVE' : 'OFF'}</span>
-                          {renderInfoBtn('mayaPrivateReply')}
-                        </span>
+                        <span>{t.privateInboxAiTitle}</span>
+                        {renderInfoBtn('mayaPrivateReply')}
                       </h4>
                       <p>{t.privateInboxAiDesc}</p>
                     </div>
@@ -4621,11 +4514,8 @@ export default function App() {
                   <div className="toggle-row">
                     <div className="toggle-info">
                       <h4>
-                        <span className="flex items-center gap-1.5 flex-wrap">
-                          {t.groupAiTitle}
-                          <span className={`badge ${settings.mayaGroupReply ? 'badge-green' : 'badge-amber'}`}>{settings.mayaGroupReply ? 'ACTIVE' : 'OFF'}</span>
-                          {renderInfoBtn('mayaGroupReply')}
-                        </span>
+                        <span>{t.groupAiTitle}</span>
+                        {renderInfoBtn('mayaGroupReply')}
                       </h4>
                       <p>{t.groupAiDesc}</p>
                     </div>
@@ -4642,11 +4532,8 @@ export default function App() {
                   <div className="toggle-row">
                     <div className="toggle-info">
                       <h4>
-                        <span className="flex items-center gap-1.5 flex-wrap">
-                          {t.romanticTitle}
-                          <span className={`badge ${settings.mayaRomantic ? 'badge-green' : 'badge-amber'}`}>{settings.mayaRomantic ? 'ON' : 'OFF'}</span>
-                          {renderInfoBtn('mayaRomantic')}
-                        </span>
+                        <span>{t.romanticTitle}</span>
+                        {renderInfoBtn('mayaRomantic')}
                       </h4>
                       <p>{t.romanticDesc}</p>
                     </div>
@@ -4663,11 +4550,8 @@ export default function App() {
                   <div className="toggle-row">
                     <div className="toggle-info">
                       <h4>
-                        <span className="flex items-center gap-1.5 flex-wrap">
-                          {t.funnyTitle}
-                          <span className={`badge ${settings.mayaFunny ? 'badge-green' : 'badge-amber'}`}>{settings.mayaFunny ? 'ON' : 'OFF'}</span>
-                          {renderInfoBtn('mayaFunny')}
-                        </span>
+                        <span>{t.funnyTitle}</span>
+                        {renderInfoBtn('mayaFunny')}
                       </h4>
                       <p>{t.funnyDesc}</p>
                     </div>
@@ -4684,11 +4568,8 @@ export default function App() {
                   <div className="toggle-row">
                     <div className="toggle-info">
                       <h4>
-                        <span className="flex items-center gap-1.5 flex-wrap">
-                          {t.autoPartTitle}
-                          <span className={`badge ${settings.mayaAutoParticipate ? 'badge-green' : 'badge-amber'}`}>{settings.mayaAutoParticipate ? 'ON' : 'OFF'}</span>
-                          {renderInfoBtn('mayaAutoParticipate')}
-                        </span>
+                        <span>{t.autoPartTitle}</span>
+                        {renderInfoBtn('mayaAutoParticipate')}
                       </h4>
                       <p>{t.autoPartDesc}</p>
                     </div>
@@ -4700,6 +4581,15 @@ export default function App() {
                       />
                       <span className="slider"></span>
                     </label>
+                  </div>
+
+                  <div className="policy-box">
+                    <h4>{isBn ? 'মায়া AI স্মার্ট আচরণ' : 'Maya AI Smart Policy'}</h4>
+                    <div>
+                      {isBn
+                        ? 'গ্রুপে শুধুমাত্র @মেনশন, রিপ্লাই বা মায়া নামে ডাকলে তবেই উত্তর দেবে — ইনবক্সে সবসময় মিষ্টি ও বুদ্ধিমতী ভাষায় চ্যাট করবে।'
+                        : 'Responds cleanly when tagged in groups and stays attentive in private DMs.'}
+                    </div>
                   </div>
                 </div>
 
@@ -4793,8 +4683,8 @@ export default function App() {
                     {t.sendBtn}
                   </button>
                 </div>
-                <div className="hint mt-2 p-2.5 bg-slate-50  border border-slate-200">
-                  💡 {isBn ? 'মেসেজ পাঠিয়ে মায়ার রোমান্টিক উত্তর দেখুন।' : 'Send a message to see Maya\'s reply.'}
+                <div className="hint mt-2.5 p-3 rounded-xl bg-[#f4f8f5] border border-emerald-950/[0.08]">
+                  {isBn ? 'মেসেজ পাঠিয়ে মায়ার রোমান্টিক উত্তর দেখুন।' : 'Send a message to see Maya\'s reply.'}
                 </div>
               </div>
             </section>
@@ -4808,9 +4698,9 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => navigateToPage('home')}
-                    className="inline-flex items-center gap-1.5 mb-2 px-2.5 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-700 cursor-pointer"
+                    className="sub-back-btn mb-2 cursor-pointer"
                   >
-                    <ArrowLeft size={13} className="text-emerald-700" /> {isBn ? 'হোম পেজ' : 'Home'}
+                    <ArrowLeft size={12} className="text-[#087f55]" /> {isBn ? 'হোম পেজ' : 'Home'}
                   </button>
                   <h1>{t.connectTitle}</h1>
                   <p>{t.connectSub}</p>
@@ -4999,7 +4889,7 @@ export default function App() {
                     <div className="info text-left mt-3">
                       <div className="flex justify-between items-center text-xs font-bold">
                         <span>OFFICIAL PAIRING CODE</span>
-                        <span className="bg-emerald-200 text-emerald-900 text-[10px] px-2 py-0.5 ">Active</span>
+                        <span className="bg-emerald-200 text-emerald-900 text-[10px] px-2.5 py-0.5 rounded-lg">Active</span>
                       </div>
 
                       {pairingMode === 'code' ? (
@@ -5026,7 +4916,7 @@ export default function App() {
                             <img
                               src={liveStatus.qrCode}
                               alt="WhatsApp QR Code"
-                              className="w-48 h-48 mx-auto  border border-gray-200 p-1 bg-white shadow-xs"
+                              className="w-48 h-48 mx-auto rounded-2xl border border-emerald-950/[0.08] p-2 bg-white shadow-sm"
                             />
                           ) : (
                             <p className="text-xs text-gray-500 py-4">QR Loading...</p>
@@ -5039,7 +4929,7 @@ export default function App() {
               )}
 
               {/* Encrypted Full State Backup Card (Primary WhatsApp + 2nd Account + All ON/OFF Settings) */}
-              <div ref={sessionCardRef} className="card mt-4 border border-emerald-200">
+              <div ref={sessionCardRef} className="card mt-4 border border-emerald-200/80">
                 <div className="card-head">
                   <div>
                     <h3>{isBn ? 'সেশন ও সব সেটিংস ব্যাকআপ (Full Backup & Restore)' : 'Full Session & Settings Backup'}</h3>
@@ -5056,7 +4946,7 @@ export default function App() {
 
                 {storageInfo && (
                   <div
-                    className={`mt-2.5 px-3 py-2 text-[11px] leading-relaxed border ${
+                    className={`mt-2.5 px-3.5 py-2.5 rounded-xl text-[11px] leading-relaxed border ${
                       storageInfo.persistentVolumeDetected
                         ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
                         : 'bg-amber-50 border-amber-200 text-amber-900'
@@ -5065,13 +4955,13 @@ export default function App() {
                     {storageInfo.persistentVolumeDetected ? (
                       <span>
                         {isBn
-                          ? `✅ Persistent Volume সক্রিয় রয়েছে (${storageInfo.dataDir}) — নতুন কোড পুশ করলেও WhatsApp ও সেটিংস ডিসকানেক্ট/রিসেট হবে না।`
+                          ? `Persistent Volume সক্রিয় রয়েছে (${storageInfo.dataDir}) — নতুন কোড পুশ করলেও WhatsApp ও সেটিংস ডিসকানেক্ট/রিসেট হবে না।`
                           : `Persistent Volume active (${storageInfo.dataDir}) — sessions and settings persist across redeploys.`}
                       </span>
                     ) : (
                       <span>
                         {isBn
-                          ? `ℹ️ স্থায়ী ডিস্ক ছাড়া অস্থায়ী কন্টেইনারে চলছে। Railway/Render-এ '/app/data' Volume মাউন্ট করলে (বা WAGUARD_DATA_DIR সেট করলে) কোড আপডেটে আর কখনোই ডিসকানেক্ট বা সেটিংস রিসেট হবে না; নতুবা আপডেটের আগে এখান থেকে ব্যাকআপ নিয়ে রাখুন।`
+                          ? `স্থায়ী ডিস্ক ছাড়া অস্থায়ী কন্টেইনারে চলছে। Railway/Render-এ '/app/data' Volume মাউন্ট করলে (বা WAGUARD_DATA_DIR সেট করলে) কোড আপডেটে আর কখনোই ডিসকানেক্ট বা সেটিংস রিসেট হবে না; নতুবা আপডেটের আগে এখান থেকে ব্যাকআপ নিয়ে রাখুন।`
                           : `No Persistent Volume env detected (${storageInfo.dataDir}). Mount a persistent disk at /app/data or download a full backup before pushing updates.`}
                       </span>
                     )}
@@ -5088,7 +4978,7 @@ export default function App() {
                       value={sessionPassphrase}
                       onChange={(e) => setSessionPassphrase(e.target.value)}
                       placeholder={isBn ? 'যেমন: 1234 বা গোপন পাসওয়ার্ড' : 'e.g. secret123'}
-                      className="w-full px-3 py-2 border border-gray-300 text-xs outline-none focus:border-emerald-500"
+                      className="field"
                     />
                   </div>
 
@@ -5139,7 +5029,7 @@ export default function App() {
                   </div>
 
                   {showSessionPasteBox && (
-                    <div className="mt-2 p-3 bg-slate-50 border border-slate-200 space-y-2">
+                    <div className="mt-2 p-3.5 rounded-2xl bg-[#f4f8f5] border border-emerald-950/[0.08] space-y-2">
                       <label className="block text-[11px] font-bold text-slate-700">
                         {isBn ? 'কপি করা ব্যাকআপ JSON এখানে পেস্ট করুন:' : 'Paste Encrypted Backup JSON:'}
                       </label>
@@ -5148,7 +5038,7 @@ export default function App() {
                         value={sessionPasteText}
                         onChange={(e) => setSessionPasteText(e.target.value)}
                         placeholder='{"version":1,"alg":"aes-256-gcm",...}'
-                        className="w-full p-2 border border-gray-300 text-[11px] font-mono outline-none focus:border-emerald-500 bg-white"
+                        className="w-full p-2.5 rounded-xl border border-emerald-950/[0.1] text-[11px] font-mono outline-none focus:border-emerald-500 bg-white"
                       />
                       <div className="flex gap-2">
                         <button
@@ -5180,9 +5070,9 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => navigateToPage('home')}
-                    className="inline-flex items-center gap-1.5 mb-2 px-2.5 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-700 cursor-pointer"
+                    className="sub-back-btn mb-2 cursor-pointer"
                   >
-                    <ArrowLeft size={13} className="text-emerald-700" /> {isBn ? 'হোম পেজ' : 'Home'}
+                    <ArrowLeft size={12} className="text-[#087f55]" /> {isBn ? 'হোম পেজ' : 'Home'}
                   </button>
                   <h1>{t.groupsTitle}</h1>
                   <p>{t.groupsSub}</p>
@@ -5191,7 +5081,7 @@ export default function App() {
                   className={`btn primary ${isGroupsLoading ? 'is-loading' : ''}`}
                   onClick={loadGroups}
                 >
-                  <RefreshCw size={13} />
+                  <RefreshCw size={12} />
                   <span className="btn-text">{t.refresh}</span>
                 </button>
               </div>
@@ -5357,9 +5247,9 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => navigateToPage('home')}
-                    className="inline-flex items-center gap-1.5 mb-2 px-2.5 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-700 cursor-pointer"
+                    className="sub-back-btn mb-2 cursor-pointer"
                   >
-                    <ArrowLeft size={13} className="text-emerald-700" /> {isBn ? 'হোম পেজ' : 'Home'}
+                    <ArrowLeft size={12} className="text-[#087f55]" /> {isBn ? 'হোম পেজ' : 'Home'}
                   </button>
                   <h1>{isBn ? 'AI কন্ট্রোল সেন্টার' : 'AI Control Center'}</h1>
                   <p>Manage Gemini, Groq & OpenRouter failover and server synchronization.</p>
@@ -5368,13 +5258,13 @@ export default function App() {
 
               <div className="grid2 !mb-6">
                  {/* AI System Health Card */}
-                 <div className="card !bg-emerald-700 !text-white border-0 shadow-xl overflow-hidden relative">
-                    <div className="absolute top-[-20px] right-[-20px] opacity-10 rotate-12">
+                 <div className="card !bg-gradient-to-br !from-[#087f55] !via-[#0d9566] !to-[#14b378] !text-white border-0 shadow-[0_14px_34px_rgba(8,127,85,0.22)] overflow-hidden relative">
+                    <div className="absolute top-[-20px] right-[-20px] opacity-10 rotate-12 pointer-events-none">
                        <Cpu size={120} />
                     </div>
-                    <div className="card-head !border-emerald-600/30">
-                       <div className="flex items-center gap-2">
-                          <div className="p-1.5 bg-white/20 ">
+                    <div className="card-head !border-white/15">
+                       <div className="flex items-center gap-2.5">
+                          <div className="p-2 rounded-xl bg-white/20 backdrop-blur-sm">
                              <ShieldCheck size={18} className="text-white" />
                           </div>
                           <div>
@@ -5385,32 +5275,32 @@ export default function App() {
                     </div>
                     
                     <div className="grid grid-cols-4 gap-2 mt-4">
-                       <div className="text-center p-2 bg-white/10 ">
-                          <div className="text-xl font-black">{settings.aiKeys?.length || 0}</div>
-                          <div className="text-[8px] font-bold uppercase opacity-70 tracking-widest">Pool</div>
-                          <div className="text-[7px] font-bold opacity-50 mt-0.5">(মোট কি)</div>
+                       <div className="text-center p-2.5 rounded-xl bg-white/12">
+                          <div className="text-xl font-black tabular-nums">{settings.aiKeys?.length || 0}</div>
+                          <div className="text-[8px] font-bold uppercase opacity-75 tracking-widest">Pool</div>
+                          <div className="text-[7px] font-bold opacity-60 mt-0.5">(মোট কি)</div>
                        </div>
-                       <div className="text-center p-2 bg-white/20  border border-white/20">
-                          <div className="text-xl font-black">{settings.aiKeys?.filter(k => k.status === 'active').length || 0}</div>
-                          <div className="text-[8px] font-bold uppercase opacity-90 tracking-widest">Active</div>
-                          <div className="text-[7px] font-bold opacity-60 mt-0.5">(সচল)</div>
+                       <div className="text-center p-2.5 rounded-xl bg-white/20 border border-white/20">
+                          <div className="text-xl font-black tabular-nums">{settings.aiKeys?.filter(k => k.status === 'active').length || 0}</div>
+                          <div className="text-[8px] font-bold uppercase opacity-95 tracking-widest">Active</div>
+                          <div className="text-[7px] font-bold opacity-65 mt-0.5">(সচল)</div>
                        </div>
-                       <div className="text-center p-2 bg-amber-500/30  border border-amber-400/30">
-                          <div className="text-xl font-black">{settings.aiKeys?.filter(k => k.status === 'exhausted' || k.status === 'cooldown').length || 0}</div>
-                          <div className="text-[8px] font-bold uppercase opacity-90 tracking-widest">Busy</div>
-                          <div className="text-[7px] font-bold opacity-60 mt-0.5">(কোটা শেষ)</div>
+                       <div className="text-center p-2.5 rounded-xl bg-amber-500/30 border border-amber-400/30">
+                          <div className="text-xl font-black tabular-nums">{settings.aiKeys?.filter(k => k.status === 'exhausted' || k.status === 'cooldown').length || 0}</div>
+                          <div className="text-[8px] font-bold uppercase opacity-95 tracking-widest">Busy</div>
+                          <div className="text-[7px] font-bold opacity-65 mt-0.5">(কোটা শেষ)</div>
                        </div>
-                       <div className="text-center p-2 bg-rose-500/30  border border-rose-400/30">
-                          <div className="text-xl font-black">{settings.aiKeys?.filter(k => k.status === 'invalid').length || 0}</div>
-                          <div className="text-[8px] font-bold uppercase opacity-90 tracking-widest">Faulty</div>
-                          <div className="text-[7px] font-bold opacity-60 mt-0.5">(ভুল কি)</div>
+                       <div className="text-center p-2.5 rounded-xl bg-rose-500/30 border border-rose-400/30">
+                          <div className="text-xl font-black tabular-nums">{settings.aiKeys?.filter(k => k.status === 'invalid').length || 0}</div>
+                          <div className="text-[8px] font-bold uppercase opacity-95 tracking-widest">Faulty</div>
+                          <div className="text-[7px] font-bold opacity-65 mt-0.5">(ভুল কি)</div>
                        </div>
                     </div>
 
-                    <div className="mt-5 p-2.5 bg-black/20  border border-white/10 flex items-center justify-between">
+                    <div className="mt-5 p-3 rounded-xl bg-black/20 border border-white/10 flex items-center justify-between">
                        <div className="flex items-center gap-2">
-                          <div className={`w-2 h-2  ${settings.aiAutoRotate ? 'bg-emerald-400' : 'bg-slate-400'}`} />
-                          <span className="text-[10px] font-bold">Auto-Rotation: <span className={settings.aiAutoRotate ? 'text-emerald-300' : 'text-slate-300'}>{settings.aiAutoRotate ? 'ACTIVE (চালু)' : 'OFF (বন্ধ)'}</span></span>
+                          <div className={`w-2 h-2 rounded-full ${settings.aiAutoRotate ? 'bg-emerald-300' : 'bg-slate-400'}`} />
+                          <span className="text-[10px] font-bold">Auto-Rotation: <span className={settings.aiAutoRotate ? 'text-emerald-200' : 'text-slate-300'}>{settings.aiAutoRotate ? 'ACTIVE (চালু)' : 'OFF (বন্ধ)'}</span></span>
                        </div>
                        {(() => {
                           const activeKey = (settings.aiKeys || [])
@@ -5418,11 +5308,11 @@ export default function App() {
                             .sort((a, b) => (a.lastUsed || 0) - (b.lastUsed || 0))[0];
                           return activeKey ? (
                              <div className="text-right">
-                                <div className="text-[8px] opacity-50 font-bold uppercase tracking-tighter line-clamp-1">Current Engine</div>
-                                <div className="text-[9px] font-mono bg-white/10 px-2 py-0.5 text-white/80">{activeKey.provider.toUpperCase()} #{activeKey.label.split(' ')[0]}</div>
+                                <div className="text-[8px] opacity-60 font-bold uppercase tracking-tighter line-clamp-1">Current Engine</div>
+                                <div className="text-[9px] font-mono bg-white/15 px-2 py-0.5 rounded-md text-white/90">{activeKey.provider.toUpperCase()} #{activeKey.label.split(' ')[0]}</div>
                              </div>
                           ) : (
-                             <span className="text-[9px] font-mono opacity-60">LEGACY MODE</span>
+                             <span className="text-[9px] font-mono opacity-65">LEGACY MODE</span>
                           );
                        })()}
                     </div>
@@ -5431,8 +5321,8 @@ export default function App() {
                  {/* System Incident Logs */}
                  <div className="card">
                     <div className="card-head">
-                       <div className="flex items-center gap-2">
-                          <div className="p-1.5 bg-rose-50 ">
+                       <div className="flex items-center gap-2.5">
+                          <div className="p-2 rounded-xl bg-rose-50">
                              <Zap size={18} className="text-rose-500" />
                           </div>
                           <div>
@@ -5447,8 +5337,8 @@ export default function App() {
                     <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1 custom-scrollbar mt-2">
                        {(settings.aiKeys || []).some(k => k.lastError) ? (
                           settings.aiKeys?.filter(k => k.lastError).map(k => (
-                             <div key={k.id} className="p-2.5 bg-slate-50  border border-slate-200 flex items-start gap-3 group hover:border-rose-200 transition-colors">
-                                <div className={`px-2 py-0.5 text-[8px] font-black uppercase tracking-tighter shrink-0 mt-0.5 shadow-sm ${
+                             <div key={k.id} className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-start gap-3 group hover:border-rose-200 transition-colors">
+                                <div className={`px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-tighter shrink-0 mt-0.5 shadow-sm ${
                                    k.provider === 'gemini' ? 'bg-emerald-100 text-emerald-700' :
                                    k.provider === 'groq' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'
                                 }`}>
@@ -5457,10 +5347,10 @@ export default function App() {
                                 <div className="flex-1 min-w-0">
                                    <div className="text-[10px] font-extrabold text-slate-700 flex items-center gap-1.5">
                                       {k.label}
-                                      <span className="w-1 h-1  bg-slate-300" />
+                                      <span className="w-1 h-1 rounded-full bg-slate-300" />
                                       <span className="text-[8px] font-bold text-rose-500 uppercase tracking-tight">System Error</span>
                                    </div>
-                                   <div className="text-[10px] text-slate-500 leading-relaxed font-mono bg-white/50 p-1.5 mt-1 border border-slate-100 break-words line-clamp-3 group-hover:line-clamp-none transition-all">
+                                   <div className="text-[10px] text-slate-500 leading-relaxed font-mono bg-white/80 rounded-lg p-1.5 mt-1 border border-slate-100 break-words line-clamp-3 group-hover:line-clamp-none transition-all">
                                       {k.lastError}
                                    </div>
                                 </div>
@@ -5468,12 +5358,12 @@ export default function App() {
                           ))
                        ) : (
                           <div className="h-[140px] flex flex-col items-center justify-center text-slate-300 gap-3">
-                             <div className="w-12 h-12 bg-slate-50  flex items-center justify-center border border-slate-100">
-                                <CheckCircle2 size={24} className="opacity-20 text-emerald-500" />
+                             <div className="w-12 h-12 rounded-2xl bg-[#f4f8f5] flex items-center justify-center border border-emerald-950/[0.06]">
+                                <CheckCircle2 size={24} className="opacity-35 text-emerald-600" />
                              </div>
                              <div className="text-center">
-                                <span className="text-[11px] font-bold text-slate-400 block uppercase tracking-wider">System Normal</span>
-                                <span className="text-[9px] text-slate-300">No AI failures or failover events recorded.</span>
+                                <span className="text-[11px] font-bold text-slate-500 block uppercase tracking-wider">System Normal</span>
+                                <span className="text-[9.5px] text-slate-400">No AI failures or failover events recorded.</span>
                              </div>
                           </div>
                        )}
@@ -5503,8 +5393,8 @@ export default function App() {
 
                 {/* Key Management Area */}
                 <div className="space-y-4">
-                  <div className="bg-[#f2f8f5] p-3  border border-emerald-100">
-                    <h4 className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <div className="bg-[#f4f8f5] p-3.5 rounded-2xl border border-emerald-950/[0.08]">
+                    <h4 className="text-[11px] font-bold text-[#087f55] uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
                       <Database size={12} />
                       Maya AI Key Pool ({settings.aiKeys?.length || 0})
                     </h4>
@@ -5526,7 +5416,7 @@ export default function App() {
                               <tr key={k.id}>
                                 <td>
                                   <div className="flex items-center gap-2">
-                                    <div className={`w-2 h-2  ${
+                                    <div className={`w-2 h-2 rounded-full ${
                                       k.provider === 'gemini' ? 'bg-emerald-500' :
                                       k.provider === 'groq' ? 'bg-orange-500' : 'bg-blue-500'
                                     }`} />
@@ -5600,7 +5490,7 @@ export default function App() {
                   </div>
 
                   {/* Add Key Form */}
-                  <div className="p-4 bg-emerald-50/50  border border-emerald-100">
+                  <div className="p-4 rounded-2xl bg-[#f4f8f5] border border-emerald-950/[0.08]">
                     <h4 className="text-xs font-bold text-emerald-900 mb-3 flex items-center gap-1.5">
                       <Sparkles size={13} className="text-emerald-600" />
                       অ্যাডভান্সড কী ম্যানেজমেন্ট (নতুন কী যুক্ত করুন)
@@ -5674,10 +5564,10 @@ export default function App() {
                         <label className="text-[10px] font-bold text-slate-500 uppercase">Provider Failover Priority</label>
                         <div className="flex flex-col gap-1.5 mt-2">
                            {(settings.aiProviderPriority || ['gemini', 'groq', 'openrouter']).map((p, i) => (
-                             <div key={p} className="flex items-center justify-between p-2 bg-white border border-slate-200  shadow-sm">
+                             <div key={p} className="flex items-center justify-between p-2.5 rounded-xl bg-white border border-emerald-950/[0.08] shadow-xs">
                                <div className="flex items-center gap-2">
                                   <span className="text-[10px] text-slate-400 font-bold w-4">#{i+1}</span>
-                                  <div className={`w-2 h-2  ${
+                                  <div className={`w-2 h-2 rounded-full ${
                                     p === 'gemini' ? 'bg-indigo-500' : p === 'groq' ? 'bg-orange-500' : 'bg-blue-500'
                                   }`} />
                                   <span className="text-[11px] font-bold capitalize">{p}</span>
@@ -5685,7 +5575,7 @@ export default function App() {
                                <div className="flex gap-1">
                                   <button 
                                     type="button"
-                                    className="p-1.5 hover:bg-slate-100 text-slate-500 disabled:opacity-20 transition-colors" 
+                                    className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 disabled:opacity-20 transition-colors" 
                                     onClick={() => moveProviderUp(i)}
                                     disabled={i === 0}
                                     title="Move Up"
@@ -5694,7 +5584,7 @@ export default function App() {
                                   </button>
                                   <button 
                                     type="button"
-                                    className="p-1.5 hover:bg-slate-100 text-slate-500 disabled:opacity-20 transition-colors" 
+                                    className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 disabled:opacity-20 transition-colors" 
                                     onClick={() => moveProviderDown(i)}
                                     disabled={i === (settings.aiProviderPriority || []).length - 1}
                                     title="Move Down"
@@ -5707,7 +5597,7 @@ export default function App() {
                         </div>
                         <p className="hint !mt-2">Failed keys automatically rotate. Failed providers trigger failover in this order.</p>
                      </div>
-                     <div className="flex items-center justify-between p-3 bg-slate-50  border border-slate-200">
+                     <div className="flex items-center justify-between p-3.5 rounded-2xl bg-[#f4f8f5] border border-emerald-950/[0.08]">
                         <div>
                            <h4 className="text-[11px] font-bold">Auto-Rotation</h4>
                            <p className="text-[9px] text-slate-500">Enable smart key rotation on 429 errors</p>
@@ -5914,10 +5804,9 @@ export default function App() {
               <div className="card">
                 <div className="card-head">
                   <div>
-                    <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <span className="badge badge-blue text-[9px] font-bold">CATEGORY F</span>
-                      <span className="text-[10px] text-gray-500 font-semibold">{isBn ? 'সার্ভার ও সিস্টেম সংযোগ' : 'Server & System Status'}</span>
-                    </div>
+                    <span className="text-[10px] text-[#087f55] font-bold uppercase tracking-wider block mb-0.5">
+                      {isBn ? 'সার্ভার ও সিস্টেম সংযোগ' : 'Server & System Status'}
+                    </span>
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="font-extrabold text-[13px]">Baileys Socket Server URL</h3>
                       {renderInfoBtn('serverConnection')}
@@ -5949,7 +5838,7 @@ export default function App() {
               </div>
 
               {/* GitHub Pages Deployment Card */}
-              <div className="card border border-emerald-300 bg-emerald-50/70">
+              <div className="card border border-emerald-200/80 bg-[#f4fbf7]">
                 <div className="card-head">
                   <div>
                     <h3 className="text-emerald-950 font-bold">GitHub Pages Deployment (Blank Screen 100% Fixed)</h3>
@@ -5960,26 +5849,26 @@ export default function App() {
                   </div>
                 </div>
                 <div className="text-xs text-emerald-950 leading-relaxed space-y-2.5">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-                    <div className="p-2 bg-white  border border-emerald-200">
-                      <b>✅ 1. Relative Asset Path:</b> <code>base: &#39;./&#39;</code> কনফিগার করা হয়েছে।
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-[11px]">
+                    <div className="p-2.5 rounded-xl bg-white border border-emerald-200/80">
+                      <b>1. Relative Asset Path:</b> <code>base: &#39;./&#39;</code> কনফিগার করা হয়েছে।
                     </div>
-                    <div className="p-2 bg-white  border border-emerald-200">
-                      <b>✅ 2. Trailing Slash Enforcer:</b> <code>index.html</code> এ স্বয়ংক্রিয় রিডাইরেক্ট কোড যুক্ত।
+                    <div className="p-2.5 rounded-xl bg-white border border-emerald-200/80">
+                      <b>2. Trailing Slash Enforcer:</b> <code>index.html</code> এ স্বয়ংক্রিয় রিডাইরেক্ট কোড যুক্ত।
                     </div>
-                    <div className="p-2 bg-white  border border-emerald-200">
-                      <b>✅ 3. Jekyll Bypass:</b> <code>.nojekyll</code> ফাইল যুক্ত যাতে কোনো ফাইল মিসিং না হয়।
+                    <div className="p-2.5 rounded-xl bg-white border border-emerald-200/80">
+                      <b>3. Jekyll Bypass:</b> <code>.nojekyll</code> ফাইল যুক্ত যাতে কোনো ফাইল মিসিং না হয়।
                     </div>
-                    <div className="p-2 bg-white  border border-emerald-200">
-                      <b>✅ 4. SPA 404 Routing:</b> <code>404.html</code> দেওয়া হয়েছে যাতে রিফ্রেশে পেজ না হারায়।
+                    <div className="p-2.5 rounded-xl bg-white border border-emerald-200/80">
+                      <b>4. SPA 404 Routing:</b> <code>404.html</code> দেওয়া হয়েছে যাতে রিফ্রেশে পেজ না হারায়।
                     </div>
                   </div>
 
                   <p className="pt-1">
-                    <b>💡 গুরুত্বপূর্ণ নোট (Anti-Ban টিপস):</b> ফ্রি Render (`onrender.com`) সার্ভার প্রতি ১৫ মিনিটে স্লিপ করে এবং শেয়ার্ড IP থেকে বারবার সেশন রিসেট করায় WhatsApp টেম্পোরারি ব্যান দেয়। ২৪/৭ নিরাপদ ও ব্যান-মুক্ত সংযোগের জন্য প্রজেক্টটি <b>Google Cloud Run</b>-এ (রিপোতে থাকা `Dockerfile` দিয়ে) অথবা নিজের ফোনের <b>Termux</b> (`http://127.0.0.1:3000`)-এ চালিয়ে উপরের <b>Baileys Socket Server URL</b> বক্সে সেভ করুন।
+                    <b>গুরুত্বপূর্ণ নোট (Anti-Ban টিপস):</b> ফ্রি Render (`onrender.com`) সার্ভার প্রতি ১৫ মিনিটে স্লিপ করে এবং শেয়ার্ড IP থেকে বারবার সেশন রিসেট করায় WhatsApp টেম্পোরারি ব্যান দেয়। ২৪/৭ নিরাপদ ও ব্যান-মুক্ত সংযোগের জন্য প্রজেক্টটি <b>Google Cloud Run</b>-এ (রিপোতে থাকা `Dockerfile` দিয়ে) অথবা নিজের ফোনের <b>Termux</b> (`http://127.0.0.1:3000`)-এ চালিয়ে উপরের <b>Baileys Socket Server URL</b> বক্সে সেভ করুন।
                   </p>
 
-                  <div className="p-2.5 bg-white  border border-emerald-200 font-mono text-[11px] text-gray-800">
+                  <div className="p-2.5 rounded-xl bg-white border border-emerald-200/80 font-mono text-[11px] text-gray-800">
                     npm run build &nbsp;&nbsp;&mdash; Generates GitHub Pages ready build in <b>dist/</b>
                   </div>
                 </div>

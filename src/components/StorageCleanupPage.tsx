@@ -358,14 +358,14 @@ export function StorageCleanupPage({
 
   return (
     <section className="page active" id="storagecleanup">
-      <div className="mb-4 pb-3 border-b border-slate-200">
-        <div className="flex items-center justify-between gap-2 mb-2.5">
+      <div className="mb-3 pb-2.5 border-b border-emerald-950/[0.06]">
+        <div className="flex items-center justify-between gap-2 mb-2">
           <button
             type="button"
             onClick={onBack}
-            className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-2 rounded-xl bg-white border border-slate-200 hover:border-emerald-400 text-xs font-bold text-slate-700 transition-colors cursor-pointer"
+            className="sub-back-btn"
           >
-            <ArrowLeft size={14} className="text-emerald-700" />
+            <ArrowLeft size={12} className="text-[#087f55]" />
             <span>{isBn ? 'হোম পেজ' : 'Back Home'}</span>
           </button>
 
@@ -373,17 +373,17 @@ export function StorageCleanupPage({
             type="button"
             onClick={onRefresh}
             disabled={isLoading || Boolean(runningMode)}
-            className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 rounded-xl bg-white border border-slate-200 hover:border-emerald-400 text-xs font-bold text-slate-700 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            className="btn outline whitespace-nowrap shrink-0"
           >
-            <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
+            <RefreshCw size={12} className={isLoading ? 'animate-spin' : ''} />
             <span>{isBn ? 'স্টোরেজ রিফ্রেশ' : 'Refresh Monitor'}</span>
           </button>
         </div>
 
-        <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight leading-snug">
+        <h1 className="text-[15px] sm:text-[17px] font-extrabold text-[#0f291e] tracking-tight leading-snug">
           {isBn ? 'সার্ভার স্টোরেজ মনিটর ও অটো ক্লিনআপ' : 'Server Storage Monitor & Auto Cleanup'}
         </h1>
-        <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 leading-relaxed">
+        <p className="text-[10.5px] sm:text-[11px] text-[#5f7368] mt-0.5 leading-relaxed">
           {isBn
             ? 'ডাটাবেজ ও WhatsApp সেশন সম্পূর্ণ সুরক্ষিত রেখে প্রতি ৩ ঘণ্টায় ক্যাশ, প্রতিদিন টেম্প ফাইল, ডুপ্লিকেট ও ৭ দিনের পুরোনো ডিবাগ লগ নিরাপদভাবে অপ্টিমাইজ করে।'
             : 'Safely cleans cache every 3h, daily temporary/duplicate files, and archives debug logs older than 7 days without touching WhatsApp auth, database, or active queues.'}
@@ -391,67 +391,67 @@ export function StorageCleanupPage({
       </div>
 
       {/* Primary KPI Summary Strip */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 mb-4">
-        <div className="bg-white rounded-xl border border-slate-200 p-3.5">
-          <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500 mb-1">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 mb-3.5">
+        <div className="bg-white rounded-[16px] border border-emerald-950/[0.07] shadow-[0_3px_14px_rgba(10,56,36,0.035)] p-3">
+          <div className="flex items-center justify-between text-[10.5px] font-semibold text-slate-500 mb-1">
             <span>{isBn ? 'বট ডাটা ও স্বাস্থ্য' : 'Bot Data & Storage'}</span>
-            <HardDrive size={14} className="text-slate-400" />
+            <HardDrive size={13} className="text-slate-400" />
           </div>
-          <div className="text-lg sm:text-xl font-extrabold text-slate-900 tabular-nums">
+          <div className="text-[17px] sm:text-[18px] font-extrabold text-slate-900 tabular-nums leading-tight">
             {snap?.appDataBytes !== undefined ? formatBytesHuman(snap.appDataBytes) : (disk ? `${usedPct.toFixed(1)}%` : '—')}
           </div>
-          <div className={`text-[11px] font-bold mt-0.5 ${statusColor}`}>{statusText}</div>
-          <div className="text-[10px] text-slate-400 mt-0.5 tabular-nums">
+          <div className={`text-[10.5px] font-bold mt-0.5 ${statusColor}`}>{statusText}</div>
+          <div className="text-[9.5px] text-slate-400 mt-0.5 tabular-nums">
             {disk ? (isBn ? `ফ্রি স্পেস: ${formatBytesHuman(disk.freeBytes)}` : `Free: ${formatBytesHuman(disk.freeBytes)}`) : ''}
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-slate-200 p-3.5">
-          <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500 mb-1">
+        <div className="bg-white rounded-[16px] border border-emerald-950/[0.07] shadow-[0_3px_14px_rgba(10,56,36,0.035)] p-3">
+          <div className="flex items-center justify-between text-[10.5px] font-semibold text-slate-500 mb-1">
             <span>{isBn ? 'মোট রিকভার স্টোরেজ' : 'Recovered Storage'}</span>
-            <Sparkles size={14} className="text-emerald-600" />
+            <Sparkles size={13} className="text-emerald-600" />
           </div>
-          <div className="text-lg sm:text-xl font-extrabold text-emerald-700 tabular-nums">
+          <div className="text-[17px] sm:text-[18px] font-extrabold text-emerald-700 tabular-nums leading-tight">
             {formatBytesHuman(sched?.totalRecoveredBytes)}
           </div>
-          <div className="text-[11px] text-slate-500 mt-0.5 tabular-nums">
+          <div className="text-[10.5px] text-slate-500 mt-0.5 tabular-nums">
             {isBn
               ? `${sched?.totalFilesCleaned || 0}টি ফাইল/লগ অপ্টিমাইজ`
               : `${sched?.totalFilesCleaned || 0} items cleaned`}
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-slate-200 p-3.5">
-          <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500 mb-1">
+        <div className="bg-white rounded-[16px] border border-emerald-950/[0.07] shadow-[0_3px_14px_rgba(10,56,36,0.035)] p-3">
+          <div className="flex items-center justify-between text-[10.5px] font-semibold text-slate-500 mb-1">
             <span>{isBn ? 'সর্বশেষ ক্লিনআপ' : 'Last Cleanup Time'}</span>
-            <Clock size={14} className="text-slate-400" />
+            <Clock size={13} className="text-slate-400" />
           </div>
-          <div className="text-sm sm:text-base font-extrabold text-slate-900 tabular-nums leading-snug">
+          <div className="text-[13px] sm:text-[14px] font-extrabold text-slate-900 tabular-nums leading-snug">
             {formatDateTime(sched?.lastCleanupAt, isBn)}
           </div>
-          <div className="text-[11px] text-slate-500 mt-0.5 tabular-nums">
+          <div className="text-[10px] text-slate-500 mt-0.5 tabular-nums">
             {isBn
               ? `পরবর্তী ক্যাশ: ${formatDateTime(sched?.nextCacheCleanupAt, true)}`
               : `Next cache: ${formatDateTime(sched?.nextCacheCleanupAt, false)}`}
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-slate-200 p-3.5">
-          <div className="flex items-center justify-between text-[11px] font-semibold text-slate-500 mb-1">
+        <div className="bg-white rounded-[16px] border border-emerald-950/[0.07] shadow-[0_3px_14px_rgba(10,56,36,0.035)] p-3">
+          <div className="flex items-center justify-between text-[10.5px] font-semibold text-slate-500 mb-1">
             <span>{isBn ? 'সার্ভার র‍্যাম ও সুরক্ষা' : 'Memory & Data Guard'}</span>
-            <ShieldCheck size={14} className="text-emerald-600" />
+            <ShieldCheck size={13} className="text-emerald-600" />
           </div>
-          <div className="text-lg sm:text-xl font-extrabold text-slate-900 tabular-nums">
+          <div className="text-[17px] sm:text-[18px] font-extrabold text-slate-900 tabular-nums leading-tight">
             {mem ? `${mem.rssMb} MB` : '—'}
           </div>
-          <div className="text-[11px] font-semibold text-emerald-700 mt-0.5">
+          <div className="text-[10.5px] font-semibold text-emerald-700 mt-0.5">
             {isBn ? 'DB ও WA সেশন ১০০% সুরক্ষিত' : 'DB & WA Creds Protected'}
           </div>
         </div>
       </div>
 
       {/* Disk Usage Gauge + Manual Cleanup Bar */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
+      <div className="bg-white rounded-[18px] border border-emerald-950/[0.07] shadow-[0_3px_14px_rgba(10,56,36,0.035)] p-3.5 mb-3.5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
           <div>
             <h2 className="text-sm font-extrabold text-slate-900">
@@ -472,9 +472,9 @@ export function StorageCleanupPage({
             type="button"
             disabled={Boolean(runningMode)}
             onClick={() => onRunCleanup('full')}
-            className="inline-flex items-center justify-center gap-2 min-h-[42px] px-4 py-2 rounded-xl bg-[#087f55] hover:bg-[#066c49] disabled:opacity-60 text-white text-xs font-extrabold transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            className="btn primary shrink-0"
           >
-            <Trash2 size={14} />
+            <Trash2 size={12} />
             <span>
               {runningMode === 'full'
                 ? isBn
@@ -534,14 +534,14 @@ export function StorageCleanupPage({
         </div>
 
         {/* Targeted Action Buttons */}
-        <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap gap-2">
+        <div className="mt-3 pt-2.5 border-t border-emerald-950/[0.06] flex flex-wrap gap-1.5">
           <button
             type="button"
             disabled={Boolean(runningMode)}
             onClick={() => onRunCleanup('cache')}
-            className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-xs font-bold text-slate-800 cursor-pointer whitespace-nowrap"
+            className="btn outline"
           >
-            <RefreshCw size={13} className={runningMode === 'cache' ? 'animate-spin text-emerald-700' : 'text-emerald-700'} />
+            <RefreshCw size={11} className={runningMode === 'cache' ? 'animate-spin text-[#087f55]' : 'text-[#087f55]'} />
             <span>{isBn ? 'ক্যাশ ও র‍্যাম অপ্টিমাইজ' : 'Clean Cache Only'}</span>
           </button>
 
@@ -549,9 +549,9 @@ export function StorageCleanupPage({
             type="button"
             disabled={Boolean(runningMode)}
             onClick={() => onRunCleanup('temp')}
-            className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-xs font-bold text-slate-800 cursor-pointer whitespace-nowrap"
+            className="btn outline"
           >
-            <Copy size={13} className="text-amber-700" />
+            <Copy size={11} className="text-amber-600" />
             <span>{isBn ? 'টেম্প ও ডুপ্লিকেট ফাইল' : 'Clean Temp & Duplicates'}</span>
           </button>
 
@@ -559,17 +559,17 @@ export function StorageCleanupPage({
             type="button"
             disabled={Boolean(runningMode)}
             onClick={() => onRunCleanup('logs')}
-            className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-xs font-bold text-slate-800 cursor-pointer whitespace-nowrap"
+            className="btn outline"
           >
-            <Archive size={13} className="text-blue-700" />
+            <Archive size={11} className="text-blue-600" />
             <span>{isBn ? '৭+ দিনের ডিবাগ লগ আর্কাইভ' : 'Archive 7d+ Debug Logs'}</span>
           </button>
         </div>
       </div>
 
       {/* Main 2-Column Section: Storage Breakdown + Auto-Scheduler Settings */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-        <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3.5 mb-3.5">
+        <div className="lg:col-span-2 card">
           <div className="flex items-center justify-between gap-2 mb-3">
             <div>
               <h3 className="text-sm font-extrabold text-slate-900">
@@ -615,63 +615,94 @@ export function StorageCleanupPage({
         </div>
 
         {/* Auto Cleanup Scheduler Controls */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-col justify-between">
+        <div className="card flex flex-col justify-between">
           <div>
-            <h3 className="text-sm font-extrabold text-slate-900 mb-1">
-              {isBn ? 'অটো ক্লিনআপ শিডিউলার' : 'Auto Cleanup Scheduler'}
-            </h3>
-            <p className="text-[11px] text-slate-500 mb-3">
-              {isBn
-                ? 'সার্ভার রিস্টার্ট হলেও শিডিউল স্বয়ংক্রিয়ভাবে চলবে ও হোয়াটসঅ্যাপ সংযোগ অটুট রাখবে।'
-                : 'Schedule persists across server restarts with zero WhatsApp downtime.'}
-            </p>
+            <div className="card-head">
+              <div>
+                <h3 className="font-extrabold text-[13px]">
+                  {isBn ? 'অটো ক্লিনআপ শিডিউলার' : 'Auto Cleanup Scheduler'}
+                </h3>
+                <p>
+                  {isBn
+                    ? 'সার্ভার রিস্টার্ট হলেও শিডিউল স্বয়ংক্রিয়ভাবে চলবে ও সংযোগ অটুট রাখবে।'
+                    : 'Schedule persists across server restarts with zero WhatsApp downtime.'}
+                </p>
+              </div>
+              <div className="symbol sg">
+                <Clock size={15} />
+              </div>
+            </div>
 
-            <div className="space-y-3">
-              <label className="flex items-center justify-between gap-2 cursor-pointer">
-                <span className="text-xs font-semibold text-slate-700">
-                  {isBn ? 'অটোমেটিক ক্লিনআপ সিস্টেম' : 'Auto Cleanup System'}
-                </span>
+            <div className="toggle-row">
+              <div className="toggle-info">
+                <h4>{isBn ? 'অটোমেটিক ক্লিনআপ সিস্টেম' : 'Auto Cleanup System'}</h4>
+                <p>{isBn ? 'নির্ধারিত সময় পর পর নিরাপদ ক্যাশ পরিষ্কার করবে' : 'Runs scheduled maintenance sweeps'}</p>
+              </div>
+              <label className="switch">
                 <input
                   type="checkbox"
                   checked={autoEnabled}
                   onChange={(e) => setAutoEnabled(e.target.checked)}
-                  className="w-4 h-4 accent-[#087f55]"
                 />
+                <span className="slider"></span>
               </label>
+            </div>
 
-              <label className="flex items-center justify-between gap-2 cursor-pointer">
-                <span className="text-xs font-semibold text-slate-700">
-                  {isBn ? 'দৈনিক টেম্প ও ডুপ্লিকেট ক্লিনআপ' : 'Daily Temp & Duplicates'}
-                </span>
+            <div className="toggle-row">
+              <div className="toggle-info">
+                <h4>{isBn ? 'দৈনিক টেম্প ও ডুপ্লিকেট ক্লিনআপ' : 'Daily Temp & Duplicates'}</h4>
+                <p>{isBn ? 'অপ্রয়োজনীয় টেম্পোরারি ও ডুপ্লিকেট ফাইল মুছে ফেলবে' : 'Removes stale temp & duplicate files'}</p>
+              </div>
+              <label className="switch">
                 <input
                   type="checkbox"
                   checked={dailyTempEnabled}
                   onChange={(e) => setDailyTempEnabled(e.target.checked)}
-                  className="w-4 h-4 accent-[#087f55]"
                 />
+                <span className="slider"></span>
               </label>
+            </div>
 
-              <label className="flex items-center justify-between gap-2 cursor-pointer">
-                <span className="text-xs font-semibold text-slate-700">
-                  {isBn ? 'গুরুত্বপূর্ণ এরর লগ সংরক্ষণ' : 'Preserve Important Error Logs'}
-                </span>
+            <div className="toggle-row">
+              <div className="toggle-info">
+                <h4>{isBn ? 'গুরুত্বপূর্ণ এরর লগ সংরক্ষণ' : 'Preserve Important Error Logs'}</h4>
+                <p>{isBn ? 'ডাটাবেজ ও এরর লগ কখনোই ডিলিট করবে না' : 'Protects core database and critical logs'}</p>
+              </div>
+              <label className="switch">
                 <input
                   type="checkbox"
                   checked={preserveErrors}
                   onChange={(e) => setPreserveErrors(e.target.checked)}
-                  className="w-4 h-4 accent-[#087f55]"
                 />
+                <span className="slider"></span>
               </label>
+            </div>
 
-              <div className="grid grid-cols-2 gap-2 pt-1">
+            <div className="toggle-row">
+              <div className="toggle-info">
+                <h4>{isBn ? 'স্টিকার, ওয়ার্নিং ও রিমুভ হিস্ট্রি অটো-ক্লিয়ার' : 'Auto-Clear Sticker, Warning & Remove History'}</h4>
+                <p>{isBn ? 'পুরোনো হিস্ট্রি নির্ধারিত সময় পর অটো-ক্লিয়ার হবে' : 'Auto-prunes expired moderation histories'}</p>
+              </div>
+              <label className="switch">
+                <input
+                  type="checkbox"
+                  checked={autoHistoryClear}
+                  onChange={(e) => setAutoHistoryClear(e.target.checked)}
+                />
+                <span className="slider"></span>
+              </label>
+            </div>
+
+            <div className="subpanel-soft mt-3 space-y-2">
+              <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                    {isBn ? 'ক্যাশ ইন্টারভাল (ঘণ্টা)' : 'Cache Interval (hr)'}
+                  <label className="block text-[10px] font-bold text-[#5f7368] mb-1">
+                    {isBn ? 'ক্যাশ ইন্টারভাল' : 'Cache Interval'}
                   </label>
                   <select
                     value={cacheHours}
                     onChange={(e) => setCacheHours(Number(e.target.value))}
-                    className="w-full min-h-[38px] px-2.5 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-800"
+                    className="field font-bold"
                   >
                     <option value={1}>1h</option>
                     <option value={3}>3h (Default)</option>
@@ -681,13 +712,13 @@ export function StorageCleanupPage({
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                    {isBn ? 'ডিবাগ লগ মেয়াদ (দিন)' : 'Debug Log Days'}
+                  <label className="block text-[10px] font-bold text-[#5f7368] mb-1">
+                    {isBn ? 'ডিবাগ লগ মেয়াদ' : 'Debug Log Days'}
                   </label>
                   <select
                     value={logRetentionDays}
                     onChange={(e) => setLogRetentionDays(Number(e.target.value))}
-                    className="w-full min-h-[38px] px-2.5 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-800"
+                    className="field font-bold"
                   >
                     <option value={3}>3 Days</option>
                     <option value={7}>7 Days (Default)</option>
@@ -697,40 +728,27 @@ export function StorageCleanupPage({
                 </div>
               </div>
 
-              <div className="pt-2 border-t border-slate-100 space-y-2">
-                <label className="flex items-center justify-between gap-2 cursor-pointer">
-                  <span className="text-xs font-semibold text-slate-700">
-                    {isBn ? 'স্টিকার, ওয়ার্নিং ও রিমুভ হিস্ট্রি অটো-ক্লিয়ার' : 'Auto-Clear Sticker, Warning & Remove History'}
-                  </span>
-                  <input
-                    type="checkbox"
-                    checked={autoHistoryClear}
-                    onChange={(e) => setAutoHistoryClear(e.target.checked)}
-                    className="w-4 h-4 accent-[#087f55]"
-                  />
+              <div>
+                <label className="block text-[10px] font-bold text-[#5f7368] mb-1">
+                  {isBn ? 'হিস্ট্রি কতক্ষণ পর অটো ক্লিয়ার হবে' : 'Clear Histories Older Than'}
                 </label>
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                    {isBn ? 'হিস্ট্রি কতক্ষণ পর অটো ক্লিয়ার হবে' : 'Clear Histories Older Than'}
-                  </label>
-                  <select
-                    value={historyRetentionHours}
-                    onChange={(e) => setHistoryRetentionHours(Number(e.target.value))}
-                    className="w-full min-h-[38px] px-2.5 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-800"
-                  >
-                    <option value={1}>{isBn ? '১ ঘণ্টা পর' : '1 Hour'}</option>
-                    <option value={3}>{isBn ? '৩ ঘণ্টা পর' : '3 Hours'}</option>
-                    <option value={6}>{isBn ? '৬ ঘণ্টা পর' : '6 Hours'}</option>
-                    <option value={12}>{isBn ? '১২ ঘণ্টা পর' : '12 Hours'}</option>
-                    <option value={24}>{isBn ? '২৪ ঘণ্টা (ডিফল্ট)' : '24 Hours (Default)'}</option>
-                    <option value={72}>{isBn ? '৩ দিন পর' : '72 Hours'}</option>
-                  </select>
-                </div>
+                <select
+                  value={historyRetentionHours}
+                  onChange={(e) => setHistoryRetentionHours(Number(e.target.value))}
+                  className="field font-bold"
+                >
+                  <option value={1}>{isBn ? '১ ঘণ্টা পর' : '1 Hour'}</option>
+                  <option value={3}>{isBn ? '৩ ঘণ্টা পর' : '3 Hours'}</option>
+                  <option value={6}>{isBn ? '৬ ঘণ্টা পর' : '6 Hours'}</option>
+                  <option value={12}>{isBn ? '১২ ঘণ্টা পর' : '12 Hours'}</option>
+                  <option value={24}>{isBn ? '২৪ ঘণ্টা (ডিফল্ট)' : '24 Hours (Default)'}</option>
+                  <option value={72}>{isBn ? '৩ দিন পর' : '72 Hours'}</option>
+                </select>
               </div>
             </div>
           </div>
 
-          <div className="mt-4 space-y-2">
+          <div className="mt-3 space-y-2">
             <button
               type="button"
               onClick={() =>
@@ -744,19 +762,19 @@ export function StorageCleanupPage({
                   historyRetentionHours,
                 })
               }
-              className="w-full min-h-[40px] px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+              className="btn primary w-full justify-center"
             >
-              <Save size={13} />
+              <Save size={12} />
               <span>{isBn ? 'শিডিউল সেটিংস সেভ করুন' : 'Save Scheduler Settings'}</span>
             </button>
             {onClearHistoriesNow && (
               <button
                 type="button"
                 onClick={onClearHistoriesNow}
-                className="w-full min-h-[38px] px-4 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 text-xs font-bold inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                className="btn danger w-full justify-center"
               >
-                <Trash2 size={13} />
-                <span>{isBn ? 'এখনই সব হিস্ট্রি ক্লিয়ার (স্টিকার + ওয়ার্নিং + রিমুভ)' : 'Clear Sticker, Warning & Remove History Now'}</span>
+                <Trash2 size={12} />
+                <span>{isBn ? 'এখনই সব হিস্ট্রি ক্লিয়ার করুন' : 'Clear All Histories Now'}</span>
               </button>
             )}
           </div>
@@ -764,21 +782,19 @@ export function StorageCleanupPage({
       </div>
 
       {/* Safety Guarantee Notice */}
-      <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 mb-4 flex items-start gap-2.5">
-        <CheckCircle2 size={16} className="text-emerald-700 shrink-0 mt-0.5" />
-        <div className="text-xs text-emerald-950 leading-relaxed">
-          <span className="font-extrabold">
-            {isBn ? 'বিশেষ ডাটা সুরক্ষা গ্যারান্টি: ' : 'Strict Data Protection Guarantee: '}
-          </span>
+      <div className="policy-box mb-3.5 flex items-start gap-2">
+        <CheckCircle2 size={14} className="text-[#087f55] shrink-0 mt-0.5" />
+        <p>
+          <strong>{isBn ? 'বিশেষ ডাটা সুরক্ষা গ্যারান্টি: ' : 'Strict Data Protection Guarantee: '}</strong>
           {isBn
-            ? 'ডাটাবেজ ফাইল, WhatsApp সেশন ও ক্রেডেনশিয়াল, পেন্ডিং মেসেজ কিউ, গ্রুপ সুরক্ষা সেটিংস এবং গুরুত্বপূর্ণ এরর লগ সুরক্ষিত রেখে শুধু নির্ধারিত মেয়াদের পুরোনো স্টিকার, ওয়ার্নিং ও রিমুভ হিস্ট্রি অটো-ক্লিয়ার করা হয়।'
-            : 'Core settings, WhatsApp auth credentials, pending queues, and important error logs stay protected while expired sticker, warning, and remove histories auto-clear on schedule.'}
-        </div>
+            ? 'ডাটাবেজ ফাইল, WhatsApp সেশন ও ক্রেডেনশিয়াল, পেন্ডিং মেসেজ কিউ এবং গুরুত্বপূর্ণ এরর লগ সুরক্ষিত রেখে শুধু পুরোনো হিস্ট্রি ও ক্যাশ অটো-ক্লিয়ার করা হয়।'
+            : 'Core settings, WhatsApp auth credentials, pending queues, and important error logs stay protected.'}
+        </p>
       </div>
 
       {/* Storage Threshold Alerts (70%, 85%, 95%) */}
       {overview?.alerts && overview.alerts.length > 0 && (
-        <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
+        <div className="card mb-3.5">
           <div className="flex items-center justify-between gap-2 mb-2.5">
             <div className="flex items-center gap-2">
               <AlertTriangle size={15} className="text-amber-600" />
@@ -812,7 +828,7 @@ export function StorageCleanupPage({
       )}
 
       {/* Cleanup History & Before/After Reports */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4">
+      <div className="bg-white rounded-[20px] border border-emerald-950/[0.07] shadow-[0_4px_18px_rgba(10,56,36,0.04)] p-4">
         <div className="flex items-center justify-between gap-2 mb-3">
           <div>
             <h3 className="text-sm font-extrabold text-slate-900">
