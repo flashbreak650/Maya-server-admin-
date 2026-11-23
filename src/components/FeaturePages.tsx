@@ -2274,7 +2274,7 @@ export function MemberBlockPage({
   onBack: () => void;
 }) {
   const [search, setSearch] = useState('');
-  const [filterMode, setFilterMode] = useState<'members' | 'all' | 'blocked'>('members');
+  const [filterMode, setFilterMode] = useState<'members' | 'all' | 'blocked'>('all');
   const [durationMinutes, setDurationMinutes] = useState<number>(10);
   const [showNoticeEditor, setShowNoticeEditor] = useState(false);
   const [draftNotice, setDraftNotice] = useState(noticeTemplate || defaultNotice);
@@ -2283,11 +2283,11 @@ export function MemberBlockPage({
     setDraftNotice(noticeTemplate || defaultNotice);
   }, [noticeTemplate, defaultNotice]);
 
-  const blockedCount = members.filter((m) => m.isBlocked).length;
-  const nonAdminCount = members.filter((m) => m.role === 'member' && !m.isSelf).length;
+  const nonSelfMembers = members.filter((m) => !m.isSelf);
+  const blockedCount = nonSelfMembers.filter((m) => m.isBlocked).length;
+  const nonAdminCount = nonSelfMembers.filter((m) => m.role === 'member').length;
 
-  const visibleMembers = members.filter((m) => {
-    if (m.isSelf) return false;
+  const visibleMembers = nonSelfMembers.filter((m) => {
     if (filterMode === 'members' && m.role !== 'member') return false;
     if (filterMode === 'blocked' && !m.isBlocked) return false;
     if (!search.trim()) return true;
@@ -2335,13 +2335,21 @@ export function MemberBlockPage({
                   {isBn ? 'গ্রুপ সিলেক্ট করুন' : 'Select Group'}
                 </label>
                 <select
-                  className="field"
-                  value={selectedGroupId}
+                  className="field bg-white cursor-pointer"
+                  value={selectedGroupId || groups[0]?.id || ''}
                   onChange={(e) => onSelectGroup(e.target.value)}
-                  disabled={isLoading || groups.length === 0}
+                  disabled={groups.length === 0}
                 >
                   {groups.length === 0 && (
-                    <option value="">{isBn ? 'কোনো গ্রুপ পাওয়া যায়নি' : 'No groups found'}</option>
+                    <option value="">
+                      {isLoading
+                        ? isBn
+                          ? 'গ্রুপ লোড হচ্ছে...'
+                          : 'Loading groups...'
+                        : isBn
+                        ? 'কোনো গ্রুপ পাওয়া যায়নি'
+                        : 'No groups found'}
+                    </option>
                   )}
                   {groups.map((g) => (
                     <option key={g.id} value={g.id}>
@@ -2404,6 +2412,15 @@ export function MemberBlockPage({
               <div className="flex items-center gap-1.5 flex-wrap">
                 <button
                   type="button"
+                  onClick={() => setFilterMode('all')}
+                  className={`min-h-[32px] px-2.5 rounded-lg text-[11px] font-bold cursor-pointer ${
+                    filterMode === 'all' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
+                  }`}
+                >
+                  {isBn ? `সবাই (${nonSelfMembers.length})` : `All (${nonSelfMembers.length})`}
+                </button>
+                <button
+                  type="button"
                   onClick={() => setFilterMode('members')}
                   className={`min-h-[32px] px-2.5 rounded-lg text-[11px] font-bold cursor-pointer ${
                     filterMode === 'members' ? 'bg-[#087f55] text-white' : 'bg-slate-100 text-slate-700'
@@ -2419,15 +2436,6 @@ export function MemberBlockPage({
                   }`}
                 >
                   {isBn ? `ব্লক করা (${blockedCount})` : `Blocked (${blockedCount})`}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFilterMode('all')}
-                  className={`min-h-[32px] px-2.5 rounded-lg text-[11px] font-bold cursor-pointer ${
-                    filterMode === 'all' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
-                  }`}
-                >
-                  {isBn ? `সবাই (${members.length})` : `All (${members.length})`}
                 </button>
               </div>
             </div>
@@ -2519,7 +2527,7 @@ export function MemberBlockPage({
                         )}
                       </div>
                       <div className="font-mono text-[11px] font-bold text-slate-600 mt-0.5 tabular-nums break-all">
-                        +{m.phone}
+                        {m.phone ? (m.phone.startsWith('+') ? m.phone : `+${m.phone}`) : m.jid}
                       </div>
                       {m.isBlocked && (
                         <div className="mt-1 inline-flex items-center gap-1 text-[10.5px] font-extrabold text-rose-600 tabular-nums">

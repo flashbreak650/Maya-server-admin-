@@ -1207,8 +1207,15 @@ function findRestrictionEntry(
     candidateKeys.add(getRestrictedUserKey(groupId, cand));
     candidateKeys.add(`${groupId}:${cand}`);
     const cu = cleanJidUser(cand);
-    if (cu) candidateUsers.add(cu);
+    if (cu) {
+      candidateUsers.add(cu);
+      if (!isLidJid(cand)) {
+        const pnDigits = normalizePhoneDigits(cu);
+        if (pnDigits) candidateUsers.add(pnDigits);
+      }
+    }
   }
+  expandIdSetWithLidMaps(candidateUsers);
 
   for (const ck of candidateKeys) {
     if (db.restrictedUsers[ck]) {
@@ -1216,16 +1223,79 @@ function findRestrictionEntry(
     }
   }
 
-  // Fallback: match stored altJid or clean user digits in the same group
+  // Fallback: match stored altJid or clean user digits (including LID <-> PN mappings) in the same group
   for (const [storedKey, entry] of Object.entries(db.restrictedUsers)) {
     if (entry.groupId !== groupId) continue;
-    const entryUsers = [cleanJidUser(entry.senderJid), cleanJidUser(entry.altJid), cleanJidUser(entry.senderPhone)].filter(Boolean);
-    if (entryUsers.some((u) => candidateUsers.has(u))) {
-      return { key: storedKey, restriction: entry };
+    const entryUsers = new Set<string>();
+    for (const raw of [entry.senderJid, entry.altJid, entry.senderPhone]) {
+      if (!raw) continue;
+      const cu = cleanJidUser(raw);
+      if (cu) {
+        entryUsers.add(cu);
+        if (!isLidJid(raw)) {
+          const pnDigits = normalizePhoneDigits(cu);
+          if (pnDigits) entryUsers.add(pnDigits);
+        }
+      }
+    }
+    expandIdSetWithLidMaps(entryUsers);
+    for (const u of entryUsers) {
+      if (candidateUsers.has(u)) {
+        return { key: storedKey, restriction: entry };
+      }
     }
   }
 
   return null;
+}
+
+const recentExtendedMsgIds = new Map<string, number>();
+
+export function extendRestrictionBySeconds(
+  groupId: string,
+  senderJid: string,
+  extraJids: string[] = [],
+  addSeconds: number = 60,
+  messageId?: string
+): { extended: boolean; expiresAt: number; remainingMs: number } {
+  if (!db.restrictedUsers) return { extended: false, expiresAt: 0, remainingMs: 0 };
+  const found = findRestrictionEntry(groupId, senderJid, extraJids);
+  if (!found) return { extended: false, expiresAt: 0, remainingMs: 0 };
+
+  const now = Date.now();
+  if (found.restriction.expiresAt <= now) {
+    return { extended: false, expiresAt: found.restriction.expiresAt, remainingMs: 0 };
+  }
+
+  if (messageId) {
+    const dedupKey = `${groupId}:${messageId}`;
+    const prevTs = recentExtendedMsgIds.get(dedupKey);
+    if (prevTs && now - prevTs < 30000) {
+      return {
+        extended: false,
+        expiresAt: found.restriction.expiresAt,
+        remainingMs: Math.max(0, found.restriction.expiresAt - now),
+      };
+    }
+    recentExtendedMsgIds.set(dedupKey, now);
+    if (recentExtendedMsgIds.size > 600) {
+      for (const [k, ts] of recentExtendedMsgIds.entries()) {
+        if (now - ts > 60000) recentExtendedMsgIds.delete(k);
+      }
+    }
+  }
+
+  const addMs = Math.max(1000, Math.round(addSeconds * 1000));
+  const maxCap = now + 24 * 60 * 60 * 1000;
+  found.restriction.expiresAt = Math.min(maxCap, found.restriction.expiresAt + addMs);
+  found.restriction.violationCount = (found.restriction.violationCount || 1) + 1;
+  saveDatabase();
+
+  return {
+    extended: true,
+    expiresAt: found.restriction.expiresAt,
+    remainingMs: Math.max(0, found.restriction.expiresAt - now),
+  };
 }
 
 export function isUserRestricted(
@@ -4024,7 +4094,11 @@ export interface GroupMemberDirectoryItem {
 
 export async function getGroupMembersForBlockPage(
   sock: WASocket | null,
-  requestedGroupId?: string
+  requestedGroupId?: string,
+  options?: {
+    forceRefresh?: boolean;
+    fallbackGroups?: Array<{ id: string; name: string; participants?: number; isBotAdmin?: boolean }>;
+  }
 ): Promise<{
   connected: boolean;
   groups: Array<{ id: string; name: string; participants: number; isBotAdmin: boolean }>;
@@ -4033,7 +4107,36 @@ export async function getGroupMembersForBlockPage(
   isBotAdmin: boolean;
   members: GroupMemberDirectoryItem[];
 }> {
-  if (!sock || !sock.authState?.creds?.registered) {
+  const isSocketReady = Boolean(sock && sock.authState?.creds?.registered);
+  const forceRefresh = Boolean(options?.forceRefresh);
+
+  // 1. Seed mergedGroupsMap from cached group metadata & any server fallback group list
+  const mergedGroupsMap: Record<string, any> = {};
+  let newestCacheTs = 0;
+
+  for (const [gid, entry] of Object.entries(groupMetaCache)) {
+    if (gid && gid.endsWith('@g.us') && entry?.meta) {
+      mergedGroupsMap[gid] = entry.meta;
+      if (entry.fetchedAt > newestCacheTs) newestCacheTs = entry.fetchedAt;
+    }
+  }
+
+  for (const fg of options?.fallbackGroups || []) {
+    if (!fg?.id || !fg.id.endsWith('@g.us')) continue;
+    if (!mergedGroupsMap[fg.id]) {
+      mergedGroupsMap[fg.id] = {
+        id: fg.id,
+        subject: fg.name || 'WhatsApp Group',
+        participants: [],
+        _fallbackCount: Number(fg.participants || 0),
+        _fallbackBotAdmin: Boolean(fg.isBotAdmin),
+      };
+    } else if (!mergedGroupsMap[fg.id].subject && fg.name) {
+      mergedGroupsMap[fg.id].subject = fg.name;
+    }
+  }
+
+  if (!isSocketReady && Object.keys(mergedGroupsMap).length === 0) {
     return {
       connected: false,
       groups: [],
@@ -4044,22 +4147,52 @@ export async function getGroupMembersForBlockPage(
     };
   }
 
-  await resolveBotIdentitySet(sock).catch(() => {});
-  const allGroups = await sock.groupFetchAllParticipating().catch(() => ({} as Record<string, any>));
-  primeGroupMetaCache(allGroups);
+  if (isSocketReady && sock) {
+    await Promise.race([
+      resolveBotIdentitySet(sock).catch(() => {}),
+      new Promise<void>((r) => setTimeout(r, 2500)),
+    ]);
 
-  const groups = Object.values(allGroups)
+    const hasCachedGroups = Object.keys(mergedGroupsMap).length > 0;
+    const isCacheStale = Date.now() - newestCacheTs > 120000;
+    const shouldFetchAll = forceRefresh || !hasCachedGroups || isCacheStale;
+
+    if (shouldFetchAll) {
+      const timeoutMs = hasCachedGroups && !forceRefresh ? 6000 : 14000;
+      const fetchedGroups = await Promise.race([
+        sock.groupFetchAllParticipating().catch(() => ({} as Record<string, any>)),
+        new Promise<Record<string, any>>((r) => setTimeout(() => r({}), timeoutMs)),
+      ]);
+      if (fetchedGroups && Object.keys(fetchedGroups).length > 0) {
+        primeGroupMetaCache(fetchedGroups);
+        for (const [gid, gMeta] of Object.entries(fetchedGroups)) {
+          if (gid && gid.endsWith('@g.us') && gMeta) {
+            mergedGroupsMap[gid] = gMeta;
+          }
+        }
+      }
+    }
+  }
+
+  const groups = Object.values(mergedGroupsMap)
+    .filter((g: any) => g?.id && String(g.id).endsWith('@g.us'))
     .map((g: any) => ({
-      id: g.id,
-      name: g.subject || 'WhatsApp Group',
-      participants: Array.isArray(g.participants) ? g.participants.length : 0,
-      isBotAdmin: isBotGroupAdminFromMeta(sock, g),
+      id: String(g.id),
+      name: String(g.subject || getKnownGroupSubjectFallback(String(g.id)) || 'WhatsApp Group'),
+      participants:
+        Array.isArray(g.participants) && g.participants.length > 0
+          ? g.participants.length
+          : Number(g._fallbackCount || 0),
+      isBotAdmin:
+        isSocketReady && sock && Array.isArray(g.participants) && g.participants.length > 0
+          ? isBotGroupAdminFromMeta(sock, g)
+          : Boolean(g._fallbackBotAdmin),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   if (groups.length === 0) {
     return {
-      connected: true,
+      connected: isSocketReady,
       groups: [],
       selectedGroupId: '',
       selectedGroupName: '',
@@ -4068,17 +4201,46 @@ export async function getGroupMembersForBlockPage(
     };
   }
 
-  const selectedGroupId =
-    requestedGroupId && allGroups[requestedGroupId] ? requestedGroupId : groups[0].id;
-  const meta = (await getGroupMeta(sock, selectedGroupId, true)) || allGroups[selectedGroupId];
-  const selectedGroupName = meta?.subject || 'WhatsApp Group';
-  const isBotAdmin = isBotGroupAdminFromMeta(sock, meta);
+  const cleanRequested = requestedGroupId ? String(requestedGroupId).trim() : '';
+  const hasRequestedGroup = Boolean(cleanRequested && groups.some((g) => g.id === cleanRequested));
+  const selectedGroupId = hasRequestedGroup ? cleanRequested : groups[0].id;
+
+  let meta: any = mergedGroupsMap[selectedGroupId] || groupMetaCache[selectedGroupId]?.meta;
+  const needsSelectedMetaFetch =
+    isSocketReady &&
+    sock &&
+    (forceRefresh || !Array.isArray(meta?.participants) || meta.participants.length === 0);
+
+  if (needsSelectedMetaFetch && sock) {
+    const freshMeta = await Promise.race([
+      getGroupMeta(sock, selectedGroupId, Boolean(forceRefresh)).catch(() => null),
+      new Promise<null>((r) => setTimeout(() => r(null), 8000)),
+    ]);
+    if (freshMeta && Array.isArray(freshMeta.participants) && freshMeta.participants.length > 0) {
+      meta = freshMeta;
+      // Update participant count in group list
+      const idx = groups.findIndex((g) => g.id === selectedGroupId);
+      if (idx >= 0) {
+        groups[idx].participants = freshMeta.participants.length;
+        groups[idx].isBotAdmin = isBotGroupAdminFromMeta(sock, freshMeta);
+      }
+    }
+  }
+
+  const selectedGroupEntry = groups.find((g) => g.id === selectedGroupId);
+  const selectedGroupName =
+    meta?.subject || selectedGroupEntry?.name || getKnownGroupSubjectFallback(selectedGroupId) || 'WhatsApp Group';
+  const isBotAdmin =
+    isSocketReady && sock && Array.isArray(meta?.participants) && meta.participants.length > 0
+      ? isBotGroupAdminFromMeta(sock, meta)
+      : Boolean(selectedGroupEntry?.isBotAdmin);
 
   const botIds = new Set(
-    [sock.user?.id, sock.user?.lid, sock.authState?.creds?.me?.id, sock.authState?.creds?.me?.lid]
+    [sock?.user?.id, sock?.user?.lid, sock?.authState?.creds?.me?.id, sock?.authState?.creds?.me?.lid]
       .filter(Boolean)
       .map((j) => cleanJidUser(String(j)))
   );
+  expandIdSetWithLidMaps(botIds);
 
   // Build lookup of known activity names/phones inside this group
   const activityByClean: Record<string, MemberActivityItem> = {};
@@ -4092,61 +4254,135 @@ export async function getGroupMembersForBlockPage(
 
   const activeRestrictions = getActiveRestrictedUsers().filter((r) => r.groupId === selectedGroupId);
 
-  const members: GroupMemberDirectoryItem[] = (meta?.participants || []).map((p: any) => {
-    const jid = normalizeJid(p.id || p.jid || p.lid || '');
-    const altJid = p.phoneNumber ? normalizeJid(p.phoneNumber) : p.lid ? normalizeJid(p.lid) : '';
-    const cleanId = cleanJidUser(jid);
-    const cleanAlt = cleanJidUser(altJid);
-    const act = activityByClean[cleanId] || (cleanAlt ? activityByClean[cleanAlt] : undefined);
-
-    let phone = cleanAlt || cleanId;
-    if (jid.endsWith('@s.whatsapp.net')) {
-      phone = cleanId;
-    } else if (p.phoneNumber) {
-      phone = cleanJidUser(p.phoneNumber) || phone;
-    } else if (act?.senderPhone && /^\d+$/.test(act.senderPhone)) {
-      phone = act.senderPhone;
+  // Build participant source list: live/cached meta participants, or fallback from recorded group activity & active restrictions
+  let rawParticipants: any[] = Array.isArray(meta?.participants) ? [...meta.participants] : [];
+  if (rawParticipants.length === 0) {
+    const seenFallbackUsers = new Set<string>();
+    for (const act of Object.values(db.memberActivity || {})) {
+      if (act.groupId !== selectedGroupId || !act.senderJid) continue;
+      const cu = cleanJidUser(act.senderJid);
+      if (!cu || seenFallbackUsers.has(cu)) continue;
+      seenFallbackUsers.add(cu);
+      rawParticipants.push({
+        id: act.senderJid,
+        phoneNumber: act.senderPhone && /^\d{10,15}$/.test(act.senderPhone) ? `${act.senderPhone}@s.whatsapp.net` : undefined,
+        notify: act.name,
+        admin: null,
+      });
     }
+    for (const r of activeRestrictions) {
+      const cu = cleanJidUser(r.senderJid);
+      if (!cu || seenFallbackUsers.has(cu)) continue;
+      seenFallbackUsers.add(cu);
+      rawParticipants.push({
+        id: r.senderJid,
+        phoneNumber: r.altJid || (r.senderPhone && /^\d{10,15}$/.test(r.senderPhone) ? `${r.senderPhone}@s.whatsapp.net` : undefined),
+        admin: null,
+      });
+    }
+  }
 
-    const resolvedName = (
-      p.notify ||
-      p.name ||
-      contactNamesCache[jid] ||
-      contactNamesCache[cleanId] ||
-      (altJid ? contactNamesCache[altJid] : '') ||
-      (cleanAlt ? contactNamesCache[cleanAlt] : '') ||
-      act?.name ||
-      ''
-    ).trim();
+  // Batch resolve up to 35 unresolved @lid -> PN via Baileys signalRepository if available
+  const lidMappingApi = (sock as any)?.signalRepository?.lidMapping;
+  if (isSocketReady && typeof lidMappingApi?.getPNForLID === 'function') {
+    const unresolvedLids = rawParticipants
+      .map((p: any) => String(p?.id || p?.lid || ''))
+      .filter((jid) => isLidJid(jid) && !lidToPnUserMap.has(cleanJidUser(jid)))
+      .slice(0, 35);
+    if (unresolvedLids.length > 0) {
+      await Promise.race([
+        Promise.allSettled(
+          unresolvedLids.map(async (lidJid) => {
+            try {
+              const pn = await lidMappingApi.getPNForLID(lidJid);
+              if (pn) rememberLidPnPair(lidJid, pn);
+            } catch {}
+          })
+        ),
+        new Promise<void>((r) => setTimeout(r, 1500)),
+      ]);
+    }
+  }
 
-    const role: 'superadmin' | 'admin' | 'member' =
-      p.admin === 'superadmin' || p.isSuperAdmin
-        ? 'superadmin'
-        : p.admin === 'admin' || p.isAdmin
-        ? 'admin'
-        : 'member';
+  const members: GroupMemberDirectoryItem[] = rawParticipants
+    .map((p: any) => {
+      const primaryRaw = p.id || p.jid || p.lid || p.phoneNumber || '';
+      const jid = normalizeJid(primaryRaw);
+      if (!jid) return null;
 
-    const isSelf = botIds.has(cleanId) || (cleanAlt ? botIds.has(cleanAlt) : false);
+      const cleanId = cleanJidUser(jid);
+      const mappedPn = isLidJid(jid) ? lidToPnUserMap.get(cleanId) : '';
+      const mappedLid = !isLidJid(jid) ? pnToLidUserMap.get(cleanId) : '';
 
-    const matchedRestriction = activeRestrictions.find((r) => {
-      const rUsers = [cleanJidUser(r.senderJid), cleanJidUser(r.altJid), cleanJidUser(r.senderPhone)].filter(Boolean);
-      return rUsers.includes(cleanId) || (cleanAlt && rUsers.includes(cleanAlt)) || rUsers.includes(phone);
-    });
+      const rawAlt =
+        p.phoneNumber ||
+        p.pn ||
+        (p.lid && normalizeJid(p.lid) !== jid ? p.lid : '') ||
+        (mappedPn ? `${mappedPn}@s.whatsapp.net` : mappedLid ? `${mappedLid}@lid` : '');
+      const altJid = rawAlt ? normalizeJid(rawAlt) : '';
+      const cleanAlt = cleanJidUser(altJid);
+      if (jid && altJid) rememberLidPnPair(jid, altJid);
 
-    return {
-      jid,
-      altJid,
-      phone,
-      name: resolvedName || (phone ? `সদস্য (${phone.slice(-4)})` : 'সদস্য'),
-      role,
-      isSelf,
-      isBlocked: Boolean(matchedRestriction),
-      remainingSeconds: matchedRestriction?.remainingSeconds || 0,
-      remainingText: matchedRestriction?.remainingText || '',
-    };
-  });
+      const act = activityByClean[cleanId] || (cleanAlt ? activityByClean[cleanAlt] : undefined);
 
-  // Sort: Blocked first, then members alphabetically, then admins last
+      let phone = cleanAlt || cleanId;
+      if (isPnJid(jid)) {
+        phone = cleanId;
+      } else if (p.phoneNumber || p.pn) {
+        phone = cleanJidUser(p.phoneNumber || p.pn) || phone;
+      } else if (mappedPn) {
+        phone = mappedPn;
+      } else if (act?.senderPhone && /^\d{10,15}$/.test(act.senderPhone)) {
+        phone = act.senderPhone;
+      }
+
+      const resolvedName = (
+        p.notify ||
+        p.name ||
+        p.verifiedName ||
+        contactNamesCache[jid] ||
+        contactNamesCache[cleanId] ||
+        (altJid ? contactNamesCache[altJid] : '') ||
+        (cleanAlt ? contactNamesCache[cleanAlt] : '') ||
+        (phone ? contactNamesCache[phone] : '') ||
+        act?.name ||
+        ''
+      ).trim();
+
+      const role: 'superadmin' | 'admin' | 'member' =
+        p.admin === 'superadmin' || p.isSuperAdmin
+          ? 'superadmin'
+          : p.admin === 'admin' || p.isAdmin
+          ? 'admin'
+          : 'member';
+
+      const idSet = new Set<string>([cleanId, cleanAlt, phone].filter(Boolean));
+      expandIdSetWithLidMaps(idSet);
+      const isSelf = Array.from(idSet).some((u) => botIds.has(u));
+
+      const matchedRestriction = activeRestrictions.find((r) => {
+        const rUsers = new Set<string>(
+          [cleanJidUser(r.senderJid), cleanJidUser(r.altJid), cleanJidUser(r.senderPhone)].filter(Boolean)
+        );
+        expandIdSetWithLidMaps(rUsers);
+        return Array.from(idSet).some((u) => rUsers.has(u));
+      });
+
+      return {
+        jid,
+        altJid,
+        phone,
+        name: resolvedName || (phone ? `সদস্য (${phone.slice(-4)})` : 'সদস্য'),
+        role,
+        isSelf,
+        isBlocked: Boolean(matchedRestriction),
+        remainingSeconds: matchedRestriction?.remainingSeconds || 0,
+        remainingText: matchedRestriction?.remainingText || '',
+      };
+    })
+    .filter((item): item is GroupMemberDirectoryItem => Boolean(item));
+
+  // Sort: Blocked first, then non-admin members alphabetically, then admins last
   members.sort((a, b) => {
     if (a.isBlocked !== b.isBlocked) return a.isBlocked ? -1 : 1;
     if ((a.role === 'member') !== (b.role === 'member')) return a.role === 'member' ? -1 : 1;
@@ -4154,7 +4390,7 @@ export async function getGroupMembersForBlockPage(
   });
 
   return {
-    connected: true,
+    connected: isSocketReady || groups.length > 0,
     groups,
     selectedGroupId,
     selectedGroupName,
@@ -4177,30 +4413,61 @@ export async function manualBlockMember(
   success: boolean;
   error?: string;
   noticeSent: boolean;
-  restriction?: RestrictedUser;
+  restriction?: RestrictedUser & { remainingSeconds: number; remainingText: string };
 }> {
-  const { groupId, memberJid, altJid, memberPhone } = params;
+  const { groupId, memberJid, memberPhone } = params;
+  let altJid = params.altJid;
   const durationMinutes = Math.max(1, Math.min(180, Number(params.durationMinutes || 10)));
 
   if (!groupId || !memberJid) {
     return { success: false, error: 'গ্রুপ এবং মেম্বার নির্বাচন করুন।', noticeSent: false };
   }
 
-  let groupName = 'WhatsApp Group';
+  const cleanMemberId = cleanJidUser(memberJid);
+  if (!altJid) {
+    const mappedPn = isLidJid(memberJid) ? lidToPnUserMap.get(cleanMemberId) : '';
+    const mappedLid = !isLidJid(memberJid) ? pnToLidUserMap.get(cleanMemberId) : '';
+    if (mappedPn) altJid = `${mappedPn}@s.whatsapp.net`;
+    else if (mappedLid) altJid = `${mappedLid}@lid`;
+  }
+  if (memberJid && altJid) {
+    rememberLidPnPair(memberJid, altJid);
+  }
+
+  let groupName = getKnownGroupSubjectFallback(groupId);
   let isTargetAdmin = false;
-  if (sock && sock.authState?.creds?.registered) {
-    const meta = await getGroupMeta(sock, groupId, false);
-    if (meta?.subject) groupName = meta.subject;
-    const targetCleans = new Set([cleanJidUser(memberJid), cleanJidUser(altJid), cleanJidUser(memberPhone)].filter(Boolean));
-    for (const p of meta?.participants || []) {
-      const pAny = p as any;
-      const pCleans = [p.id, pAny.lid, pAny.phoneNumber].filter(Boolean).map((j) => cleanJidUser(String(j)));
-      if (pCleans.some((c) => targetCleans.has(c))) {
-        if (p.admin === 'admin' || p.admin === 'superadmin' || pAny.isAdmin || pAny.isSuperAdmin) {
-          isTargetAdmin = true;
+  const meta =
+    sock && sock.authState?.creds?.registered
+      ? await Promise.race([
+          getGroupMeta(sock, groupId, false).catch(() => null),
+          new Promise<null>((r) => setTimeout(() => r(null), 4000)),
+        ])
+      : getCachedGroupMetadataSync(groupId);
+
+  if (meta?.subject) groupName = meta.subject;
+
+  const targetCleans = new Set(
+    [cleanJidUser(memberJid), cleanJidUser(altJid), cleanJidUser(memberPhone)].filter(Boolean)
+  );
+  expandIdSetWithLidMaps(targetCleans);
+
+  for (const p of meta?.participants || []) {
+    const pAny = p as any;
+    const pCleans = [p.id, pAny.jid, pAny.lid, pAny.phoneNumber, pAny.pn]
+      .filter(Boolean)
+      .map((j) => cleanJidUser(String(j)));
+    if (pCleans.some((c) => targetCleans.has(c))) {
+      if (!altJid && (pAny.phoneNumber || pAny.pn || pAny.lid)) {
+        const candAlt = normalizeJid(String(pAny.phoneNumber || pAny.pn || pAny.lid));
+        if (candAlt && candAlt !== normalizeJid(memberJid)) {
+          altJid = candAlt;
+          rememberLidPnPair(memberJid, altJid);
         }
-        break;
       }
+      if (p.admin === 'admin' || p.admin === 'superadmin' || pAny.isAdmin || pAny.isSuperAdmin) {
+        isTargetAdmin = true;
+      }
+      break;
     }
   }
 
@@ -4213,19 +4480,22 @@ export async function manualBlockMember(
     };
   }
 
+  const mappedPn = isLidJid(memberJid) ? lidToPnUserMap.get(cleanMemberId) : '';
   const cleanPhone =
+    mappedPn ||
+    (altJid && isPnJid(altJid) ? cleanJidUser(altJid) : '') ||
     (memberPhone || '').replace(/[^\d]/g, '') ||
     cleanJidUser(altJid) ||
-    cleanJidUser(memberJid) ||
+    cleanMemberId ||
     'member';
 
-  const restriction = restrictUser(
+  const savedRestriction = restrictUser(
     groupId,
     groupName,
     memberJid,
     cleanPhone,
     durationMinutes,
-    'সাময়িক নীরবতা (১০ মিনিট ডিসিপ্লিনারি ব্লক)',
+    `সাময়িক নীরবতা (${durationMinutes} মিনিট ডিসিপ্লিনারি ব্লক)`,
     altJid
   );
 
@@ -4239,18 +4509,29 @@ export async function manualBlockMember(
       .replace(/\{\{?user\}?\}/gi, cleanPhone)
       .replace(/\{\{?minutes\}?\}/gi, String(durationMinutes));
 
-    const mentionJid = normalizeJid(memberJid);
+    const mentions = Array.from(
+      new Set([normalizeJid(memberJid), altJid ? normalizeJid(altJid) : ''].filter(Boolean))
+    );
     const sent = await safeSendMessage(sock, groupId, {
       text: noticeText,
-      mentions: [mentionJid],
+      mentions,
     });
     noticeSent = Boolean(sent);
   }
 
+  const remainingSeconds = Math.max(1, Math.ceil((savedRestriction.expiresAt - Date.now()) / 1000));
+  const mins = Math.floor(remainingSeconds / 60);
+  const secs = remainingSeconds % 60;
+  const remainingText = mins > 0 ? `${mins} মি. ${secs} সে.` : `${secs} সেকেন্ড`;
+
   return {
     success: true,
     noticeSent,
-    restriction,
+    restriction: {
+      ...savedRestriction,
+      remainingSeconds,
+      remainingText,
+    },
   };
 }
 
@@ -4508,8 +4789,15 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
       console.log(`[Individual Mute] @${cleanPhone} is an Admin with Admin Shield active. Lifting restriction.`);
       unrestrictUser(remoteJid, canonicalSender, [senderJid, senderAltJid]);
     } else {
-      const remainingSec = Math.round(restrictionCheck.remainingMs / 1000);
-      console.log(`[Individual Mute ACTIVE] Intercepted message from restricted user @${cleanPhone} in "${groupSubject}". Auto-deleting message (${remainingSec}s remaining)...`);
+      const extendedRes = extendRestrictionBySeconds(
+        remoteJid,
+        canonicalSender,
+        [senderJid, senderAltJid, cleanPhone].filter(Boolean),
+        60,
+        msg.key?.id || undefined
+      );
+      const remainingSec = Math.round((extendedRes.remainingMs || restrictionCheck.remainingMs) / 1000);
+      console.log(`[Individual Mute ACTIVE] Intercepted message from restricted user @${cleanPhone} in "${groupSubject}". Added +1m penalty, auto-deleting (${remainingSec}s remaining)...`);
 
       const deleted = await deleteMessageSafely(sock, remoteJid, msg, matchedSenderId, metaKnown ? isBotAdmin : undefined);
       if (deleted) {
@@ -4521,7 +4809,7 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
             remoteJid,
             msg.key.id,
             'moderation_engine',
-            'রেস্ট্রিক্টেড ইউজারের মেসেজ অটো ডিলিট'
+            'রেস্ট্রিক্টেড ইউজারের মেসেজ অটো ডিলিট (+১ মিনিট যোগ)'
           ).catch(() => {});
         }
       } else if (metaKnown && !isBotAdmin) {

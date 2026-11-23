@@ -1489,7 +1489,28 @@ app.post('/api/moderation/unmute', (req: Request, res: Response) => {
 app.get('/api/moderation/group-members', async (req: Request, res: Response) => {
   try {
     const groupId = req.query.groupId ? String(req.query.groupId) : undefined;
-    const data = await getGroupMembersForBlockPage(currentSock, groupId);
+    const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
+    const inboxFallback = getInboxGroupsList().map((g) => ({
+      id: g.id,
+      name: g.name,
+      participants: g.participants,
+      isBotAdmin: g.isBotAdmin,
+    }));
+    const stateFallback = (botState.groups || []).map((g) => ({
+      id: g.id,
+      name: g.name,
+      participants: g.participants,
+      isBotAdmin: false,
+    }));
+    const fallbackMap = new Map<string, { id: string; name: string; participants?: number; isBotAdmin?: boolean }>();
+    for (const item of [...stateFallback, ...inboxFallback]) {
+      if (item?.id) fallbackMap.set(item.id, item);
+    }
+
+    const data = await getGroupMembersForBlockPage(currentSock, groupId, {
+      forceRefresh,
+      fallbackGroups: Array.from(fallbackMap.values()),
+    });
     res.json({
       success: true,
       defaultNotice: DEFAULT_MANUAL_MEMBER_BLOCK_NOTICE,
@@ -1503,12 +1524,13 @@ app.get('/api/moderation/group-members', async (req: Request, res: Response) => 
 app.post('/api/moderation/member-block', async (req: Request, res: Response) => {
   try {
     const { groupId, memberJid, altJid, memberPhone, durationMinutes, customNotice } = req.body || {};
+    const mins = Math.max(1, Math.min(180, Number(durationMinutes || 10)));
     const result = await manualBlockMember(currentSock, {
       groupId: String(groupId || ''),
       memberJid: String(memberJid || ''),
       altJid: altJid ? String(altJid) : undefined,
       memberPhone: memberPhone ? String(memberPhone) : undefined,
-      durationMinutes: Number(durationMinutes || 10),
+      durationMinutes: mins,
       customNotice: typeof customNotice === 'string' ? customNotice : undefined,
     });
     if (!result.success) {
@@ -1520,8 +1542,8 @@ app.post('/api/moderation/member-block', async (req: Request, res: Response) => 
       restriction: result.restriction,
       restrictedUsers: getActiveRestrictedUsers(),
       message: result.noticeSent
-        ? 'সদস্যকে ১০ মিনিটের জন্য ব্লক করা হয়েছে এবং আলাদা নোটিশ পাঠানো হয়েছে!'
-        : 'সদস্যকে ১০ মিনিটের জন্য ব্লক করা হয়েছে!',
+        ? `সদস্যকে ${mins} মিনিটের জন্য ব্লক করা হয়েছে এবং আলাদা নোটিশ পাঠানো হয়েছে!`
+        : `সদস্যকে ${mins} মিনিটের জন্য ব্লক করা হয়েছে!`,
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });

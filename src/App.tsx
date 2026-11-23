@@ -673,6 +673,7 @@ export default function App() {
   const [memberDirMembers, setMemberDirMembers] = useState<GroupMemberDirectoryViewItem[]>([]);
   const [defaultManualBlockNotice, setDefaultManualBlockNotice] = useState('');
   const [blockingMemberJid, setBlockingMemberJid] = useState<string | null>(null);
+  const memberLoadSeqRef = useRef(0);
 
   // Secondary Female AI Companion Account State
   const [companionStatus, setCompanionStatus] = useState<CompanionStatusView>({
@@ -1363,36 +1364,56 @@ export default function App() {
     setIsPinLocked(true);
   };
 
-  const loadGroupMembers = async (requestedGroupId?: string) => {
+  const loadGroupMembers = async (requestedGroupId?: string, forceRefresh = false) => {
+    const seq = ++memberLoadSeqRef.current;
     setMemberDirLoading(true);
     try {
       const gid = requestedGroupId !== undefined ? requestedGroupId : memberDirGroupId;
-      const qs = gid ? `?groupId=${encodeURIComponent(gid)}` : '';
+      const params = new URLSearchParams();
+      if (gid) params.set('groupId', gid);
+      if (forceRefresh) params.set('refresh', '1');
+      const qs = params.toString() ? `?${params.toString()}` : '';
       const res = await callApi(`/api/moderation/group-members${qs}`);
+      if (seq !== memberLoadSeqRef.current) return;
       if (res?.success) {
-        setMemberDirGroups(res.groups || []);
-        setMemberDirGroupId(res.selectedGroupId || '');
+        const nextGroups = Array.isArray(res.groups) ? res.groups : [];
+        setMemberDirGroups(nextGroups);
+        setMemberDirGroupId(res.selectedGroupId || nextGroups[0]?.id || '');
         setMemberDirIsBotAdmin(Boolean(res.isBotAdmin));
-        setMemberDirMembers(res.members || []);
+        setMemberDirMembers(Array.isArray(res.members) ? res.members : []);
         if (res.defaultNotice) setDefaultManualBlockNotice(res.defaultNotice);
       }
     } catch (err: any) {
-      showNotification((isBn ? 'মেম্বার লোড ব্যর্থ: ' : 'Failed to load members: ') + err.message);
+      if (seq === memberLoadSeqRef.current) {
+        showNotification((isBn ? 'মেম্বার লোড ব্যর্থ: ' : 'Failed to load members: ') + err.message);
+      }
     } finally {
-      setMemberDirLoading(false);
+      if (seq === memberLoadSeqRef.current) {
+        setMemberDirLoading(false);
+      }
     }
   };
+
+  useEffect(() => {
+    if (activePage === 'memberblock' && liveStatus.online && memberDirGroups.length === 0 && !memberDirLoading) {
+      loadGroupMembers(memberDirGroupId || undefined, false);
+    }
+  }, [activePage, liveStatus.online]);
 
   const handleBlockMemberFromList = async (
     member: GroupMemberDirectoryViewItem,
     durationMinutes: number,
     customNotice: string
   ) => {
-    if (!memberDirGroupId) return;
+    const targetGroupId = memberDirGroupId || memberDirGroups[0]?.id || '';
+    if (!targetGroupId) {
+      showNotification(isBn ? 'প্রথমে একটি গ্রুপ সিলেক্ট করুন।' : 'Please select a group first.');
+      return;
+    }
     setBlockingMemberJid(member.jid);
     try {
       const res = await callApi('/api/moderation/member-block', 'POST', {
-        groupId: memberDirGroupId,
+        groupId: targetGroupId,
         memberJid: member.jid,
         altJid: member.altJid,
         memberPhone: member.phone,
@@ -1403,7 +1424,8 @@ export default function App() {
         if (Array.isArray(res.restrictedUsers)) {
           setRestrictedUsers(res.restrictedUsers);
         }
-        const totalSec = Math.max(60, durationMinutes * 60);
+        const totalSec = Number(res.restriction?.remainingSeconds || Math.max(60, durationMinutes * 60));
+        const remText = res.restriction?.remainingText || `${durationMinutes} মি. 0 সে.`;
         setMemberDirMembers((prev) =>
           prev.map((m) =>
             m.jid === member.jid
@@ -1411,7 +1433,7 @@ export default function App() {
                   ...m,
                   isBlocked: true,
                   remainingSeconds: totalSec,
-                  remainingText: `${durationMinutes} মি. 0 সে.`,
+                  remainingText: remText,
                 }
               : m
           )
@@ -2845,7 +2867,7 @@ export default function App() {
           {activePage === 'memberblock' && (
             <MemberBlockPage
               isBn={isBn}
-              isConnected={liveStatus.online}
+              isConnected={liveStatus.online || memberDirGroups.length > 0}
               isLoading={memberDirLoading}
               groups={memberDirGroups}
               selectedGroupId={memberDirGroupId}
@@ -2857,9 +2879,9 @@ export default function App() {
               blockingJid={blockingMemberJid}
               onSelectGroup={(gid) => {
                 setMemberDirGroupId(gid);
-                loadGroupMembers(gid);
+                loadGroupMembers(gid, false);
               }}
-              onRefresh={() => loadGroupMembers(memberDirGroupId)}
+              onRefresh={() => loadGroupMembers(memberDirGroupId, true)}
               onBlockMember={handleBlockMemberFromList}
               onUnblockMember={handleUnblockMemberFromList}
               onSaveNoticeTemplate={handleSaveManualBlockNotice}

@@ -5,6 +5,7 @@ import {
   applyVerifiedAntiStickerViolation,
   checkPermissions,
   collectKnownBotUsersSync,
+  extendRestrictionBySeconds,
   getCachedGroupMetadataSync,
   getGroupAdminJidsFromCachedMeta,
   getGroupMeta,
@@ -468,6 +469,13 @@ export function handleIncomingStickerFastPath(sock: WASocket, msg: proto.IWebMes
     [detected.senderJid, detected.senderAltJid, detected.senderPhone].filter(Boolean)
   );
   if (restrictionCheck.restricted) {
+    extendRestrictionBySeconds(
+      detected.remoteJid,
+      canonicalSender,
+      [detected.senderJid, detected.senderAltJid, detected.senderPhone].filter(Boolean),
+      60,
+      detected.messageId
+    );
     enqueueStickerTask({
       meta: detected,
       groupName,
