@@ -639,3 +639,552 @@ input:checked + .slider:before{transform:translateX(17px)}
   color: var(--green);
   box-shadow: 0 1px 4px rgba(10, 56, 36, 0.08);
 }
+
+/* =========================================================
+   WAGUARD EMERALD CHIBI AI MASCOT OVERLAY
+   ========================================================= */
+.ai-mascot-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 42;
+}
+
+.ai-mascot-char {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 124px;
+  height: 158px;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: grab;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  will-change: transform;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.ai-mascot-char.is-dragging {
+  cursor: grabbing;
+}
+
+/* Fallback bar/ledge/pillow styled cleanly in WAGuard Emerald-Mint (hidden when anchored to a real card or button) */
+.ai-mascot-hang-bar {
+  position: relative;
+  width: 112px;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #14bd7a 0%, #087f55 60%, #065f3e 100%);
+  box-shadow: 0 4px 12px rgba(8, 127, 85, 0.28), inset 0 1.5px 2px rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  opacity: 0;
+  transform: scaleX(0.55) translateY(-4px);
+  transition: opacity 0.22s ease, transform 0.26s cubic-bezier(0.34, 1.56, 0.64, 1);
+  pointer-events: none;
+  order: 1;
+  margin-bottom: -14px;
+  z-index: 1;
+}
+
+.ai-mascot-sit-ledge {
+  position: relative;
+  width: 106px;
+  height: 14px;
+  border-radius: 10px 10px 999px 999px;
+  background: linear-gradient(180deg, #ffffff 0%, #e8f8f0 65%, #bbf7d0 100%);
+  box-shadow: 0 8px 16px rgba(10, 56, 36, 0.16), inset 0 2px 3px rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(16, 185, 117, 0.35);
+  opacity: 0;
+  transform: scaleX(0.6) translateY(6px);
+  transition: opacity 0.22s ease, transform 0.26s cubic-bezier(0.34, 1.56, 0.64, 1);
+  pointer-events: none;
+  order: 2;
+  margin-top: -54px;
+  z-index: 1;
+}
+
+.ai-mascot-sleep-pillow {
+  position: relative;
+  width: 116px;
+  height: 22px;
+  border-radius: 999px;
+  background: radial-gradient(ellipse at 50% 35%, #ffffff 0%, #e8f8f0 68%, #a7f3d0 100%);
+  box-shadow: 0 8px 18px rgba(10, 56, 36, 0.16), inset 0 2px 5px rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(16, 185, 117, 0.32);
+  opacity: 0;
+  transform: scale(0.75);
+  transition: opacity 0.25s ease, transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+  pointer-events: none;
+  order: 2;
+  margin-top: -28px;
+  z-index: 1;
+}
+
+.ai-mascot-char.state-hang:not(.has-dom-anchor) .ai-mascot-hang-bar {
+  opacity: 1;
+  transform: scaleX(1) translateY(0);
+}
+
+.ai-mascot-char.state-sit:not(.has-dom-anchor) .ai-mascot-sit-ledge {
+  opacity: 1;
+  transform: scaleX(1) translateY(0);
+}
+
+.ai-mascot-char.state-sleep:not(.has-dom-anchor) .ai-mascot-sleep-pillow {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.ai-mascot-char.has-dom-anchor .ai-mascot-hang-bar,
+.ai-mascot-char.has-dom-anchor .ai-mascot-sit-ledge,
+.ai-mascot-char.has-dom-anchor .ai-mascot-sleep-pillow {
+  display: none;
+}
+
+.ai-mascot-body-wrap {
+  width: 118px;
+  height: 136px;
+  order: 2;
+  position: relative;
+  z-index: 2;
+  transform-origin: center bottom;
+  transition: transform 0.24s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.24s ease;
+  filter: drop-shadow(0 8px 12px rgba(6, 78, 59, 0.18));
+}
+
+.ai-mascot-char.state-sit .ai-mascot-body-wrap,
+.ai-mascot-char.state-sleep .ai-mascot-body-wrap {
+  order: 1;
+}
+
+.ai-mascot-char.facing-left .ai-mascot-body-wrap {
+  transform: scaleX(-1);
+}
+
+/* Switch between upright body, seated thighs/dangling legs, hanging arms, and curled sleeping pose */
+.ai-mascot-char .pose-upright { display: block; }
+.ai-mascot-char .pose-standing { display: block; }
+.ai-mascot-char .pose-sitting { display: none; }
+.ai-mascot-char .pose-sleeping { display: none; }
+.ai-mascot-char .arms-default { display: block; }
+.ai-mascot-char .hang-arms { display: none; }
+
+.ai-mascot-char.state-sit .pose-standing { display: none; }
+.ai-mascot-char.state-sit .pose-sitting { display: block; }
+
+.ai-mascot-char.state-hang .arms-default { display: none; }
+.ai-mascot-char.state-hang .hang-arms { display: block; }
+
+.ai-mascot-char.state-sleep .pose-upright { display: none; }
+.ai-mascot-char.state-sleep .pose-sleeping { display: block; }
+
+/* Facial expressions */
+.ai-mascot-char .expr { display: none; }
+.ai-mascot-char.state-idle .expr-normal,
+.ai-mascot-char.state-walk .expr-normal,
+.ai-mascot-char.state-run .expr-normal,
+.ai-mascot-char.state-sit .expr-normal { display: block; }
+.ai-mascot-char.state-wave .expr-wave,
+.ai-mascot-char.state-hang .expr-wave,
+.ai-mascot-char.state-jump .expr-wave { display: block; }
+.ai-mascot-char.state-laugh .expr-laugh,
+.ai-mascot-char.state-dance .expr-laugh { display: block; }
+.ai-mascot-char.state-sing .expr-sing { display: block; }
+.ai-mascot-char.state-sleep .expr-sleep { display: block; }
+.ai-mascot-char.state-annoyed .expr-annoyed { display: block; }
+.ai-mascot-char.state-angry .expr-angry { display: block; }
+.ai-mascot-char.state-drag .expr-surprised { display: block; }
+
+/* =========================================================
+   KEYFRAMES & ANIMATIONS
+   ========================================================= */
+@keyframes aiMascotBreathe {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  50% { transform: translateY(-2.4px) scaleY(1.018); }
+}
+
+@keyframes aiMascotHeadLook {
+  0%, 100% { transform: rotate(0deg); }
+  35% { transform: rotate(4.5deg); }
+  70% { transform: rotate(-4.5deg); }
+}
+
+@keyframes aiMascotTailSwish {
+  0%, 100% { transform: rotate(-10deg); }
+  50% { transform: rotate(14deg); }
+}
+
+@keyframes aiMascotWingLeft {
+  0%, 100% { transform: rotate(0deg) scaleX(1); }
+  50% { transform: rotate(-14deg) scaleX(0.92); }
+}
+
+@keyframes aiMascotWingRight {
+  0%, 100% { transform: rotate(0deg) scaleX(1); }
+  50% { transform: rotate(14deg) scaleX(0.92); }
+}
+
+@keyframes aiMascotHaloFloat {
+  0%, 100% { transform: translateY(0) rotate(-3deg); }
+  50% { transform: translateY(-2.5px) rotate(3deg); }
+}
+
+@keyframes aiMascotBlink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  96% { transform: scaleY(0.08); }
+}
+
+.ai-mascot-char .demon-tail {
+  transform-origin: 60px 86px;
+  animation: aiMascotTailSwish 2.1s infinite ease-in-out;
+}
+.ai-mascot-char .wing-left {
+  transform-origin: 45px 62px;
+  animation: aiMascotWingLeft 1.9s infinite ease-in-out;
+}
+.ai-mascot-char .wing-right {
+  transform-origin: 75px 62px;
+  animation: aiMascotWingRight 1.9s infinite ease-in-out;
+}
+.ai-mascot-char .ai-halo {
+  transform-origin: 60px 10px;
+  animation: aiMascotHaloFloat 2.4s infinite ease-in-out;
+}
+.ai-mascot-char .blink-eyes {
+  transform-origin: 60px 41px;
+  animation: aiMascotBlink 3.2s infinite;
+}
+
+/* Idle */
+.ai-mascot-char.state-idle .upper-body {
+  transform-origin: 60px 84px;
+  animation: aiMascotBreathe 2.1s infinite ease-in-out;
+}
+.ai-mascot-char.state-idle .head-group {
+  transform-origin: 60px 55px;
+  animation: aiMascotHeadLook 3.2s infinite ease-in-out;
+}
+
+/* Walk & Run */
+@keyframes aiMascotTorsoWalk {
+  0%, 100% { transform: translateY(0) rotate(-1.5deg); }
+  25% { transform: translateY(-4px) rotate(0deg); }
+  50% { transform: translateY(0) rotate(1.5deg); }
+  75% { transform: translateY(-4px) rotate(0deg); }
+}
+@keyframes aiMascotSwingA {
+  0%, 100% { transform: rotate(-25deg); }
+  50% { transform: rotate(25deg); }
+}
+@keyframes aiMascotSwingB {
+  0%, 100% { transform: rotate(25deg); }
+  50% { transform: rotate(-25deg); }
+}
+
+.ai-mascot-char.state-walk .upper-body { transform-origin: 60px 84px; animation: aiMascotTorsoWalk 0.54s infinite ease-in-out; }
+.ai-mascot-char.state-walk .leg-left { transform-origin: 51px 86px; animation: aiMascotSwingA 0.54s infinite ease-in-out; }
+.ai-mascot-char.state-walk .leg-right { transform-origin: 69px 86px; animation: aiMascotSwingB 0.54s infinite ease-in-out; }
+.ai-mascot-char.state-walk .arm-left { transform-origin: 42px 62px; animation: aiMascotSwingB 0.54s infinite ease-in-out; }
+.ai-mascot-char.state-walk .arm-right { transform-origin: 78px 62px; animation: aiMascotSwingA 0.54s infinite ease-in-out; }
+
+.ai-mascot-char.state-run .upper-body { transform-origin: 60px 84px; animation: aiMascotTorsoWalk 0.32s infinite ease-in-out; }
+.ai-mascot-char.state-run .leg-left { transform-origin: 51px 86px; animation: aiMascotSwingA 0.32s infinite ease-in-out; }
+.ai-mascot-char.state-run .leg-right { transform-origin: 69px 86px; animation: aiMascotSwingB 0.32s infinite ease-in-out; }
+.ai-mascot-char.state-run .arm-left { transform-origin: 42px 62px; animation: aiMascotSwingB 0.32s infinite ease-in-out; }
+.ai-mascot-char.state-run .arm-right { transform-origin: 78px 62px; animation: aiMascotSwingA 0.32s infinite ease-in-out; }
+.ai-mascot-char.state-run .wing-left,
+.ai-mascot-char.state-run .wing-right { animation-duration: 0.45s; }
+
+/* HANGING FROM REAL BUTTON OR BAR */
+@keyframes aiMascotHangSwing {
+  0%, 100% { transform: rotate(-4.5deg); }
+  50% { transform: rotate(4.5deg); }
+}
+@keyframes aiMascotHangSwingFlipped {
+  0%, 100% { transform: scaleX(-1) rotate(-4.5deg); }
+  50% { transform: scaleX(-1) rotate(4.5deg); }
+}
+@keyframes aiMascotHangLegL {
+  0%, 100% { transform: rotate(-12deg) translateY(0); }
+  50% { transform: rotate(20deg) translateY(-2px); }
+}
+@keyframes aiMascotHangLegR {
+  0%, 100% { transform: rotate(20deg) translateY(-2px); }
+  50% { transform: rotate(-12deg) translateY(0); }
+}
+
+.ai-mascot-char.state-hang .ai-mascot-body-wrap {
+  transform-origin: 60px 10px;
+  animation: aiMascotHangSwing 1.45s infinite ease-in-out;
+}
+.ai-mascot-char.state-hang.facing-left .ai-mascot-body-wrap {
+  transform-origin: 60px 10px;
+  animation: aiMascotHangSwingFlipped 1.45s infinite ease-in-out;
+}
+.ai-mascot-char.state-hang .leg-left {
+  transform-origin: 51px 86px;
+  animation: aiMascotHangLegL 0.85s infinite ease-in-out;
+}
+.ai-mascot-char.state-hang .leg-right {
+  transform-origin: 69px 86px;
+  animation: aiMascotHangLegR 0.85s infinite ease-in-out;
+}
+.ai-mascot-char.state-hang .wing-left,
+.ai-mascot-char.state-hang .wing-right { animation-duration: 0.65s; }
+
+/* SITTING ON TOP OF REAL CARD EDGE */
+@keyframes aiMascotSitSway {
+  0%, 100% { transform: translateY(6px) rotate(-1.6deg); }
+  50% { transform: translateY(4.5px) rotate(1.6deg); }
+}
+@keyframes aiMascotShinSwingL {
+  0%, 100% { transform: rotate(-18deg); }
+  50% { transform: rotate(12deg); }
+}
+@keyframes aiMascotShinSwingR {
+  0%, 100% { transform: rotate(12deg); }
+  50% { transform: rotate(-18deg); }
+}
+
+.ai-mascot-char.state-sit .upper-body {
+  transform-origin: 60px 86px;
+  animation: aiMascotSitSway 1.9s infinite ease-in-out;
+}
+.ai-mascot-char.state-sit .arm-left {
+  transform-origin: 42px 64px;
+  transform: translate(1px, 7px) rotate(-14deg);
+}
+.ai-mascot-char.state-sit .arm-right {
+  transform-origin: 78px 64px;
+  transform: translate(-1px, 7px) rotate(14deg);
+}
+.ai-mascot-char.state-sit .sit-shin-left {
+  transform-origin: 49px 98px;
+  animation: aiMascotShinSwingL 1s infinite ease-in-out;
+}
+.ai-mascot-char.state-sit .sit-shin-right {
+  transform-origin: 70px 98px;
+  animation: aiMascotShinSwingR 1s infinite ease-in-out;
+}
+.ai-mascot-char.state-sit .demon-tail {
+  transform: translateY(6px);
+}
+
+/* SLEEPING / LYING DOWN ON TOP OF CARD */
+@keyframes aiMascotSleepBreath {
+  0%, 100% { transform: scale(1, 1) translateY(0); }
+  50% { transform: scale(1.024, 0.985) translateY(1.2px); }
+}
+.ai-mascot-char.state-sleep .pose-sleeping {
+  transform-origin: 60px 104px;
+  animation: aiMascotSleepBreath 2.7s infinite ease-in-out;
+}
+
+/* DANCING (Energetic rhythm sway + alternating arms + happy step bounce) */
+@keyframes aiMascotDanceGroove {
+  0% { transform: translateY(0) translateX(-4px) rotate(-6deg); }
+  25% { transform: translateY(-7px) translateX(0) rotate(0deg); }
+  50% { transform: translateY(0) translateX(4px) rotate(6deg); }
+  75% { transform: translateY(-7px) translateX(0) rotate(0deg); }
+  100% { transform: translateY(0) translateX(-4px) rotate(-6deg); }
+}
+@keyframes aiMascotDanceGrooveFlipped {
+  0% { transform: scaleX(-1) translateY(0) translateX(-4px) rotate(-6deg); }
+  25% { transform: scaleX(-1) translateY(-7px) translateX(0) rotate(0deg); }
+  50% { transform: scaleX(-1) translateY(0) translateX(4px) rotate(6deg); }
+  75% { transform: scaleX(-1) translateY(-7px) translateX(0) rotate(0deg); }
+  100% { transform: scaleX(-1) translateY(0) translateX(-4px) rotate(-6deg); }
+}
+@keyframes aiMascotDanceArmL {
+  0%, 100% { transform: rotate(125deg); }
+  50% { transform: rotate(35deg); }
+}
+@keyframes aiMascotDanceArmR {
+  0%, 100% { transform: rotate(-35deg); }
+  50% { transform: rotate(-125deg); }
+}
+@keyframes aiMascotDanceLegL {
+  0%, 100% { transform: rotate(-16deg); }
+  50% { transform: rotate(14deg); }
+}
+@keyframes aiMascotDanceLegR {
+  0%, 100% { transform: rotate(14deg); }
+  50% { transform: rotate(-16deg); }
+}
+
+.ai-mascot-char.state-dance .ai-mascot-body-wrap { animation: aiMascotDanceGroove 0.72s infinite ease-in-out; }
+.ai-mascot-char.state-dance.facing-left .ai-mascot-body-wrap { animation: aiMascotDanceGrooveFlipped 0.72s infinite ease-in-out; }
+.ai-mascot-char.state-dance .arm-left { transform-origin: 42px 62px; animation: aiMascotDanceArmL 0.72s infinite ease-in-out; }
+.ai-mascot-char.state-dance .arm-right { transform-origin: 78px 62px; animation: aiMascotDanceArmR 0.72s infinite ease-in-out; }
+.ai-mascot-char.state-dance .leg-left { transform-origin: 51px 86px; animation: aiMascotDanceLegL 0.36s infinite ease-in-out; }
+.ai-mascot-char.state-dance .leg-right { transform-origin: 69px 86px; animation: aiMascotDanceLegR 0.36s infinite ease-in-out; }
+.ai-mascot-char.state-dance .wing-left,
+.ai-mascot-char.state-dance .wing-right { animation-duration: 0.36s; }
+.ai-mascot-char.state-dance .demon-tail { animation-duration: 0.55s; }
+
+/* JUMPING (High bouncy squash & stretch leaps) */
+@keyframes aiMascotJumpBounce {
+  0%, 100% { transform: translateY(3px) scale(1.09, 0.88); }
+  18% { transform: translateY(-2px) scale(0.95, 1.06); }
+  45% { transform: translateY(-28px) scale(0.96, 1.07); }
+  75% { transform: translateY(-10px) scale(1, 1); }
+  90% { transform: translateY(4px) scale(1.1, 0.86); }
+}
+@keyframes aiMascotJumpBounceFlipped {
+  0%, 100% { transform: scaleX(-1.09) scaleY(0.88) translateY(3px); }
+  18% { transform: scaleX(-0.95) scaleY(1.06) translateY(-2px); }
+  45% { transform: scaleX(-0.96) scaleY(1.07) translateY(-28px); }
+  75% { transform: scaleX(-1) scaleY(1) translateY(-10px); }
+  90% { transform: scaleX(-1.1) scaleY(0.86) translateY(4px); }
+}
+@keyframes aiMascotJumpLegs {
+  0%, 100% { transform: rotate(0deg); }
+  45% { transform: rotate(-20deg) translateY(-4px); }
+}
+@keyframes aiMascotJumpLegsR {
+  0%, 100% { transform: rotate(0deg); }
+  45% { transform: rotate(20deg) translateY(-4px); }
+}
+
+.ai-mascot-char.state-jump .ai-mascot-body-wrap { animation: aiMascotJumpBounce 0.68s infinite ease-in-out; }
+.ai-mascot-char.state-jump.facing-left .ai-mascot-body-wrap { animation: aiMascotJumpBounceFlipped 0.68s infinite ease-in-out; }
+.ai-mascot-char.state-jump .arm-left { transform-origin: 42px 62px; transform: rotate(148deg); }
+.ai-mascot-char.state-jump .arm-right { transform-origin: 78px 62px; transform: rotate(-148deg); }
+.ai-mascot-char.state-jump .leg-left { transform-origin: 51px 86px; animation: aiMascotJumpLegs 0.68s infinite ease-in-out; }
+.ai-mascot-char.state-jump .leg-right { transform-origin: 69px 86px; animation: aiMascotJumpLegsR 0.68s infinite ease-in-out; }
+.ai-mascot-char.state-jump .wing-left,
+.ai-mascot-char.state-jump .wing-right { animation-duration: 0.34s; }
+
+/* Singing */
+@keyframes aiMascotSingBody {
+  0%, 100% { transform: translateY(0) rotate(-3deg); }
+  50% { transform: translateY(-6px) rotate(3deg); }
+}
+@keyframes aiMascotSingHead {
+  0%, 100% { transform: rotate(-6deg); }
+  50% { transform: rotate(6deg); }
+}
+@keyframes aiMascotSingMouth {
+  0%, 100% { transform: scaleY(0.85) scaleX(1.05); }
+  50% { transform: scaleY(1.22) scaleX(0.92); }
+}
+.ai-mascot-char.state-sing .upper-body { transform-origin: 60px 84px; animation: aiMascotSingBody 0.56s infinite ease-in-out; }
+.ai-mascot-char.state-sing .head-group { transform-origin: 60px 55px; animation: aiMascotSingHead 0.56s infinite ease-in-out; }
+.ai-mascot-char.state-sing .sing-mouth { transform-origin: 60px 49px; animation: aiMascotSingMouth 0.28s infinite ease-in-out; }
+.ai-mascot-char.state-sing .arm-right { transform-origin: 78px 62px; transform: rotate(-108deg); }
+.ai-mascot-char.state-sing .arm-left { transform-origin: 42px 62px; transform: rotate(22deg); }
+.ai-mascot-char.state-sing .wing-left,
+.ai-mascot-char.state-sing .wing-right { animation-duration: 0.7s; }
+
+/* Wave Hi */
+@keyframes aiMascotWaveArm {
+  0%, 100% { transform: rotate(-122deg); }
+  25% { transform: rotate(-158deg); }
+  50% { transform: rotate(-112deg); }
+  75% { transform: rotate(-158deg); }
+}
+.ai-mascot-char.state-wave .arm-right { transform-origin: 78px 62px; animation: aiMascotWaveArm 0.48s infinite ease-in-out; }
+.ai-mascot-char.state-wave .head-group { transform-origin: 60px 55px; animation: aiMascotHeadLook 0.9s infinite ease-in-out; }
+
+/* Laugh & Hop */
+@keyframes aiMascotHopJoy {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  25% { transform: translateY(-15px) rotate(-4.5deg); }
+  50% { transform: translateY(-3px) rotate(4deg); }
+  75% { transform: translateY(-13px) rotate(-3.5deg); }
+}
+@keyframes aiMascotHopJoyFlipped {
+  0%, 100% { transform: scaleX(-1) translateY(0) rotate(0deg); }
+  25% { transform: scaleX(-1) translateY(-15px) rotate(-4.5deg); }
+  50% { transform: scaleX(-1) translateY(-3px) rotate(4deg); }
+  75% { transform: scaleX(-1) translateY(-13px) rotate(-3.5deg); }
+}
+@keyframes aiMascotArmUpL {
+  0%, 100% { transform: rotate(125deg); }
+  50% { transform: rotate(165deg); }
+}
+@keyframes aiMascotArmUpR {
+  0%, 100% { transform: rotate(-125deg); }
+  50% { transform: rotate(-165deg); }
+}
+.ai-mascot-char.state-laugh .ai-mascot-body-wrap { animation: aiMascotHopJoy 0.52s infinite ease-in-out; }
+.ai-mascot-char.state-laugh.facing-left .ai-mascot-body-wrap { animation: aiMascotHopJoyFlipped 0.52s infinite ease-in-out; }
+.ai-mascot-char.state-laugh .arm-left { transform-origin: 42px 62px; animation: aiMascotArmUpL 0.26s infinite ease-in-out; }
+.ai-mascot-char.state-laugh .arm-right { transform-origin: 78px 62px; animation: aiMascotArmUpR 0.26s infinite ease-in-out; }
+
+/* Annoyed */
+@keyframes aiMascotAnnoyedWiggle {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-2.5px); }
+  75% { transform: translateX(2.5px); }
+}
+.ai-mascot-char.state-annoyed .upper-body { animation: aiMascotAnnoyedWiggle 0.32s infinite ease-in-out; }
+.ai-mascot-char.state-annoyed .arm-left { transform-origin: 42px 62px; transform: rotate(-34deg); }
+.ai-mascot-char.state-annoyed .arm-right { transform-origin: 78px 62px; transform: rotate(34deg); }
+
+/* Cute Grumpy / Tantrum (soft emerald-amber sparks, never scary monster glow) */
+@keyframes aiMascotAngryShake {
+  0%, 100% { transform: translate(0, 0) scale(1.05); }
+  25% { transform: translate(-3.5px, -2px) rotate(-3.5deg) scale(1.07); }
+  50% { transform: translate(3.5px, 0) rotate(3.5deg) scale(1.05); }
+  75% { transform: translate(-3.5px, -2px) rotate(-3deg) scale(1.07); }
+}
+@keyframes aiMascotStompA {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+@keyframes aiMascotStompB {
+  0%, 100% { transform: translateY(-8px); }
+  50% { transform: translateY(0); }
+}
+.ai-mascot-char.state-angry .ai-mascot-body-wrap {
+  animation: aiMascotAngryShake 0.22s infinite ease-in-out;
+  filter: drop-shadow(0 0 14px rgba(245, 158, 11, 0.72));
+}
+.ai-mascot-char.state-angry .arm-left { transform-origin: 42px 62px; transform: rotate(148deg); }
+.ai-mascot-char.state-angry .arm-right { transform-origin: 78px 62px; transform: rotate(-148deg); }
+.ai-mascot-char.state-angry .leg-left { animation: aiMascotStompA 0.22s infinite ease-in-out; }
+.ai-mascot-char.state-angry .leg-right { animation: aiMascotStompB 0.22s infinite ease-in-out; }
+.ai-mascot-char.state-angry .wing-left,
+.ai-mascot-char.state-angry .wing-right { animation-duration: 0.25s; }
+
+/* Dragged / Flailing */
+@keyframes aiMascotFlailLegs {
+  0%, 100% { transform: rotate(-22deg); }
+  50% { transform: rotate(22deg); }
+}
+.ai-mascot-char.state-drag .ai-mascot-body-wrap {
+  transform: scale(1.08) rotate(-5deg);
+}
+.ai-mascot-char.state-drag.facing-left .ai-mascot-body-wrap {
+  transform: scaleX(-1.08) scaleY(1.08) rotate(5deg);
+}
+.ai-mascot-char.state-drag .leg-left { transform-origin: 51px 86px; animation: aiMascotFlailLegs 0.24s infinite ease-in-out; }
+.ai-mascot-char.state-drag .leg-right { transform-origin: 69px 86px; animation: aiMascotFlailLegs 0.24s infinite reverse ease-in-out; }
+.ai-mascot-char.state-drag .arm-left { transform-origin: 42px 62px; transform: rotate(150deg); }
+.ai-mascot-char.state-drag .arm-right { transform-origin: 78px 62px; transform: rotate(-150deg); }
+.ai-mascot-char.state-drag .wing-left,
+.ai-mascot-char.state-drag .wing-right { animation-duration: 0.26s; }
+
+/* Floating visual particles */
+.ai-mascot-particle {
+  position: absolute;
+  font-size: 17px;
+  pointer-events: none;
+  animation: aiMascotRiseFade 1.2s forwards ease-out;
+  will-change: transform, opacity;
+}
+
+@keyframes aiMascotRiseFade {
+  0% { opacity: 1; transform: translateY(0) scale(0.72); }
+  100% { opacity: 0; transform: translateY(-54px) scale(1.3); }
+}
+
+

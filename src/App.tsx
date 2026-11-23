@@ -99,6 +99,7 @@ import {
   VoiceModerationPage,
   type VoiceModerationOverview,
 } from './components/VoiceModerationPage.tsx';
+import { AiMascotOverlay } from './components/AiMascotOverlay.tsx';
 
 interface LatestDisconnectInfo {
   id: string;
@@ -5921,6 +5922,9 @@ export default function App() {
         currentStatusText={getHelpStatus(activeHelpId).text}
         isStatusActive={getHelpStatus(activeHelpId).isActive}
       />
+
+      {/* Interactive Cute Demon AI Mascot Overlay */}
+      <AiMascotOverlay />
     </div>
   );
 }
