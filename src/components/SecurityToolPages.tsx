@@ -51,7 +51,7 @@ interface SecurityToolPageProps {
   onRefreshStickerQueue: () => void;
   onRetryFailedStickers: () => void;
   onClearStickerQueueHistory: () => void;
-  onPurgeGroupStickers?: (groupId?: string) => void;
+  onPurgeGroupStickers?: (groupId?: string, includeUnverified?: boolean) => void;
   onSaveAdminMentionConfig: () => void;
   onSaveBossAndNoticeConfig: () => void;
   onTestBossAlert: () => void;
@@ -600,9 +600,23 @@ export function SecurityToolPage({
                     {isBn ? 'এক ক্লিকে গ্রুপের আগের জমে থাকা সব স্টিকার রিমুভ' : '1-Click Remove Previous Accumulated Stickers'}
                   </div>
                   <div className="text-[10px] text-slate-600">
-                    {isBn
-                      ? `সার্ভারে শনাক্তকৃত অ-ডিলিটেড স্টিকার: ${stickerQueue?.accumulatedStickers?.totalCount ?? 0}টি (${stickerQueue?.accumulatedStickers?.groups?.length ?? 0} গ্রুপ)`
-                      : `Detected accumulated stickers: ${stickerQueue?.accumulatedStickers?.totalCount ?? 0}`}
+                    {(() => {
+                      const activeCount = stickerQueue?.accumulatedStickers?.totalCount ?? 0;
+                      const unverifiedCount = stickerQueue?.accumulatedStickers?.unverifiedBulkCount ?? 0;
+                      if (activeCount > 0) {
+                        return isBn
+                          ? `সার্ভার ও গ্রুপে শনাক্তকৃত অ-ডিলিটেড স্টিকার: ${activeCount}টি (${stickerQueue?.accumulatedStickers?.groups?.length ?? 0} গ্রুপ)`
+                          : `Detected accumulated stickers: ${activeCount}`;
+                      }
+                      if (unverifiedCount > 0) {
+                        return isBn
+                          ? `WhatsApp গ্রুপে রিট্রাইযোগ্য আগের স্টিকার: ${unverifiedCount}টি (সার্ভার থেকে হিডেন ছিল)`
+                          : `Pending WhatsApp group re-purge: ${unverifiedCount} stickers`;
+                      }
+                      return isBn
+                        ? `সার্ভারে শনাক্তকৃত অ-ডিলিটেড স্টিকার: 0টি (${stickerQueue?.accumulatedStickers?.groups?.length ?? 0} গ্রুপ)`
+                        : `Detected accumulated stickers: 0`;
+                    })()}
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
@@ -614,6 +628,8 @@ export function SecurityToolPage({
                     <option value="ALL">{isBn ? 'সব কানেক্টেড গ্রুপ' : 'All Groups'}</option>
                     {(stickerQueue?.accumulatedStickers?.groups?.length
                       ? stickerQueue.accumulatedStickers.groups
+                      : stickerQueue?.accumulatedStickers?.unverifiedGroups?.length
+                      ? stickerQueue.accumulatedStickers.unverifiedGroups
                       : (groups || []).map((g) => ({ groupId: g.id, groupName: g.name, count: 0 }))
                     ).map((g: any) => (
                       <option key={g.groupId} value={g.groupId}>
@@ -626,7 +642,10 @@ export function SecurityToolPage({
                     disabled={Boolean(purgingStickers)}
                     onClick={() => {
                       const sel = document.getElementById('sec-purge-group-select') as HTMLSelectElement | null;
-                      onPurgeGroupStickers(sel?.value || 'ALL');
+                      const includeUnverified =
+                        (stickerQueue?.accumulatedStickers?.totalCount ?? 0) === 0 &&
+                        (stickerQueue?.accumulatedStickers?.unverifiedBulkCount ?? 0) > 0;
+                      onPurgeGroupStickers(sel?.value || 'ALL', includeUnverified);
                     }}
                     className="btn danger"
                   >
@@ -635,6 +654,11 @@ export function SecurityToolPage({
                       ? isBn
                         ? 'রিমুভ হচ্ছে...'
                         : 'Removing...'
+                      : (stickerQueue?.accumulatedStickers?.totalCount ?? 0) === 0 &&
+                        (stickerQueue?.accumulatedStickers?.unverifiedBulkCount ?? 0) > 0
+                      ? isBn
+                        ? 'গ্রুপ থেকে পুনরায় রিমুভ'
+                        : 'Re-Purge in WhatsApp'
                       : isBn
                       ? 'সব স্টিকার রিমুভ (১ ক্লিক)'
                       : 'Purge All Stickers'}

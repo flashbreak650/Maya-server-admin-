@@ -637,6 +637,8 @@ export default function App() {
     accumulatedStickers?: {
       totalCount: number;
       groups: Array<{ groupId: string; groupName: string; count: number }>;
+      unverifiedBulkCount?: number;
+      unverifiedGroups?: Array<{ groupId: string; groupName: string; count: number }>;
     };
   } | null>(null);
   const [purgingStickers, setPurgingStickers] = useState(false);
@@ -1730,13 +1732,14 @@ export default function App() {
     }
   };
 
-  const handlePurgeGroupStickers = async (groupId?: string) => {
+  const handlePurgeGroupStickers = async (groupId?: string, includeUnverified?: boolean) => {
     if (purgingStickers) return;
     setPurgingStickers(true);
     try {
       const target = groupId && groupId !== 'ALL' ? groupId : undefined;
       const res = await callApi('/api/moderation/sticker-queue/purge-group-stickers', 'POST', {
         groupId: target,
+        includeUnverified: Boolean(includeUnverified),
       });
       if (res?.queue) setStickerQueue(res.queue);
       showNotification(res?.message || (isBn ? 'স্টিকার রিমুভ শুরু হয়েছে!' : 'Bulk sticker purge started!'));
@@ -3552,9 +3555,23 @@ export default function App() {
                             {isBn ? 'এক ক্লিকে গ্রুপের আগের জমে থাকা সব স্টিকার রিমুভ' : '1-Click Remove Previous Accumulated Stickers'}
                           </div>
                           <div className="text-[10px] text-slate-600">
-                            {isBn
-                              ? `সার্ভারে শনাক্তকৃত অ-ডিলিটেড স্টিকার: ${stickerQueue?.accumulatedStickers?.totalCount ?? 0}টি`
-                              : `Detected accumulated stickers: ${stickerQueue?.accumulatedStickers?.totalCount ?? 0}`}
+                            {(() => {
+                              const activeCount = stickerQueue?.accumulatedStickers?.totalCount ?? 0;
+                              const unverifiedCount = stickerQueue?.accumulatedStickers?.unverifiedBulkCount ?? 0;
+                              if (activeCount > 0) {
+                                return isBn
+                                  ? `সার্ভার ও গ্রুপে শনাক্তকৃত অ-ডিলিটেড স্টিকার: ${activeCount}টি`
+                                  : `Detected accumulated stickers: ${activeCount}`;
+                              }
+                              if (unverifiedCount > 0) {
+                                return isBn
+                                  ? `WhatsApp গ্রুপে রিট্রাইযোগ্য আগের স্টিকার: ${unverifiedCount}টি (সার্ভার থেকে হিডেন ছিল)`
+                                  : `Pending WhatsApp group re-purge: ${unverifiedCount} stickers`;
+                              }
+                              return isBn
+                                ? `সার্ভারে শনাক্তকৃত অ-ডিলিটেড স্টিকার: 0টি`
+                                : `Detected accumulated stickers: 0`;
+                            })()}
                           </div>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
@@ -3566,6 +3583,8 @@ export default function App() {
                             <option value="ALL">{isBn ? 'সব গ্রুপ একসাথে' : 'All Groups'}</option>
                             {(stickerQueue?.accumulatedStickers?.groups?.length
                               ? stickerQueue.accumulatedStickers.groups
+                              : stickerQueue?.accumulatedStickers?.unverifiedGroups?.length
+                              ? stickerQueue.accumulatedStickers.unverifiedGroups
                               : groups.map((g) => ({ groupId: g.id, groupName: g.name, count: 0 }))
                             ).map((g) => (
                               <option key={g.groupId} value={g.groupId}>
@@ -3576,7 +3595,13 @@ export default function App() {
                           <button
                             type="button"
                             disabled={purgingStickers}
-                            onClick={() => handlePurgeGroupStickers(purgeTargetGroupId)}
+                            onClick={() =>
+                              handlePurgeGroupStickers(
+                                purgeTargetGroupId,
+                                (stickerQueue?.accumulatedStickers?.totalCount ?? 0) === 0 &&
+                                  (stickerQueue?.accumulatedStickers?.unverifiedBulkCount ?? 0) > 0
+                              )
+                            }
                             className="btn danger"
                           >
                             <Trash2 size={11} />{' '}
@@ -3584,6 +3609,11 @@ export default function App() {
                               ? isBn
                                 ? 'রিমুভ হচ্ছে...'
                                 : 'Removing...'
+                              : (stickerQueue?.accumulatedStickers?.totalCount ?? 0) === 0 &&
+                                (stickerQueue?.accumulatedStickers?.unverifiedBulkCount ?? 0) > 0
+                              ? isBn
+                                ? 'গ্রুপ থেকে পুনরায় রিমুভ'
+                                : 'Re-Purge in WhatsApp'
                               : isBn
                               ? 'সব স্টিকার রিমুভ (১ ক্লিক)'
                               : 'Purge All Stickers'}

@@ -3382,6 +3382,17 @@ export async function checkPermissions(
         ]);
         if (pn) rememberLidPnPair(senderJid, pn);
       } catch {}
+    } else if (senderJid && !isLidJid(senderJid) && lidMappingApi?.getLIDForPN) {
+      const pnClean = normalizePhoneDigits(cleanJidUser(senderJid)) || cleanJidUser(senderJid);
+      if (pnClean && /^\d{6,16}$/.test(pnClean) && !pnToLidUserMap.has(pnClean)) {
+        try {
+          const lid = await Promise.race([
+            lidMappingApi.getLIDForPN(`${pnClean}@s.whatsapp.net`),
+            new Promise<null>((r) => setTimeout(() => r(null), 1000)),
+          ]);
+          if (lid) rememberLidPnPair(lid, `${pnClean}@s.whatsapp.net`);
+        } catch {}
+      }
     }
     expandIdSetWithLidMaps(senderCandidates, senderNormalized);
 
@@ -3495,6 +3506,180 @@ export async function checkPermissions(
   }
 }
 
+function isValidUserParticipantJid(jid?: string | null): boolean {
+  if (!jid) return false;
+  const str = String(jid).trim();
+  if (!str || str === 'BOT' || str === 'unknown') return false;
+  const lower = str.toLowerCase();
+  if (lower.endsWith('@g.us') || lower === 'status@broadcast') return false;
+  return lower.includes('@lid') || lower.includes('@s.whatsapp.net') || lower.includes('@c.us');
+}
+
+export async function resolveAllGroupParticipantJids(
+  sock: WASocket,
+  groupId: string,
+  senderJid?: string | null,
+  senderAltJid?: string | null,
+  rawParticipant?: string | null
+): Promise<{
+  isSenderBot: boolean;
+  addressingMode: 'lid' | 'pn';
+  matchedSenderId?: string;
+  candidates: string[];
+}> {
+  const meta = await getGroupMeta(sock, groupId, false).catch(() => null);
+  if (meta) {
+    learnGroupParticipantsLidPn(meta);
+  }
+  const addressingMode: 'lid' | 'pn' = (meta as any)?.addressingMode === 'pn' ? 'pn' : 'lid';
+  const lidMappingApi = (sock as any)?.signalRepository?.lidMapping;
+  const { botUsers, botNormalized } = await resolveBotIdentitySet(sock);
+
+  const cleanInputs = [rawParticipant, senderJid, senderAltJid]
+    .map((j) => String(j || '').trim())
+    .filter((j) => isValidUserParticipantJid(j));
+
+  rememberLidPnPair(rawParticipant || senderJid, senderAltJid);
+
+  const userCleanSet = new Set<string>();
+  const normSet = new Set<string>();
+
+  for (const j of cleanInputs) {
+    const cu = cleanJidUser(j);
+    if (cu) userCleanSet.add(cu);
+    const norm = normalizeJid(j);
+    if (norm) normSet.add(norm);
+    if (!isLidJid(j)) {
+      const pnDigits = normalizePhoneDigits(cu);
+      if (pnDigits) userCleanSet.add(pnDigits);
+    }
+  }
+
+  // Bidirectional Signal LID/PN lookup so even left-group or historical senders resolve both formats
+  for (const j of cleanInputs) {
+    const cu = cleanJidUser(j);
+    if (!cu) continue;
+    if (isLidJid(j)) {
+      if (!lidToPnUserMap.has(cu) && typeof lidMappingApi?.getPNForLID === 'function') {
+        try {
+          const pn = await Promise.race([
+            lidMappingApi.getPNForLID(normalizeJid(j)),
+            new Promise<null>((r) => setTimeout(() => r(null), 900)),
+          ]);
+          if (pn) rememberLidPnPair(j, pn);
+        } catch {}
+      }
+    } else if (isPnJid(j)) {
+      const pnDigits = normalizePhoneDigits(cu) || cu;
+      if (pnDigits && !pnToLidUserMap.has(pnDigits) && typeof lidMappingApi?.getLIDForPN === 'function') {
+        try {
+          const lid = await Promise.race([
+            lidMappingApi.getLIDForPN(`${pnDigits}@s.whatsapp.net`),
+            new Promise<null>((r) => setTimeout(() => r(null), 900)),
+          ]);
+          if (lid) rememberLidPnPair(lid, `${pnDigits}@s.whatsapp.net`);
+        } catch {}
+      }
+    }
+  }
+
+  expandIdSetWithLidMaps(userCleanSet, normSet);
+
+  let isSenderBot =
+    String(senderJid || '').trim() === 'BOT' ||
+    Array.from(userCleanSet).some((u) => botUsers.has(u)) ||
+    Array.from(normSet).some((n) => botNormalized.has(n));
+
+  let matchedSenderId: string | undefined;
+  let matchedLidJid = '';
+  let matchedPnJid = '';
+
+  if (meta?.participants && Array.isArray(meta.participants)) {
+    for (const p of meta.participants) {
+      if (!p) continue;
+      const pAny = p as any;
+      const pAllJids = [p.id, pAny.jid, pAny.lid, pAny.phoneNumber, pAny.pn].filter((j): j is string =>
+        Boolean(j && isValidUserParticipantJid(String(j)))
+      );
+      const pCleanSet = new Set<string>();
+      const pNormSet = new Set<string>();
+      for (const j of pAllJids) {
+        const cu = cleanJidUser(j);
+        if (cu) pCleanSet.add(cu);
+        const norm = normalizeJid(j);
+        if (norm) pNormSet.add(norm);
+        if (!isLidJid(j)) {
+          const pnDigits = normalizePhoneDigits(cu);
+          if (pnDigits) pCleanSet.add(pnDigits);
+        }
+      }
+      expandIdSetWithLidMaps(pCleanSet, pNormSet);
+
+      const matches =
+        Array.from(pCleanSet).some((c) => userCleanSet.has(c)) ||
+        Array.from(pNormSet).some((n) => normSet.has(n));
+
+      if (matches) {
+        matchedSenderId = isValidUserParticipantJid(p.id) ? normalizeJid(p.id) : undefined;
+        if (!isSenderBot) {
+          isSenderBot =
+            Array.from(pCleanSet).some((c) => botUsers.has(c)) ||
+            Array.from(pNormSet).some((n) => botNormalized.has(n));
+        }
+        for (const j of pAllJids) {
+          const norm = normalizeJid(j);
+          if (isLidJid(norm) && !matchedLidJid) matchedLidJid = norm;
+          else if (isPnJid(norm) && !matchedPnJid) matchedPnJid = norm;
+        }
+        for (const norm of pNormSet) {
+          if (isLidJid(norm) && !matchedLidJid) matchedLidJid = norm;
+          else if (isPnJid(norm) && !matchedPnJid) matchedPnJid = norm;
+        }
+        break;
+      }
+    }
+  }
+
+  for (const norm of normSet) {
+    if (isLidJid(norm) && !matchedLidJid) matchedLidJid = norm;
+    else if (isPnJid(norm) && !matchedPnJid) matchedPnJid = norm;
+  }
+
+  const normalizedRaw = isValidUserParticipantJid(rawParticipant) ? normalizeJid(String(rawParticipant)) : '';
+  const orderedRawCandidates =
+    addressingMode === 'lid'
+      ? [
+          matchedSenderId && isLidJid(matchedSenderId) ? matchedSenderId : '',
+          matchedLidJid,
+          normalizedRaw,
+          matchedSenderId || '',
+          matchedPnJid,
+          ...Array.from(normSet),
+        ]
+      : [
+          matchedSenderId && isPnJid(matchedSenderId) ? matchedSenderId : '',
+          matchedPnJid,
+          normalizedRaw,
+          matchedSenderId || '',
+          matchedLidJid,
+          ...Array.from(normSet),
+        ];
+
+  const candidates: string[] = [];
+  for (const c of orderedRawCandidates) {
+    if (isValidUserParticipantJid(c) && !candidates.includes(c)) {
+      candidates.push(c);
+    }
+  }
+
+  return {
+    isSenderBot,
+    addressingMode,
+    matchedSenderId,
+    candidates,
+  };
+}
+
 /**
  * Bulletproof Baileys v7 Group Message Revoke (handles PN + LID addressing modes)
  * Strict Permission Check: Never falsely returns true when bot lacks Admin delete permissions.
@@ -3515,15 +3700,57 @@ export async function deleteMessageSafely(
     return false;
   }
 
-  const participantCandidates: string[] = [];
+  if (key.fromMe) {
+    try {
+      await Promise.race([
+        sock.sendMessage(
+          remoteJid,
+          {
+            delete: {
+              remoteJid,
+              fromMe: true,
+              id: key.id,
+            },
+          },
+          { useCachedGroupMetadata: true }
+        ),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Delete ACK timeout (10s)')), 10000)),
+      ]);
+      return true;
+    } catch (err: any) {
+      console.error('[Delete Own Message FAILED]:', err?.message || err);
+      return false;
+    }
+  }
+
   const rawParticipant = key.participant || (msg as any).participant || '';
   const altParticipant = (key as any).participantAlt || '';
+  const resolved = await resolveAllGroupParticipantJids(sock, remoteJid, rawParticipant, altParticipant, rawParticipant);
 
+  if (resolved.isSenderBot) {
+    try {
+      await Promise.race([
+        sock.sendMessage(
+          remoteJid,
+          {
+            delete: {
+              remoteJid,
+              fromMe: true,
+              id: key.id,
+            },
+          },
+          { useCachedGroupMetadata: true }
+        ),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Delete ACK timeout (10s)')), 10000)),
+      ]);
+      return true;
+    } catch {}
+  }
+
+  const participantCandidates: string[] = [];
   for (const cand of [
-    rawParticipant ? jidNormalizedUser(rawParticipant) : '',
-    matchedSenderId ? jidNormalizedUser(matchedSenderId) : '',
-    altParticipant ? jidNormalizedUser(altParticipant) : '',
-    rawParticipant,
+    matchedSenderId && isValidUserParticipantJid(matchedSenderId) ? normalizeJid(matchedSenderId) : '',
+    ...resolved.candidates,
   ]) {
     if (cand && !participantCandidates.includes(cand)) {
       participantCandidates.push(cand);
@@ -3534,15 +3761,19 @@ export async function deleteMessageSafely(
   for (const participant of participantCandidates) {
     try {
       await Promise.race([
-        sock.sendMessage(remoteJid, {
-          delete: {
-            remoteJid,
-            fromMe: Boolean(key.fromMe),
-            id: key.id,
-            participant,
+        sock.sendMessage(
+          remoteJid,
+          {
+            delete: {
+              remoteJid,
+              fromMe: false,
+              id: key.id,
+              participant,
+            },
           },
-        }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Delete ACK timeout (7s)')), 7000)),
+          { useCachedGroupMetadata: true }
+        ),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Delete ACK timeout (10s)')), 10000)),
       ]);
       return true;
     } catch (err: any) {
@@ -3563,8 +3794,8 @@ export async function deleteMessageSafely(
 
   try {
     await Promise.race([
-      sock.sendMessage(remoteJid, { delete: key }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Delete ACK timeout (7s)')), 7000)),
+      sock.sendMessage(remoteJid, { delete: key }, { useCachedGroupMetadata: true }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Delete ACK timeout (10s)')), 10000)),
     ]);
     return true;
   } catch (err: any) {

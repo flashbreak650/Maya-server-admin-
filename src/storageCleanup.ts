@@ -1057,6 +1057,10 @@ export async function runCleanup(
   }
 
   cleanupInProgress = true;
+  const cleanupWatchdog = setTimeout(() => {
+    cleanupInProgress = false;
+  }, 45000);
+
   const startedAt = Date.now();
   const verifiedDirectories: string[] = [];
 
@@ -1299,6 +1303,7 @@ export async function runCleanup(
     appendErrorLog('CLEANUP_ERROR', err?.message || String(err));
     throw err;
   } finally {
+    clearTimeout(cleanupWatchdog);
     cleanupInProgress = false;
   }
 }

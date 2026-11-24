@@ -79,6 +79,8 @@ export interface InboxMessageRecord {
   groupId: string;
   groupName: string;
   senderJid: string;
+  senderAltJid?: string;
+  rawParticipant?: string;
   senderPhone: string;
   senderName: string;
   fromMe: boolean;
@@ -94,6 +96,7 @@ export interface InboxMessageRecord {
   deletedAt?: number;
   deletedBy?: string;
   deletionReason?: string;
+  deletionVerified?: boolean;
   editedAt?: number;
   isImportant: boolean;
   source: 'live' | 'history_sync' | 'bot_outgoing';
@@ -988,16 +991,18 @@ export async function captureIncomingGroupMessages(
     const contentKeys = Object.keys(content).filter((k) => k !== 'messageContextInfo');
     if (contentKeys.length === 0) continue;
 
+    const rawParticipant = String(msg.key?.participant || (msg as any).participant || '').trim();
     const rawSender = msg.key?.fromMe
-      ? sock?.user?.id || 'BOT'
-      : msg.key?.participant || (msg as any).participant || remoteJid;
-    const senderAltJid = (msg.key as any)?.participantAlt || '';
-    const senderJid = safeNormalizeJid(rawSender);
+      ? sock?.user?.id || sock?.user?.lid || 'BOT'
+      : rawParticipant || 'unknown';
+    const senderAltJid = String((msg.key as any)?.participantAlt || '').trim();
+    const senderJid =
+      rawSender === 'BOT' || rawSender === 'unknown' ? rawSender : safeNormalizeJid(rawSender);
 
     const resolved = externalIdentityResolver
       ? externalIdentityResolver({
           groupId: remoteJid,
-          senderJid,
+          senderJid: senderJid !== 'BOT' && senderJid !== 'unknown' ? senderJid : undefined,
           senderAltJid,
           pushName: msg.pushName,
         })
@@ -1206,6 +1211,8 @@ export async function captureIncomingGroupMessages(
       groupId: remoteJid,
       groupName,
       senderJid,
+      senderAltJid: senderAltJid || undefined,
+      rawParticipant: rawParticipant || undefined,
       senderPhone,
       senderName,
       fromMe: Boolean(msg.key?.fromMe),
@@ -1357,7 +1364,7 @@ export async function markInboxMessageDeleted(
   messageId: string,
   deletedBy: string,
   deletionReason: string,
-  options?: { deleteLocalMedia?: boolean; markImportant?: boolean }
+  options?: { deleteLocalMedia?: boolean; markImportant?: boolean; deletionVerified?: boolean }
 ) {
   if (!groupId || !messageId || !groupId.endsWith('@g.us')) return;
   loadInboxIndex();
@@ -1365,11 +1372,23 @@ export async function markInboxMessageDeleted(
   const target = records.find((r) => r.id === messageId);
 
   if (target) {
-    if (target.isDeleted && target.deletionReason === deletionReason) return;
+    const nextVerified = options?.deletionVerified === true;
+    if (
+      target.isDeleted &&
+      target.deletionReason === deletionReason &&
+      (!nextVerified || target.deletionVerified === true)
+    ) {
+      return;
+    }
     target.isDeleted = true;
     target.deletedAt = Date.now();
     target.deletedBy = deletedBy;
     target.deletionReason = deletionReason;
+    if (typeof options?.deletionVerified === 'boolean') {
+      target.deletionVerified = options.deletionVerified;
+    } else if (deletedBy === 'sender_revoke' || deletedBy === 'moderation_engine' || deletedBy === 'sticker_queue') {
+      target.deletionVerified = true;
+    }
 
     if (options?.deleteLocalMedia && target.media?.relPath) {
       try {
@@ -2048,9 +2067,12 @@ export interface AccumulatedGroupStickerEntry {
   groupId: string;
   groupName: string;
   senderJid: string;
+  senderAltJid?: string;
+  rawParticipant?: string;
   senderPhone: string;
   fromMe: boolean;
   timestamp: number;
+  previouslyServerPurged?: boolean;
 }
 
 function isStickerInboxRecord(rec: InboxMessageRecord): boolean {
@@ -2062,20 +2084,36 @@ function isStickerInboxRecord(rec: InboxMessageRecord): boolean {
   );
 }
 
+function isUnverifiedServerPurgedSticker(rec: InboxMessageRecord, maxAgeMs = 14 * 24 * 60 * 60 * 1000): boolean {
+  if (!rec.isDeleted || rec.deletedBy !== 'sticker_bulk_purge' || rec.deletionVerified === true) {
+    return false;
+  }
+  const refTs = Number(rec.deletedAt || rec.timestamp || 0);
+  return refTs === 0 || Date.now() - refTs <= maxAgeMs;
+}
+
 export function getAccumulatedStickerCountsSummary(): {
   totalCount: number;
   groups: Array<{ groupId: string; groupName: string; count: number }>;
+  unverifiedBulkCount: number;
+  unverifiedGroups: Array<{ groupId: string; groupName: string; count: number }>;
 } {
   loadInboxIndex();
   const groups: Array<{ groupId: string; groupName: string; count: number }> = [];
+  const unverifiedGroups: Array<{ groupId: string; groupName: string; count: number }> = [];
   let totalCount = 0;
+  let unverifiedBulkCount = 0;
 
   for (const [gid, gInfo] of Object.entries(inboxIndex.groups)) {
     const records = loadGroupMessages(gid);
     let count = 0;
+    let unverifiedCount = 0;
     for (const rec of records) {
-      if (!rec.isDeleted && isStickerInboxRecord(rec)) {
+      if (!isStickerInboxRecord(rec)) continue;
+      if (!rec.isDeleted) {
         count++;
+      } else if (isUnverifiedServerPurgedSticker(rec)) {
+        unverifiedCount++;
       }
     }
     if (count > 0) {
@@ -2086,15 +2124,25 @@ export function getAccumulatedStickerCountsSummary(): {
         count,
       });
     }
+    if (unverifiedCount > 0) {
+      unverifiedBulkCount += unverifiedCount;
+      unverifiedGroups.push({
+        groupId: gid,
+        groupName: gInfo?.name || 'WhatsApp Group',
+        count: unverifiedCount,
+      });
+    }
   }
 
   groups.sort((a, b) => b.count - a.count);
-  return { totalCount, groups };
+  unverifiedGroups.sort((a, b) => b.count - a.count);
+  return { totalCount, groups, unverifiedBulkCount, unverifiedGroups };
 }
 
 export function getAccumulatedStickersForPurge(
   targetGroupId?: string,
-  limit = 600
+  limit = 600,
+  opts?: { includeUnverifiedBulk?: boolean }
 ): {
   items: AccumulatedGroupStickerEntry[];
   groupsAffected: Array<{ groupId: string; groupName: string; count: number }>;
@@ -2103,6 +2151,7 @@ export function getAccumulatedStickersForPurge(
   const capped = Math.max(1, Math.min(2000, Number(limit || 600)));
   const cleanTarget = targetGroupId && targetGroupId !== 'ALL' ? String(targetGroupId).trim() : '';
   const groupIds = cleanTarget ? [cleanTarget] : Object.keys(inboxIndex.groups);
+  const includeUnverified = Boolean(opts?.includeUnverifiedBulk);
 
   const items: AccumulatedGroupStickerEntry[] = [];
   const countsMap = new Map<string, { groupId: string; groupName: string; count: number }>();
@@ -2112,15 +2161,30 @@ export function getAccumulatedStickersForPurge(
     const records = loadGroupMessages(gid);
     const groupName = inboxIndex.groups[gid]?.name || 'WhatsApp Group';
     for (const rec of records) {
-      if (rec.isDeleted || !isStickerInboxRecord(rec) || !rec.id) continue;
+      if (!rec.id || !isStickerInboxRecord(rec)) continue;
+      const isUnverifiedBulk = isUnverifiedServerPurgedSticker(rec);
+      if (rec.isDeleted && !(includeUnverified && isUnverifiedBulk)) continue;
+
+      const cleanSenderJid =
+        rec.senderJid && !rec.senderJid.endsWith('@g.us') && rec.senderJid !== 'unknown'
+          ? rec.senderJid
+          : rec.rawParticipant && !rec.rawParticipant.endsWith('@g.us')
+          ? rec.rawParticipant
+          : rec.senderPhone && rec.senderPhone !== 'unknown' && rec.senderPhone !== 'member'
+          ? `${rec.senderPhone}@s.whatsapp.net`
+          : '';
+
       items.push({
         messageId: rec.id,
         groupId: gid,
         groupName: rec.groupName || groupName,
-        senderJid: rec.senderJid || (rec.senderPhone ? `${rec.senderPhone}@s.whatsapp.net` : ''),
+        senderJid: cleanSenderJid,
+        senderAltJid: rec.senderAltJid,
+        rawParticipant: rec.rawParticipant,
         senderPhone: rec.senderPhone || 'member',
         fromMe: Boolean(rec.fromMe),
         timestamp: Number(rec.timestamp || 0),
+        previouslyServerPurged: rec.isDeleted && isUnverifiedBulk,
       });
       const prev = countsMap.get(gid);
       if (prev) {

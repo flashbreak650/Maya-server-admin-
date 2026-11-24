@@ -1601,10 +1601,11 @@ app.post('/api/moderation/sticker-queue/clear-history', (_req: Request, res: Res
   }
 });
 
-app.post('/api/moderation/sticker-queue/purge-group-stickers', (req: Request, res: Response) => {
+app.post('/api/moderation/sticker-queue/purge-group-stickers', async (req: Request, res: Response) => {
   try {
     const groupId = req.body?.groupId ? String(req.body.groupId) : undefined;
-    const result = enqueueBulkStickerPurge(currentSock, groupId);
+    const includeUnverified = Boolean(req.body?.includeUnverified);
+    const result = await enqueueBulkStickerPurge(currentSock, groupId, { includeUnverified });
     if (!result.success) {
       return res.status(400).json({
         success: false,

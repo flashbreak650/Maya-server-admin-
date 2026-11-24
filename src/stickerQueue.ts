@@ -19,6 +19,7 @@ import {
   rememberLidPnPair,
   reportServerProblem,
   resolveAdminPermissionProblemsForGroup,
+  resolveAllGroupParticipantJids,
   resolveCanonicalUserIdSync,
   resolveServerProblem,
   restrictUser,
@@ -53,6 +54,7 @@ export interface StickerQueueItem {
   groupName: string;
   senderJid: string;
   senderAltJid?: string;
+  rawParticipant?: string;
   matchedSenderId?: string;
   senderPhone: string;
   fromMe: boolean;
@@ -98,6 +100,7 @@ export interface DetectedStickerMeta {
   remoteJid: string;
   senderJid: string;
   senderAltJid: string;
+  rawParticipant?: string;
   senderPhone: string;
   fromMe: boolean;
   pushName?: string | null;
@@ -137,6 +140,8 @@ const inFlightGroupMetaPromises = new Map<string, Promise<any>>();
 
 let sockGetterFn: (() => WASocket | null) | null = null;
 let inFlightWorkers = 0;
+let inFlightBulkWorkers = 0;
+let lastBulkDispatchAt = 0;
 let rateLimitBackoffUntil = 0;
 let retryWakeTimer: ReturnType<typeof setTimeout> | null = null;
 let saveQueueTimer: ReturnType<typeof setTimeout> | null = null;
@@ -364,6 +369,7 @@ export function inspectIncomingSticker(msg: proto.IWebMessageInfo): DetectedStic
     remoteJid,
     senderJid,
     senderAltJid,
+    rawParticipant: senderJid,
     senderPhone,
     fromMe: Boolean(msg.key.fromMe),
     pushName: msg.pushName,
@@ -397,9 +403,14 @@ export function enqueueStickerTask(params: {
   policy: StickerPolicy;
   priority: number;
   matchedSenderId?: string;
+  bypassCompletedCache?: boolean;
 }): boolean {
-  const { meta, groupName, policy, priority, matchedSenderId } = params;
+  const { meta, groupName, policy, priority, matchedSenderId, bypassCompletedCache } = params;
   const uniqueKey = makeUniqueKey(meta.remoteJid, meta.messageId);
+
+  if (bypassCompletedCache) {
+    completedKeys.delete(uniqueKey);
+  }
 
   // Deduplicate active queue and already-processed/deleted stickers
   if (activeMap.has(uniqueKey) || completedKeys.has(uniqueKey)) {
@@ -410,7 +421,7 @@ export function enqueueStickerTask(params: {
   const settings = getSettings();
   const maxRetries =
     policy === 'bulk_purge'
-      ? 2
+      ? 3
       : Math.max(5, Math.min(12, Number(settings.stickerDeleteMaxRetries ?? 5)));
 
   const item: StickerQueueItem = {
@@ -420,6 +431,7 @@ export function enqueueStickerTask(params: {
     groupName: groupName || 'WhatsApp Group',
     senderJid: meta.senderJid,
     senderAltJid: meta.senderAltJid || undefined,
+    rawParticipant: meta.rawParticipant || undefined,
     matchedSenderId,
     senderPhone: meta.senderPhone,
     fromMe: meta.fromMe,
@@ -739,42 +751,129 @@ async function executeRealWhatsAppDelete(
   item: StickerQueueItem,
   matchedSenderId?: string
 ): Promise<void> {
-  const candidates: string[] = [];
-  for (const cand of [
-    item.senderJid ? jidNormalizedUser(item.senderJid) : '',
-    matchedSenderId ? jidNormalizedUser(matchedSenderId) : '',
-    item.senderAltJid ? jidNormalizedUser(item.senderAltJid) : '',
+  const resolved = await resolveAllGroupParticipantJids(
+    sock,
+    item.groupId,
     item.senderJid,
+    item.senderAltJid,
+    item.rawParticipant
+  );
+
+  // Own/bot stickers use sender-revoke (edit='7') without participant field
+  if (item.fromMe || resolved.isSenderBot || item.senderJid === 'BOT') {
+    await Promise.race([
+      sock.sendMessage(
+        item.groupId,
+        {
+          delete: {
+            remoteJid: item.groupId,
+            fromMe: true,
+            id: item.messageId,
+          },
+        },
+        { useCachedGroupMetadata: true }
+      ),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('WhatsApp delete ACK timeout (12s)')), 12000)),
+    ]);
+    return;
+  }
+
+  const ordered: string[] = [];
+  for (const cand of [
+    matchedSenderId ? jidNormalizedUser(matchedSenderId) : '',
+    ...resolved.candidates,
   ]) {
-    if (cand && !candidates.includes(cand)) {
-      candidates.push(cand);
+    const clean = String(cand || '').trim();
+    if (
+      clean &&
+      clean !== 'BOT' &&
+      clean !== 'unknown' &&
+      !clean.endsWith('@g.us') &&
+      !ordered.includes(clean)
+    ) {
+      ordered.push(clean);
     }
   }
 
+  if (ordered.length === 0) {
+    throw new Error('প্রেরকের সঠিক WhatsApp JID পাওয়া যায়নি (Missing valid participant JID)');
+  }
+
+  // Pick primary candidate plus at most 1 alternate domain (@lid <-> @s.whatsapp.net)
+  const primary = ordered[0];
+  const primaryIsLid = primary.toLowerCase().includes('@lid');
+  const alternate = ordered.find((c) => c.toLowerCase().includes('@lid') !== primaryIsLid);
+
+  let sentPrimary = false;
   let lastError: any = null;
-  for (const participant of candidates) {
-    try {
-      await Promise.race([
-        sock.sendMessage(item.groupId, {
+
+  try {
+    await Promise.race([
+      sock.sendMessage(
+        item.groupId,
+        {
           delete: {
             remoteJid: item.groupId,
-            fromMe: item.fromMe,
+            fromMe: false,
             id: item.messageId,
-            participant,
+            participant: primary,
           },
-        }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('WhatsApp delete ACK timeout (7s)')), 7000)),
+        },
+        { useCachedGroupMetadata: true }
+      ),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('WhatsApp delete ACK timeout (12s)')), 12000)),
+    ]);
+    sentPrimary = true;
+  } catch (err: any) {
+    lastError = err;
+    const errKind = classifyDeleteError(err).kind;
+    if (errKind === 'connection' || errKind === 'rate_limit' || errKind === 'permission') {
+      throw err;
+    }
+  }
+
+  // For bulk_purge or when exact group participant format wasn't confirmed in groupMetadata,
+  // also dispatch the alternate (@lid / @s.whatsapp.net) key so WhatsApp clients revoke regardless of how the old key was stored.
+  const rawDomainMismatch =
+    item.rawParticipant &&
+    item.rawParticipant.includes('@') &&
+    item.rawParticipant.toLowerCase().includes('@lid') !== primaryIsLid;
+  const shouldSendAlternate =
+    Boolean(alternate) &&
+    (!sentPrimary || item.policy === 'bulk_purge' || !resolved.matchedSenderId || rawDomainMismatch);
+
+  if (shouldSendAlternate && alternate) {
+    if (sentPrimary) {
+      await new Promise((r) => setTimeout(r, 140));
+    }
+    try {
+      await Promise.race([
+        sock.sendMessage(
+          item.groupId,
+          {
+            delete: {
+              remoteJid: item.groupId,
+              fromMe: false,
+              id: item.messageId,
+              participant: alternate,
+            },
+          },
+          { useCachedGroupMetadata: true }
+        ),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('WhatsApp delete ACK timeout (12s)')), 12000)),
       ]);
-      return; // Genuine revoke stanza accepted by Baileys/WhatsApp
+      return;
     } catch (err: any) {
       lastError = err;
       const errKind = classifyDeleteError(err).kind;
       if (errKind === 'connection' || errKind === 'rate_limit' || errKind === 'permission') {
         throw err;
       }
+      if (sentPrimary) return;
     }
   }
 
+  if (sentPrimary) return;
   throw lastError || new Error('Failed to send WhatsApp delete stanza');
 }
 
@@ -857,10 +956,18 @@ async function processStickerTask(item: StickerQueueItem) {
       return;
     }
 
+    let effectivePerms = perms;
+    if (item.policy === 'bulk_purge' && !effectivePerms.metaKnown && !item.fromMe) {
+      effectivePerms = await checkPermissions(sock, item.groupId, item.senderJid, true, item.senderAltJid);
+      if (!effectivePerms.metaKnown) {
+        throw new Error('গ্রুপ অ্যাডমিন স্ট্যাটাস যাচাই করা যায়নি (Group metadata unavailable)');
+      }
+    }
+
     // Strict Bot Admin Delete Permission Verification:
     // ONLY refuse delete & trigger "No Admin Permission" notice when group metadata WAS verified (metaKnown === true)
     // AND confirms bot is NOT admin (prevents false alerts when groupMetadata temporarily failed or during LID sync).
-    if (perms.metaKnown && !perms.isBotAdmin && !item.fromMe) {
+    if (effectivePerms.metaKnown && !effectivePerms.isBotAdmin && !item.fromMe) {
       item.status = 'failed_no_permission';
       item.lastError = 'বট এই গ্রুপের অ্যাডমিন (Admin) না থাকায় স্টিকার ডিলিট করা সম্ভব হয়নি';
       item.lastAttemptAt = Date.now();
@@ -882,7 +989,7 @@ async function processStickerTask(item: StickerQueueItem) {
     item.attempts += 1;
     item.lastAttemptAt = Date.now();
 
-    await executeRealWhatsAppDelete(sock, item, perms.matchedSenderId || item.matchedSenderId);
+    await executeRealWhatsAppDelete(sock, item, effectivePerms.matchedSenderId || item.matchedSenderId);
 
     // REAL VERIFIED DELETE SUCCEEDED
     item.status = 'deleted';
@@ -898,9 +1005,11 @@ async function processStickerTask(item: StickerQueueItem) {
       item.messageId,
       item.policy === 'bulk_purge' ? 'sticker_bulk_purge' : 'sticker_queue',
       item.policy === 'bulk_purge'
-        ? 'গ্রুপের জমে থাকা আগের স্টিকার এক ক্লিকে সার্ভার থেকে রিমুভ'
+        ? 'গ্রুপের জমে থাকা আগের স্টিকার WhatsApp গ্রুপ ও সার্ভার থেকে রিমুভ'
         : `স্টিকার প্রোটেকশন (${item.policy === 'restricted_user' ? 'রেস্ট্রিক্টেড ইউজার' : item.policy === 'anti_sticker' ? 'Anti-Sticker' : 'Sticker Spam'})`,
-      item.policy === 'bulk_purge' ? { deleteLocalMedia: true, markImportant: false } : undefined
+      item.policy === 'bulk_purge'
+        ? { deleteLocalMedia: true, markImportant: false, deletionVerified: true }
+        : { deletionVerified: true }
     ).catch(() => {});
     scheduleSaveQueue(false);
 
@@ -994,14 +1103,22 @@ async function processStickerTask(item: StickerQueueItem) {
       scheduleSaveQueue(false);
 
       if (item.policy === 'bulk_purge') {
-        // For old bulk-purged stickers whose WhatsApp protocol delete window already expired, clean server cache quietly without flooding Error logs
         markInboxMessageDeleted(
           item.groupId,
           item.messageId,
           'sticker_bulk_purge',
-          'সার্ভার থেকে পুরোনো স্টিকার পরিষ্কার করা হয়েছে (WA ডিলিট মেয়াদোত্তীর্ণ)',
-          { deleteLocalMedia: true, markImportant: false }
+          'মেসেজটি পুরোনো হওয়ায় WhatsApp গ্রুপ থেকে রিমুভ মেয়াদোত্তীর্ণ, সার্ভার থেকে ক্লিন করা হয়েছে',
+          { deleteLocalMedia: true, markImportant: false, deletionVerified: true }
         ).catch(() => {});
+        addActivityLog({
+          groupId: item.groupId,
+          groupName: item.groupName,
+          senderJid: item.senderJid,
+          senderPhone: item.senderPhone,
+          action: 'deleted',
+          reason: 'পুরোনো স্টিকার সার্ভার থেকে পরিষ্কার করা হয়েছে (WhatsApp ডিলিট উইন্ডো শেষ)',
+          details: classified.message,
+        });
         return;
       }
 
@@ -1080,6 +1197,19 @@ function pumpQueue() {
 
   for (const task of readyTasks) {
     if (inFlightWorkers >= maxParallel) break;
+
+    const isBulk = task.policy === 'bulk_purge';
+    if (isBulk) {
+      if (inFlightBulkWorkers >= 3) continue;
+      const elapsed = Date.now() - lastBulkDispatchAt;
+      if (elapsed < 150) {
+        scheduleRetryWake(Math.max(50, 160 - elapsed));
+        continue;
+      }
+      lastBulkDispatchAt = Date.now();
+      inFlightBulkWorkers += 1;
+    }
+
     task.status = 'processing';
     inFlightWorkers += 1;
 
@@ -1089,6 +1219,9 @@ function pumpQueue() {
       })
       .finally(() => {
         inFlightWorkers = Math.max(0, inFlightWorkers - 1);
+        if (isBulk) {
+          inFlightBulkWorkers = Math.max(0, inFlightBulkWorkers - 1);
+        }
         schedulePump();
       });
   }
@@ -1164,17 +1297,19 @@ export function getStickerQueueStatus() {
   };
 }
 
-export function enqueueBulkStickerPurge(
+export async function enqueueBulkStickerPurge(
   sock: WASocket | null,
-  targetGroupId?: string
-): {
+  targetGroupId?: string,
+  opts?: { includeUnverified?: boolean }
+): Promise<{
   success: boolean;
   foundCount: number;
   enqueuedCount: number;
   alreadyQueuedCount: number;
   groupsAffectedCount: number;
+  skippedNoAdminCount?: number;
   message: string;
-} {
+}> {
   if (!isSocketReadyForDelete(sock)) {
     return {
       success: false,
@@ -1186,7 +1321,21 @@ export function enqueueBulkStickerPurge(
     };
   }
 
-  const { items, groupsAffected } = getAccumulatedStickersForPurge(targetGroupId, 600);
+  let { items, groupsAffected } = getAccumulatedStickersForPurge(targetGroupId, 600, {
+    includeUnverifiedBulk: Boolean(opts?.includeUnverified),
+  });
+
+  // Auto-recover previously server-purged stickers whose WhatsApp deletion wasn't verified
+  if (items.length === 0 && !opts?.includeUnverified) {
+    const recovered = getAccumulatedStickersForPurge(targetGroupId, 600, {
+      includeUnverifiedBulk: true,
+    });
+    if (recovered.items.length > 0) {
+      items = recovered.items;
+      groupsAffected = recovered.groupsAffected;
+    }
+  }
+
   if (items.length === 0) {
     return {
       success: true,
@@ -1194,7 +1343,53 @@ export function enqueueBulkStickerPurge(
       enqueuedCount: 0,
       alreadyQueuedCount: 0,
       groupsAffectedCount: 0,
-      message: 'সার্ভারে রিমুভ করার মতো কোনো পুরোনো অ-ডিলিটেড স্টিকার পাওয়া যায়নি।',
+      message: 'সার্ভার বা গ্রুপে রিমুভ করার মতো কোনো পুরোনো অ-ডিলিটেড স্টিকার পাওয়া যায়নি।',
+    };
+  }
+
+  // Pre-verify fresh group metadata & bot admin permission per affected group
+  const distinctGroupIds = Array.from(new Set(items.map((i) => i.groupId)));
+  const groupPermMap = new Map<string, { metaKnown: boolean; isBotAdmin: boolean; groupName: string }>();
+
+  await Promise.all(
+    distinctGroupIds.map(async (gid) => {
+      const p = await checkPermissions(sock, gid, '', true).catch(() => ({
+        metaKnown: false,
+        isBotAdmin: false,
+        groupSubject: 'WhatsApp Group',
+      }));
+      groupPermMap.set(gid, {
+        metaKnown: p.metaKnown,
+        isBotAdmin: p.isBotAdmin,
+        groupName: p.groupSubject || 'WhatsApp Group',
+      });
+    })
+  );
+
+  const eligibleItems = [];
+  const noAdminGroupNames = new Set<string>();
+  let skippedNoAdminCount = 0;
+
+  for (const entry of items) {
+    const gp = groupPermMap.get(entry.groupId);
+    if (gp?.metaKnown && !gp.isBotAdmin && !entry.fromMe) {
+      skippedNoAdminCount++;
+      noAdminGroupNames.add(gp.groupName || entry.groupName);
+      continue;
+    }
+    eligibleItems.push(entry);
+  }
+
+  if (eligibleItems.length === 0 && skippedNoAdminCount > 0) {
+    const gList = Array.from(noAdminGroupNames).slice(0, 3).join(', ');
+    return {
+      success: false,
+      foundCount: items.length,
+      enqueuedCount: 0,
+      alreadyQueuedCount: 0,
+      groupsAffectedCount: groupsAffected.length,
+      skippedNoAdminCount,
+      message: `বট "${gList}" গ্রুপের অ্যাডমিন (Admin) নয় — তাই WhatsApp গ্রুপ থেকে স্টিকার ডিলিট করা যাচ্ছে না। আগে বটটিকে গ্রুপ Admin বানান!`,
     };
   }
 
@@ -1202,22 +1397,25 @@ export function enqueueBulkStickerPurge(
   let alreadyQueuedCount = 0;
   const now = Date.now();
 
-  for (const entry of items) {
+  for (const entry of eligibleItems) {
+    const gp = groupPermMap.get(entry.groupId);
     const added = enqueueStickerTask({
       meta: {
         messageId: entry.messageId,
         remoteJid: entry.groupId,
-        senderJid: entry.senderJid || `${entry.senderPhone}@s.whatsapp.net`,
-        senderAltJid: '',
+        senderJid: entry.senderJid,
+        senderAltJid: entry.senderAltJid || '',
+        rawParticipant: entry.rawParticipant,
         senderPhone: entry.senderPhone || 'member',
         fromMe: entry.fromMe,
         stickerKind: 'sticker',
         receivedAt: now,
         msgTimestampMs: entry.timestamp || now,
       },
-      groupName: entry.groupName,
+      groupName: gp?.groupName || entry.groupName,
       policy: 'bulk_purge',
       priority: 3,
+      bypassCompletedCache: true,
     });
     if (added) enqueuedCount++;
     else alreadyQueuedCount++;
@@ -1235,9 +1433,14 @@ export function enqueueBulkStickerPurge(
       senderJid: 'SYSTEM',
       senderPhone: 'CLEANUP',
       action: 'deleted',
-      reason: `এক-ক্লিক স্টিকার ক্লিনআপ শুরু হয়েছে (${enqueuedCount}টি পুরোনো স্টিকার কিউ করা হয়েছে)`,
+      reason: `এক-ক্লিক WhatsApp স্টিকার ক্লিনআপ শুরু (${enqueuedCount}টি স্টিকার কিউ করা হয়েছে)`,
     });
   }
+
+  const noAdminNote =
+    skippedNoAdminCount > 0
+      ? ` (${skippedNoAdminCount}টি স্টিকার বাদ পড়েছে কারণ ওই গ্রুপে বট Admin নয়)`
+      : '';
 
   return {
     success: true,
@@ -1245,10 +1448,11 @@ export function enqueueBulkStickerPurge(
     enqueuedCount,
     alreadyQueuedCount,
     groupsAffectedCount: groupsAffected.length,
+    skippedNoAdminCount,
     message:
       enqueuedCount > 0
-        ? `${enqueuedCount}টি জমে থাকা স্টিকার রিমুভের জন্য High-Speed Queue-তে যুক্ত করা হয়েছে — বট এগুলো দ্রুত গ্রুপ ও সার্ভার থেকে মুছে ফেলছে!`
-        : 'এই স্টিকারগুলো ইতিমধ্যেই ডিলিট কিউ-তে রয়েছে।',
+        ? `${enqueuedCount}টি জমে থাকা স্টিকার WhatsApp গ্রুপ থেকে ডিলিটের জন্য Queue-তে যুক্ত হয়েছে — বট ধাপে ধাপে আসল গ্রুপ ও সার্ভার থেকে মুছে ফেলছে!${noAdminNote}`
+        : `এই স্টিকারগুলো ইতিমধ্যেই ডিলিট কিউ-তে রয়েছে।${noAdminNote}`,
   };
 }
 

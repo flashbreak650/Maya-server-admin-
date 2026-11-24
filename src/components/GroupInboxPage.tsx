@@ -908,12 +908,12 @@ export function GroupInboxPage({
         groupId: selectedGroup.id,
       });
       showNotification(
-        res?.message || (isBn ? 'গ্রুপের পুরোনো সব স্টিকার রিমুভ শুরু হয়েছে!' : 'Bulk sticker cleanup started!')
+        res?.message || (isBn ? 'WhatsApp গ্রুপ ও সার্ভার থেকে পুরোনো স্টিকার রিমুভ শুরু হয়েছে!' : 'Bulk sticker cleanup started!')
       );
       setTimeout(() => {
         loadInboxGroups();
         loadMessages(selectedGroup.id);
-      }, 1500);
+      }, 2200);
     } catch (err: any) {
       showNotification(err?.message || (isBn ? 'স্টিকার রিমুভ ব্যর্থ হয়েছে' : 'Sticker cleanup failed'));
     } finally {
