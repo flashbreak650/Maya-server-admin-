@@ -63,6 +63,9 @@ export interface ModerationSettings {
   autoKick3Warnings: boolean;
   autoWelcome: boolean;
   welcomeMessage?: string;
+  newMemberInboxRulesEnabled?: boolean;
+  newMemberInboxRulesNotice?: string;
+  newMemberGroupNoticeText?: string;
   botReply: boolean;
   customBadwords: string[];
   // Feature 1: Dashboard Admin PIN Lock
@@ -254,6 +257,9 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   autoKick3Warnings: true,
   autoWelcome: true,
   welcomeMessage: '',
+  newMemberInboxRulesEnabled: true,
+  newMemberInboxRulesNotice: '',
+  newMemberGroupNoticeText: '',
   botReply: true,
   customBadwords: [],
   dashboardPinEnabled: false,
@@ -3218,6 +3224,8 @@ export function getGroupAdminJidsFromCachedMeta(groupId: string): string[] {
   return admins;
 }
 
+const recentNewMemberRulesSent = new Map<string, number>();
+
 export async function handleGroupParticipantsUpdate(
   sock: WASocket,
   update: { id: string; participants: any[]; action: string }
@@ -3249,7 +3257,9 @@ export async function handleGroupParticipantsUpdate(
     }
 
     const settings = getSettings();
-    if (!settings.autoWelcome) {
+    const welcomeEnabled = Boolean(settings.autoWelcome);
+    const inboxRulesEnabled = settings.newMemberInboxRulesEnabled !== false;
+    if (!welcomeEnabled && !inboxRulesEnabled) {
       return;
     }
 
@@ -3257,7 +3267,7 @@ export async function handleGroupParticipantsUpdate(
     const groupSubject = meta?.subject || 'আমাদের গ্রুপ';
     const memberCount = meta?.participants?.length || 0;
 
-    // Build bot identity set so we don't welcome the bot itself
+    // Build bot identity set so we don't welcome or DM the bot itself
     const botUsers = new Set<string>();
     for (const b of [
       sock.user?.id,
@@ -3271,6 +3281,12 @@ export async function handleGroupParticipantsUpdate(
 
     const mentions: string[] = [];
     const mentionLabels: string[] = [];
+    const addedMembers: Array<{
+      groupMentionJid: string;
+      dmJid: string;
+      displayNum: string;
+      participantUser: string;
+    }> = [];
 
     for (const rawParticipant of update.participants) {
       const rawJid =
@@ -3285,6 +3301,7 @@ export async function handleGroupParticipantsUpdate(
 
       // Resolve phone number from participant object or group metadata if @lid
       let displayNum = participantUser;
+      let resolvedPhone = '';
       const metaMatch = meta?.participants?.find(
         (p: any) =>
           cleanJidUser(p.id) === participantUser ||
@@ -3292,42 +3309,138 @@ export async function handleGroupParticipantsUpdate(
           cleanJidUser(p.phoneNumber) === participantUser
       );
       if (typeof rawParticipant === 'object' && rawParticipant?.phoneNumber) {
-        displayNum = cleanJidUser(rawParticipant.phoneNumber) || displayNum;
+        resolvedPhone = cleanJidUser(rawParticipant.phoneNumber);
+        displayNum = resolvedPhone || displayNum;
       } else if (metaMatch?.phoneNumber) {
-        displayNum = cleanJidUser(metaMatch.phoneNumber) || displayNum;
+        resolvedPhone = cleanJidUser(metaMatch.phoneNumber);
+        displayNum = resolvedPhone || displayNum;
       }
+
+      const dmJid = resolvedPhone ? normalizeJid(`${resolvedPhone}@s.whatsapp.net`) : normalized;
 
       if (!mentions.includes(normalized)) {
         mentions.push(normalized);
         mentionLabels.push(`@${displayNum}`);
+        addedMembers.push({
+          groupMentionJid: normalized,
+          dmJid,
+          displayNum,
+          participantUser,
+        });
       }
     }
 
     if (mentions.length === 0) return;
 
     const userTagString = mentionLabels.join(', ');
-    const customTemplate = (settings.welcomeMessage || '').trim();
-    const welcomeText = customTemplate
-      ? customTemplate.replace(/\{user\}/gi, userTagString).replace(/\{group\}/gi, groupSubject)
-      : `🌸 *আসসালামু আলাইকুম ও স্বাগতম!* 🌸\n\nহ্যালো ${userTagString},\n✨ *${groupSubject}* গ্রুপে আপনাকে আন্তরিক স্বাগতম!\n\n🛡️ অনুগ্রহ করে গ্রুপের নিয়মকানুন মেনে চলুন এবং সবার সাথে ভদ্র ও সুন্দর ব্যবহার করুন।${
-          memberCount > 0 ? `\n👥 বর্তমান সদস্য সংখ্যা: ${memberCount} জন` : ''
-        }`;
 
-    const sent = await safeSendMessage(sock, groupId, {
-      text: welcomeText,
-      mentions,
-    });
+    if (welcomeEnabled) {
+      const customTemplate = (settings.welcomeMessage || '').trim();
+      const welcomeText = customTemplate
+        ? customTemplate.replace(/\{user\}/gi, userTagString).replace(/\{group\}/gi, groupSubject)
+        : `🌸 *আসসালামু আলাইকুম ও স্বাগতম!* 🌸\n\nহ্যালো ${userTagString},\n✨ *${groupSubject}* গ্রুপে আপনাকে আন্তরিক স্বাগতম!\n\n🛡️ অনুগ্রহ করে গ্রুপের নিয়মকানুন মেনে চলুন এবং সবার সাথে ভদ্র ও সুন্দর ব্যবহার করুন।${
+            memberCount > 0 ? `\n👥 বর্তমান সদস্য সংখ্যা: ${memberCount} জন` : ''
+          }`;
 
-    if (sent) {
-      addActivityLog({
-        groupId,
-        groupName: groupSubject,
-        senderJid: mentions[0],
-        senderPhone: mentionLabels[0].replace(/^@/, ''),
-        action: 'replied',
-        reason: 'নতুন সদস্যকে অটো ওয়েলকাম জানানো হয়েছে (Auto Welcome)',
-        details: `${userTagString} গ্রুপে যুক্ত হয়েছেন`,
+      const sent = await safeSendMessage(sock, groupId, {
+        text: welcomeText,
+        mentions,
       });
+
+      if (sent) {
+        addActivityLog({
+          groupId,
+          groupName: groupSubject,
+          senderJid: mentions[0],
+          senderPhone: mentionLabels[0].replace(/^@/, ''),
+          action: 'replied',
+          reason: 'নতুন সদস্যকে অটো ওয়েলকাম জানানো হয়েছে (Auto Welcome)',
+          details: `${userTagString} গ্রুপে যুক্ত হয়েছেন`,
+        });
+      }
+    }
+
+    // Send Group Rules Notice to New Member's Private Inbox + Short @Mention Notice in Group
+    if (inboxRulesEnabled && addedMembers.length > 0) {
+      const now = Date.now();
+      for (const [k, ts] of recentNewMemberRulesSent.entries()) {
+        if (now - ts > 60_000) recentNewMemberRulesSent.delete(k);
+      }
+
+      const customRulesTemplate = (settings.newMemberInboxRulesNotice || '').trim();
+      const dmSucceeded: typeof addedMembers = [];
+
+      for (const member of addedMembers) {
+        const dedupeKey = `${groupId}:${member.participantUser}`;
+        const prevTs = recentNewMemberRulesSent.get(dedupeKey);
+        if (prevTs && now - prevTs < 30_000) continue;
+        recentNewMemberRulesSent.set(dedupeKey, now);
+
+        const memberTag = `@${member.displayNum}`;
+        const inboxRulesText = customRulesTemplate
+          ? customRulesTemplate
+              .replace(/\{user\}/gi, memberTag)
+              .replace(/\{group\}/gi, groupSubject)
+              .replace(/\{memberCount\}/gi, String(memberCount || ''))
+          : `📜 *${groupSubject} — গ্রুপ রুলস নোটিশ*\n\nআসসালামু আলাইকুম ${memberTag},\n*${groupSubject}* গ্রুপে যুক্ত হওয়ার জন্য আপনাকে স্বাগতম! 🌸\n\n📌 *গুরুত্বপূর্ণ নিয়মাবলী:*\n১। গ্রুপে কোনো ধরনের গালিগালাজ, অশালীন কথা বা ভয়েস মেসেজ দেওয়া নিষেধ।\n২। অতিরিক্ত স্টিকার স্প্যাম ও অননুমোদিত লিংক শেয়ার করবেন না।\n৩। সবার সাথে ভদ্র, সম্মানজনক ও বন্ধুত্বপূর্ণ আচরণ বজায় রাখুন।\n৪। নিয়ম ভঙ্গ করলে বট স্বয়ংক্রিয়ভাবে সতর্কবার্তা, মিউট বা রিমুভ করবে।\n\n🤝 নিয়ম মেনে গ্রুপে থাকার জন্য ধন্যবাদ!`;
+
+        let dmSent = await safeSendMessage(sock, member.dmJid, {
+          text: inboxRulesText,
+        });
+
+        if (!dmSent && member.dmJid !== member.groupMentionJid) {
+          dmSent = await safeSendMessage(sock, member.groupMentionJid, {
+            text: inboxRulesText,
+          });
+        }
+
+        if (dmSent) {
+          dmSucceeded.push(member);
+        } else {
+          addActivityLog({
+            groupId,
+            groupName: groupSubject,
+            senderJid: member.groupMentionJid,
+            senderPhone: member.displayNum,
+            action: 'error',
+            reason: 'নতুন সদস্যের ইনবক্সে গ্রুপ রুলস পাঠানো যায়নি (DM ব্লক/প্রাইভেসি)',
+            details: `@${member.displayNum} এর ইনবক্সে রুলস পাঠানো সম্ভব হয়নি`,
+          });
+        }
+
+        if (addedMembers.length > 1) {
+          await new Promise((r) => setTimeout(r, 250));
+        }
+      }
+
+      if (dmSucceeded.length > 0) {
+        if (welcomeEnabled) {
+          await new Promise((r) => setTimeout(r, 350));
+        }
+        const dmTags = dmSucceeded.map((m) => `@${m.displayNum}`).join(', ');
+        const dmMentions = dmSucceeded.map((m) => m.groupMentionJid);
+        const customGroupNotice = (settings.newMemberGroupNoticeText || '').trim();
+        const shortGroupNotice = customGroupNotice
+          ? customGroupNotice.replace(/\{user\}/gi, dmTags).replace(/\{group\}/gi, groupSubject)
+          : `📩 ${dmTags}, *${groupSubject}* গ্রুপের রুলস নোটিশ আপনার ইনবক্সে দেওয়া হলো। দয়া করে ইনবক্স চেক করুন!`;
+
+        const groupNoticeSent = await safeSendMessage(sock, groupId, {
+          text: shortGroupNotice,
+          mentions: dmMentions,
+        });
+
+        if (groupNoticeSent) {
+          addActivityLog({
+            groupId,
+            groupName: groupSubject,
+            senderJid: dmSucceeded[0].groupMentionJid,
+            senderPhone: dmSucceeded[0].displayNum,
+            action: 'replied',
+            reason: 'নতুন সদস্যের ইনবক্সে গ্রুপ রুলস ও গ্রুপে মেনশন নোটিশ পাঠানো হয়েছে',
+            details: `${dmTags} এর ইনবক্সে রুলস পাঠানো হয়েছে`,
+          });
+        }
+      }
     }
   } catch (err: any) {
     console.error('[Auto Welcome Error]:', err?.message || err);

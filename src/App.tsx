@@ -152,6 +152,9 @@ interface ModerationSettings {
   autoKick3Warnings: boolean;
   autoWelcome: boolean;
   welcomeMessage?: string;
+  newMemberInboxRulesEnabled?: boolean;
+  newMemberInboxRulesNotice?: string;
+  newMemberGroupNoticeText?: string;
   botReply: boolean;
   customBadwords: string[];
   // Maya AI Settings
@@ -545,6 +548,9 @@ export default function App() {
     autoKick3Warnings: true,
     autoWelcome: true,
     welcomeMessage: '',
+    newMemberInboxRulesEnabled: true,
+    newMemberInboxRulesNotice: '',
+    newMemberGroupNoticeText: '',
     botReply: true,
     customBadwords: [],
     mayaAiEnabled: true,
@@ -1786,6 +1792,25 @@ export default function App() {
     }
   };
 
+  const handleSaveNewMemberRulesConfig = async () => {
+    const patch = {
+      newMemberInboxRulesEnabled: settings.newMemberInboxRulesEnabled !== false,
+      newMemberInboxRulesNotice: String(settings.newMemberInboxRulesNotice || '').trim(),
+      newMemberGroupNoticeText: String(settings.newMemberGroupNoticeText || '').trim(),
+    };
+    try {
+      const res = await callApi('/api/moderation/settings', 'POST', patch);
+      if (res?.settings) setSettings(res.settings);
+      showNotification(
+        isBn
+          ? 'নতুন মেম্বার ইনবক্স রুলস ও মেনশন নোটিশ সার্ভারে সেভ হয়েছে!'
+          : 'New member inbox rules notice saved to server!'
+      );
+    } catch (err: any) {
+      showNotification((isBn ? 'সেভ ব্যর্থ: ' : 'Save failed: ') + err.message);
+    }
+  };
+
   const handleTestBossAlert = async () => {
     try {
       const res = await callApi('/api/moderation/test-boss-alert', 'POST');
@@ -2883,6 +2908,7 @@ export default function App() {
               onPurgeGroupStickers={handlePurgeGroupStickers}
               onSaveAdminMentionConfig={handleSaveAdminMentionConfig}
               onSaveBossAndNoticeConfig={handleSaveBossAndNoticeConfig}
+              onSaveNewMemberRulesConfig={handleSaveNewMemberRulesConfig}
               onTestBossAlert={handleTestBossAlert}
               renderInfoBtn={renderInfoBtn}
             />
@@ -3326,6 +3352,34 @@ export default function App() {
                     </div>
                   </div>
                 )}
+
+                {/* New Member Inbox Rules + Group Short Mention */}
+                <div className="toggle-row">
+                  <div className="toggle-info">
+                    <h4>{isBn ? 'নতুন মেম্বার ইনবক্স রুলস ও মেনশন নোটিশ' : 'New Member Inbox Rules Notice'}</h4>
+                    <p>
+                      {isBn
+                        ? 'নতুন সদস্য এড হলে তার ইনবক্সে গ্রুপ রুলস দেবে এবং গ্রুপে @মেনশন দিয়ে ছোট্ট করে জানাবে।'
+                        : 'DMs group rules to new members and sends a short @mention notice in group.'}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => navigateToPage('sec_inbox_rules')}
+                      className="mt-1 inline-flex items-center gap-1 text-[10.5px] font-bold text-[#087f55] hover:underline cursor-pointer"
+                    >
+                      <span>{isBn ? 'ইনবক্স রুলস ও নোটিশ পরিবর্তন করুন' : 'Edit Rules & Group Notice'}</span>
+                      <ArrowRight size={11} />
+                    </button>
+                  </div>
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={settings.newMemberInboxRulesEnabled !== false}
+                      onChange={(e) => updateSettingToggle('newMemberInboxRulesEnabled', e.target.checked)}
+                    />
+                    <span className="slider"></span>
+                  </label>
+                </div>
 
                 <div className="policy-box">
                   <h4>{isBn ? 'ডিফল্ট ভায়োলেশন পলিসি' : 'Default violation policy'}</h4>

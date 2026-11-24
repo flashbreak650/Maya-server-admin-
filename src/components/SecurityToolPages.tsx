@@ -7,6 +7,7 @@ import {
   BellRing,
   Bot,
   EyeOff,
+  Inbox,
   Link as LinkIcon,
   MessageSquareHeart,
   RefreshCw,
@@ -24,6 +25,7 @@ export type SecurityToolId =
   | 'sec_links'
   | 'sec_shield'
   | 'sec_welcome'
+  | 'sec_inbox_rules'
   | 'sec_stickers'
   | 'sec_media'
   | 'sec_badwords'
@@ -54,6 +56,7 @@ interface SecurityToolPageProps {
   onPurgeGroupStickers?: (groupId?: string, includeUnverified?: boolean) => void;
   onSaveAdminMentionConfig: () => void;
   onSaveBossAndNoticeConfig: () => void;
+  onSaveNewMemberRulesConfig?: () => void;
   onTestBossAlert: () => void;
   renderInfoBtn: (id: string) => React.ReactNode;
 }
@@ -84,6 +87,12 @@ const TOOL_META: Record<
     titleEn: 'Auto Welcome New Members (@Mention)',
     subBn: 'গ্রুপে নতুন কেউ যুক্ত হলে অটো @মেনশন দিয়ে ওয়েলকাম জানানো ও কাস্টম মেসেজ সেট করুন।',
     subEn: 'Automatically greet newly added members with @mention and custom template.',
+  },
+  sec_inbox_rules: {
+    titleBn: 'নতুন মেম্বার ইনবক্স রুলস ও গ্রুপ মেনশন নোটিশ',
+    titleEn: 'New Member Inbox Rules & Group Mention Notice',
+    subBn: 'গ্রুপে নতুন মেম্বার এড হলেই তার ইনবক্সে গ্রুপ রুলস নোটিশ পাঠাবে এবং গ্রুপে @মেনশন দিয়ে ছোট্ট করে জানাবে।',
+    subEn: 'Automatically DMs group rules to newly added members and posts a short @mention notice in the group.',
   },
   sec_stickers: {
     titleBn: 'অ্যান্টি-স্টিকার ও হাই-প্রায়োরিটি স্প্যাম কিউ',
@@ -146,6 +155,7 @@ export function SecurityToolPage({
   onPurgeGroupStickers,
   onSaveAdminMentionConfig,
   onSaveBossAndNoticeConfig,
+  onSaveNewMemberRulesConfig,
   onTestBossAlert,
   renderInfoBtn,
 }: SecurityToolPageProps) {
@@ -395,6 +405,162 @@ export function SecurityToolPage({
               </div>
             </div>
           )}
+
+          <div className="mt-3 pt-2.5 border-t border-emerald-950/[0.06] flex items-center justify-between gap-2 flex-wrap">
+            <span className="text-[11px] font-semibold text-[#5f7368]">
+              {isBn
+                ? 'নতুন মেম্বারের ইনবক্সে গ্রুপ রুলস ও গ্রুপে মেনশন নোটিশ সেট করুন:'
+                : 'Configure new member private inbox rules & group mention notice:'}
+            </span>
+            <button type="button" className="btn soft" onClick={() => onNavigate('sec_inbox_rules')}>
+              <Inbox size={12} /> {isBn ? 'ইনবক্স রুলস নোটিশ খুলুন' : 'Open Inbox Rules Notice'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 3B. NEW MEMBER INBOX RULES NOTICE + SHORT GROUP MENTION */}
+      {toolId === 'sec_inbox_rules' && (
+        <div className="card space-y-3">
+          <div className="card-head">
+            <div>
+              <h3 className="font-extrabold text-[13px]">
+                {isBn ? 'নতুন মেম্বার ইনবক্স রুলস ও গ্রুপ মেনশন' : 'New Member Inbox Rules & Group Mention'}
+              </h3>
+              <p>
+                {isBn
+                  ? 'নতুন সদস্য গ্রুপে এড হলে সাথে সাথে তার ইনবক্সে রুলস নোটিশ যাবে এবং গ্রুপে @মেনশন দিয়ে ছোট্ট করে জানাবে।'
+                  : 'Sends customizable group rules to the new member DM and posts a short @mention notice in the group.'}
+              </p>
+            </div>
+            <div className="symbol sg">
+              <Inbox size={15} />
+            </div>
+          </div>
+
+          <div className="toggle-row">
+            <div className="toggle-info">
+              <h4>
+                {isBn
+                  ? 'ইনবক্সে গ্রুপ রুলস + গ্রুপে মেনশন নোটিশ (ON/OFF)'
+                  : 'Auto Inbox Rules DM + Group Mention Notice'}
+              </h4>
+              <p>
+                {isBn
+                  ? 'চালু থাকলে নতুন মেম্বার এড হলেই তার প্রাইভেট ইনবক্সে গ্রুপ রুলস যাবে এবং গ্রুপে ছোট্ট নোটিশ দেবে।'
+                  : 'When enabled, new members receive group rules in DM plus a short @mention notice in group.'}
+              </p>
+            </div>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={settings.newMemberInboxRulesEnabled !== false}
+                onChange={(e) => onUpdateToggle('newMemberInboxRulesEnabled', e.target.checked)}
+              />
+              <span className="slider"></span>
+            </label>
+          </div>
+
+          <div className="subpanel-soft space-y-3">
+            <div>
+              <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
+                <label className="block text-[11px] font-bold text-[#0f291e]">
+                  {isBn
+                    ? '১. নতুন মেম্বারের ইনবক্সে যাওয়া গ্রুপ রুলস নোটিশ (সার্ভার থেকে পরিবর্তনযোগ্য)'
+                    : '1. Group Rules Notice Sent to New Member Inbox'}
+                </label>
+                {Boolean(settings.newMemberInboxRulesNotice) && (
+                  <button
+                    type="button"
+                    className="text-[10.5px] font-bold text-rose-600 hover:underline cursor-pointer"
+                    onClick={() => setSettings((prev: any) => ({ ...prev, newMemberInboxRulesNotice: '' }))}
+                  >
+                    {isBn ? 'ডিফল্ট রুলসে ফিরুন' : 'Reset Default'}
+                  </button>
+                )}
+              </div>
+              <textarea
+                rows={6}
+                className="field w-full text-[11.5px] leading-relaxed"
+                value={settings.newMemberInboxRulesNotice || ''}
+                onChange={(e) =>
+                  setSettings((prev: any) => ({ ...prev, newMemberInboxRulesNotice: e.target.value }))
+                }
+                placeholder={
+                  isBn
+                    ? 'ফাঁকা রাখলে ডিফল্ট সুন্দর গ্রুপ রুলস পাঠাবে...\nচাইলে নিজের মতো লিখুন — {user} দিলে মেনশন ও {group} দিলে গ্রুপের নাম বসবে।'
+                    : 'Leave blank for default Bengali group rules notice... Supports {user} & {group}.'
+                }
+              />
+              <p className="text-[10px] text-[#5f7368] mt-1">
+                {isBn
+                  ? 'টিপস: {user} লিখলে নতুন মেম্বারের নাম/নম্বর এবং {group} লিখলে গ্রুপের নাম অটো বসে যাবে।'
+                  : 'Tip: Use {user} for member mention and {group} for group name.'}
+              </p>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
+                <label className="block text-[11px] font-bold text-[#0f291e]">
+                  {isBn
+                    ? '২. গ্রুপে @মেনশন দিয়ে ছোট্ট নোটিশ'
+                    : '2. Short @Mention Notice Posted in Group'}
+                </label>
+                {Boolean(settings.newMemberGroupNoticeText) && (
+                  <button
+                    type="button"
+                    className="text-[10.5px] font-bold text-rose-600 hover:underline cursor-pointer"
+                    onClick={() => setSettings((prev: any) => ({ ...prev, newMemberGroupNoticeText: '' }))}
+                  >
+                    {isBn ? 'ডিফল্ট টেক্সট ব্যবহার করুন' : 'Reset Default'}
+                  </button>
+                )}
+              </div>
+              <input
+                type="text"
+                className="field w-full text-[11.5px]"
+                value={settings.newMemberGroupNoticeText || ''}
+                onChange={(e) =>
+                  setSettings((prev: any) => ({ ...prev, newMemberGroupNoticeText: e.target.value }))
+                }
+                placeholder={
+                  isBn
+                    ? 'ডিফল্ট: 📩 {user}, {group} গ্রুপের রুলস নোটিশ আপনার ইনবক্সে দেওয়া হলো। দয়া করে ইনবক্স চেক করুন!'
+                    : 'Default: 📩 {user}, group rules notice has been sent to your inbox!'
+                }
+              />
+            </div>
+
+            <div className="p-2.5 rounded-xl bg-white border border-emerald-950/[0.08] space-y-1.5">
+              <div className="text-[10.5px] font-extrabold text-[#087f55] uppercase tracking-wide">
+                {isBn ? 'লাইভ প্রিভিউ (গ্রুপে যা দেখাবে)' : 'Live Preview (Group @Mention)'}
+              </div>
+              <p className="text-[11.5px] text-slate-800 break-words">
+                {(settings.newMemberGroupNoticeText || '').trim()
+                  ? (settings.newMemberGroupNoticeText || '')
+                      .replace(/\{user\}/gi, '@8801XXXXXXXXX')
+                      .replace(/\{group\}/gi, 'WAGuard Official')
+                  : '📩 @8801XXXXXXXXX, *WAGuard Official* গ্রুপের রুলস নোটিশ আপনার ইনবক্সে দেওয়া হলো। দয়া করে ইনবক্স চেক করুন!'}
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                className="btn primary"
+                onClick={() => {
+                  if (onSaveNewMemberRulesConfig) {
+                    onSaveNewMemberRulesConfig();
+                  } else {
+                    onUpdateToggle('newMemberInboxRulesNotice', settings.newMemberInboxRulesNotice || '');
+                    onUpdateToggle('newMemberGroupNoticeText', settings.newMemberGroupNoticeText || '');
+                  }
+                }}
+              >
+                <Save size={12} /> {isBn ? 'সার্ভারে নোটিশ সেভ করুন' : 'Save Notice to Server'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

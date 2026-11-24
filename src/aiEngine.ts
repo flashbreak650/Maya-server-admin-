@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
 import { type AiKey, getSettings, updateSettings } from './moderationEngine.ts';
 
@@ -1088,5 +1088,177 @@ Return ONLY valid JSON (no markdown fences) with these keys:
   } catch {}
   return null;
 }
+
+export interface VoiceAbuseAnalysisResult {
+  transcript: string;
+  languageOrDialect: string;
+  isAbusive: boolean;
+  severity: 'NONE' | 'LOW' | 'MEDIUM' | 'HIGH';
+  confidence: number;
+  action: 'ALLOW' | 'REVIEW' | 'DELETE';
+  reason: string;
+}
+
+/**
+ * ভয়েস অডিও সরাসরি বিশ্লেষণ করে গালি/অশ্লীলতা আছে কি না যাচাই করে (Bangla, Sylheti, Banglish, English)
+ */
+export async function analyzeVoiceForAbuse(
+  audioBuffer: Buffer,
+  mimeType = 'audio/ogg'
+): Promise<VoiceAbuseAnalysisResult> {
+  if (!audioBuffer || audioBuffer.length === 0) {
+    return {
+      transcript: '',
+      languageOrDialect: 'unknown',
+      isAbusive: false,
+      severity: 'NONE',
+      confidence: 1,
+      action: 'ALLOW',
+      reason: 'Empty audio',
+    };
+  }
+
+  const settings = getSettings();
+  const apiKey =
+    (settings.geminiApiKey && isValidGeminiKeyFormat(settings.geminiApiKey) ? settings.geminiApiKey.trim() : '') ||
+    (settings.aiKeys || [])
+      .find((k) => k.provider === 'gemini' && k.status === 'active' && isValidGeminiKeyFormat(k.key))
+      ?.key?.trim() ||
+    process.env.GEMINI_API_KEY?.trim() ||
+    '';
+
+  if (!apiKey || !isValidGeminiKeyFormat(apiKey)) {
+    return {
+      transcript: '',
+      languageOrDialect: 'error',
+      isAbusive: false,
+      severity: 'NONE',
+      confidence: 0,
+      action: 'ALLOW',
+      reason: 'Gemini API key unavailable (no false delete)',
+    };
+  }
+
+  const normalizedMime = (mimeType || 'audio/ogg').split(';')[0].trim() || 'audio/ogg';
+  const ai = new GoogleGenAI({
+    apiKey,
+    httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+  });
+
+  const prompt = `
+You are a strict, accurate voice moderation classifier for a community group (supporting Bangla, Sylheti dialect, Banglish, and English).
+Listen carefully to the audio message and return a JSON decision.
+
+Rules:
+1. "ALLOW" (isAbusive: false): Normal conversation, greetings, jokes without slurs, polite speech, singing, friendly banter, or unclear/noisy audio where profanity is not clearly spoken. NEVER mark normal or polite speech as abusive.
+2. "DELETE" (isAbusive: true): Clear profanity, slurs, abusive insults, sexual harassment, or explicit verbal abuse in Bangla, Sylheti, Banglish, or English with high confidence (>= 0.75).
+3. "REVIEW" (isAbusive: false): Borderline or uncertain speech where you are not confident enough to delete safely.
+
+Be fast, objective, and avoid false positives on safe speech.
+`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [
+        {
+          inlineData: {
+            mimeType: normalizedMime,
+            data: audioBuffer.toString('base64'),
+          },
+        },
+        prompt,
+      ],
+      config: {
+        temperature: 0.1,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            transcript: { type: Type.STRING },
+            languageOrDialect: { type: Type.STRING },
+            isAbusive: { type: Type.BOOLEAN },
+            severity: {
+              type: Type.STRING,
+              enum: ['NONE', 'LOW', 'MEDIUM', 'HIGH'],
+            },
+            confidence: { type: Type.NUMBER },
+            action: {
+              type: Type.STRING,
+              enum: ['ALLOW', 'REVIEW', 'DELETE'],
+            },
+            reason: { type: Type.STRING },
+          },
+          required: [
+            'transcript',
+            'languageOrDialect',
+            'isAbusive',
+            'severity',
+            'confidence',
+            'action',
+            'reason',
+          ],
+        },
+      },
+    });
+
+    const rawText = response.text?.trim() || '';
+    if (!rawText) {
+      throw new Error('Empty response from Gemini voice moderation');
+    }
+
+    const parsed = JSON.parse(rawText) as Partial<VoiceAbuseAnalysisResult>;
+    const confidence = Number.isFinite(Number(parsed.confidence))
+      ? Math.min(1, Math.max(0, Number(parsed.confidence)))
+      : 0;
+    const severity: VoiceAbuseAnalysisResult['severity'] =
+      parsed.severity === 'LOW' || parsed.severity === 'MEDIUM' || parsed.severity === 'HIGH'
+        ? parsed.severity
+        : 'NONE';
+    const rawAction: VoiceAbuseAnalysisResult['action'] =
+      parsed.action === 'DELETE' || parsed.action === 'REVIEW' ? parsed.action : 'ALLOW';
+
+    const result: VoiceAbuseAnalysisResult = {
+      transcript: String(parsed.transcript || '').trim(),
+      languageOrDialect: String(parsed.languageOrDialect || 'unknown').trim(),
+      isAbusive: Boolean(parsed.isAbusive),
+      severity,
+      confidence,
+      action: rawAction,
+      reason: String(parsed.reason || '').trim() || 'Voice moderation check completed',
+    };
+
+    // অতিরিক্ত সুরক্ষা: কনফিডেন্স কম হলে বা severity LOW হলে ভুল ডিলিট ঠেকাতে ALLOW/REVIEW রাখা হবে
+    if (result.action === 'DELETE' && (!result.isAbusive || result.confidence < 0.75 || result.severity === 'LOW')) {
+      return {
+        ...result,
+        isAbusive: false,
+        action: result.confidence >= 0.45 ? 'REVIEW' : 'ALLOW',
+      };
+    }
+
+    if (result.action !== 'DELETE') {
+      return {
+        ...result,
+        isAbusive: false,
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('Gemini voice moderation error:', error);
+    // API বা নেটওয়ার্কে কোনো সমস্যা হলে ভালো মেসেজ যেন ভুল করে ডিলিট না হয়
+    return {
+      transcript: '',
+      languageOrDialect: 'error',
+      isAbusive: false,
+      severity: 'NONE',
+      confidence: 0,
+      action: 'ALLOW',
+      reason: 'Moderation check failed safely (no false delete)',
+    };
+  }
+}
+
 
 

@@ -58,6 +58,7 @@ export type PageId =
   | 'sec_links'
   | 'sec_shield'
   | 'sec_welcome'
+  | 'sec_inbox_rules'
   | 'sec_stickers'
   | 'sec_media'
   | 'sec_badwords'
@@ -381,6 +382,20 @@ export function HomeFeatureHub({
       iconText: 'text-teal-700',
       icon: <Sparkles size={18} />,
       onClick: () => onNavigate('sec_welcome'),
+    },
+    {
+      id: 'sec_inbox_rules',
+      title: isBn ? 'নতুন মেম্বার ইনবক্স রুলস নোটিশ' : 'New Member Inbox Rules Notice',
+      desc: isBn
+        ? 'নতুন মেম্বার এলে ইনবক্সে রুলস ও গ্রুপে @মেনশন নোটিশ (এডিটযোগ্য)'
+        : 'Send group rules to new member DM & @mention notice in group',
+      keywords: 'new member rules inbox notice mention নতুন মেম্বার রুলস ইনবক্স নোটিশ মেনশন এডিট',
+      statusText: settings.newMemberInboxRulesEnabled !== false ? (isBn ? 'চালু আছে' : 'ACTIVE') : 'OFF',
+      isOn: settings.newMemberInboxRulesEnabled !== false,
+      iconBg: 'bg-emerald-50',
+      iconText: 'text-emerald-700',
+      icon: <Inbox size={18} />,
+      onClick: () => onNavigate('sec_inbox_rules'),
     },
     {
       id: 'sec_stickers',

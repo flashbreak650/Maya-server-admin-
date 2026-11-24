@@ -29,7 +29,10 @@ import {
   updateSettings,
 } from './moderationEngine.ts';
 import { markInboxMessageDeleted } from './inboxStore.ts';
-import { evaluateVoiceProfanityViaGeminiApi } from './aiEngine.ts';
+import {
+  analyzeVoiceForAbuse,
+  type VoiceAbuseAnalysisResult,
+} from './aiEngine.ts';
 
 const execFileAsync = promisify(execFile);
 const silentBaileysLogger = pino({ level: 'silent' });
@@ -766,40 +769,165 @@ async function convertAudioToConditionedWav(ffmpegBin: string, inputPath: string
   );
 }
 
+function normalizeAudioMimeType(mimeType?: string, extHint?: string): string {
+  const base = (mimeType || '').split(';')[0].trim().toLowerCase();
+  if (base.startsWith('audio/')) return base;
+  const ext = (extHint || 'ogg').toLowerCase();
+  if (ext === 'mp3' || ext === 'mpeg') return 'audio/mpeg';
+  if (ext === 'wav') return 'audio/wav';
+  if (ext === 'm4a' || ext === 'mp4') return 'audio/mp4';
+  if (ext === 'webm') return 'audio/webm';
+  return 'audio/ogg';
+}
+
+function mapLanguageToDialectAndScript(languageOrDialect: string): {
+  detectedLanguage: string;
+  dialectDetected: VoiceProfanityAnalysis['dialectDetected'];
+  scriptSummary: VoiceProfanityAnalysis['detectedScriptSummary'];
+} {
+  const low = (languageOrDialect || '').toLowerCase();
+  if (low.includes('sylhet') || low.includes('সিলেটি')) {
+    return { detectedLanguage: 'bn', dialectDetected: 'sylheti', scriptSummary: 'bn' };
+  }
+  if (low.includes('banglish')) {
+    return { detectedLanguage: 'bn', dialectDetected: 'banglish', scriptSummary: 'banglish' };
+  }
+  if (low.includes('bangla') || low.includes('bengali') || low === 'bn') {
+    return { detectedLanguage: 'bn', dialectDetected: 'standard_bn', scriptSummary: 'bn' };
+  }
+  if (low.includes('english') || low === 'en') {
+    return { detectedLanguage: 'en', dialectDetected: 'english', scriptSummary: 'en' };
+  }
+  return { detectedLanguage: low || 'unknown', dialectDetected: 'unknown', scriptSummary: 'unknown' };
+}
+
+function buildAnalysisFromGeminiAudioResult(
+  gem: VoiceAbuseAnalysisResult,
+  profanityConfig: ReturnType<typeof getEffectiveProfanityConfig>
+): { analysis: VoiceProfanityAnalysis; detectedLanguage: string } {
+  const transcript = gem.transcript || '';
+  const localCheck = analyzeVoiceTranscriptProfanity(transcript, profanityConfig);
+  const mappedLang = mapLanguageToDialectAndScript(gem.languageOrDialect);
+
+  const hasCustomBlockedHit = localCheck.matchedCategories.includes('custom') && localCheck.isProfane;
+  const confidencePct = Math.round(gem.confidence * 100);
+
+  let isProfane = false;
+  let needsReview = false;
+  let reviewReason: string | undefined;
+
+  if (hasCustomBlockedHit) {
+    isProfane = true;
+    needsReview = false;
+  } else if (gem.action === 'DELETE' && gem.isAbusive && gem.confidence >= 0.75 && gem.severity !== 'LOW') {
+    const normalizedTranscript = transcript.trim().toLowerCase();
+    const isExplicitlyAllowedOnly =
+      normalizedTranscript.length > 0 &&
+      profanityConfig.allowedWords.some((w) => w.trim().toLowerCase() === normalizedTranscript);
+    if (!isExplicitlyAllowedOnly) {
+      isProfane = true;
+    }
+  } else if (gem.action === 'REVIEW' && profanityConfig.reviewUnclearEnabled !== false) {
+    isProfane = false;
+    needsReview = true;
+    reviewReason = gem.reason || 'বর্ডারলাইন বা অনিশ্চিত ভয়েস কন্টেন্ট (Gemini অডিও রিভিউ)';
+  }
+
+  return {
+    detectedLanguage: mappedLang.detectedLanguage,
+    analysis: {
+      cleanedTranscript: transcript || localCheck.cleanedTranscript,
+      isHallucinationOrEmpty: !transcript && !isProfane && !needsReview,
+      isProfane,
+      needsReview,
+      reviewReason,
+      confidenceScore: Math.max(confidencePct, localCheck.confidenceScore),
+      matchedWords:
+        localCheck.matchedWords.length > 0
+          ? localCheck.matchedWords
+          : isProfane
+          ? [gem.severity === 'HIGH' ? 'গুরুতর অশ্লীল বক্তব্য' : 'অশালীন বক্তব্য']
+          : [],
+      matchedCategories:
+        localCheck.matchedCategories.length > 0
+          ? localCheck.matchedCategories
+          : isProfane
+          ? ['semantic']
+          : [],
+      semanticSignals: [
+        `Gemini Audio (${gem.languageOrDialect || 'auto'} · ${gem.severity})`,
+        ...localCheck.semanticSignals,
+      ].slice(0, 4),
+      dialectDetected:
+        localCheck.dialectDetected !== 'unknown' ? localCheck.dialectDetected : mappedLang.dialectDetected,
+      contextReason: gem.reason || localCheck.contextReason,
+      detectedScriptSummary:
+        localCheck.detectedScriptSummary !== 'unknown' ? localCheck.detectedScriptSummary : mappedLang.scriptSummary,
+    },
+  };
+}
+
 async function transcribeAndAnalyzeAudioBuffer(
   audioBuffer: Buffer,
   extHint: string,
   jobTag: string,
-  overrideConfig?: Parameters<typeof getEffectiveProfanityConfig>[0]
+  overrideConfig?: Parameters<typeof getEffectiveProfanityConfig>[0],
+  mimeTypeHint?: string
 ): Promise<{
   durationSec: number;
   transcript: string;
   detectedLanguage: string;
   avgTokenProb?: number;
   analysis: VoiceProfanityAnalysis;
-  modelUsed: WhisperModelId;
+  modelUsed: string;
   dialectPassUsed: 'auto' | 'bn_sylheti_pass' | 'dual_pass';
 }> {
+  const voiceSettings = getSettings();
+  const profanityConfig = getEffectiveProfanityConfig(overrideConfig);
+  const normalizedMime = normalizeAudioMimeType(mimeTypeHint, extHint);
+
   const ffmpegBin = resolveFfmpegBinaryPath();
-  if (!ffmpegBin) {
-    throw new Error('FFmpeg বাইনারি পাওয়া যায়নি (অডিও কনভার্সন সম্ভব নয়)');
-  }
   const whisperBin = resolveWhisperBinaryPath();
-  if (!whisperBin) {
-    throw new Error('whisper.cpp বাইনারি পাওয়া যায়নি');
-  }
 
   let modelId = getActiveModelId();
-  if (!isModelReady(modelId)) {
+  let modelReady = Boolean(whisperBin && ffmpegBin);
+  if (modelReady && !isModelReady(modelId)) {
     const ok = await ensureWhisperModel(modelId);
     if (!ok) {
       const fallbackId = (['base-q5_1', 'tiny-q5_1', 'small-q5_1'] as WhisperModelId[]).find((id) => isModelReady(id));
-      if (!fallbackId) {
-        throw new Error(`অফলাইন Whisper মডেল (${WHISPER_MODELS[modelId].fileName}) প্রস্তুত নয় বা ডাউনলোড ব্যর্থ হয়েছে`);
+      if (fallbackId) {
+        modelId = fallbackId;
+      } else {
+        modelReady = false;
       }
-      modelId = fallbackId;
     }
   }
+
+  // Hybrid fast path: if offline FFmpeg/Whisper binary or model isn't ready, use Gemini Audio directly when enabled
+  if (!ffmpegBin || !whisperBin || !modelReady) {
+    if (voiceSettings.voiceUseGeminiApi !== false) {
+      const gem = await analyzeVoiceForAbuse(audioBuffer, normalizedMime);
+      if (gem.languageOrDialect !== 'error') {
+        const mapped = buildAnalysisFromGeminiAudioResult(gem, profanityConfig);
+        return {
+          durationSec: 0,
+          transcript: gem.transcript,
+          detectedLanguage: mapped.detectedLanguage,
+          analysis: mapped.analysis,
+          modelUsed: 'gemini-2.5-flash',
+          dialectPassUsed: 'auto',
+        };
+      }
+    }
+    if (!ffmpegBin) {
+      throw new Error('FFmpeg বাইনারি পাওয়া যায়নি (অডিও কনভার্সন সম্ভব নয়)');
+    }
+    if (!whisperBin) {
+      throw new Error('whisper.cpp বাইনারি পাওয়া যায়নি');
+    }
+    throw new Error(`অফলাইন Whisper মডেল (${WHISPER_MODELS[modelId].fileName}) প্রস্তুত নয় বা ডাউনলোড ব্যর্থ হয়েছে`);
+  }
+
   const modelPath = getModelFilePath(modelId);
 
   ensureDirectories();
@@ -816,7 +944,6 @@ async function transcribeAndAnalyzeAudioBuffer(
     await convertAudioToConditionedWav(ffmpegBin, inputPath, wavPath);
 
     const wavStats = inspectWav16kPcm(wavPath);
-    const profanityConfig = getEffectiveProfanityConfig(overrideConfig);
 
     if (wavStats.isLikelySilence) {
       return {
@@ -841,10 +968,17 @@ async function transcribeAndAnalyzeAudioBuffer(
       };
     }
 
-    const firstPass = await runWhisperOnWav(whisperBin, modelPath, wavPath, outPrefix, 'auto');
-    let bestTranscript = firstPass.transcript;
-    let bestLanguage = firstPass.language;
-    let bestProb = firstPass.avgTokenProb;
+    let firstPass: { transcript: string; language: string; avgTokenProb?: number } | null = null;
+    let firstPassFailed = false;
+    try {
+      firstPass = await runWhisperOnWav(whisperBin, modelPath, wavPath, outPrefix, 'auto');
+    } catch {
+      firstPassFailed = true;
+    }
+
+    let bestTranscript = firstPass?.transcript || '';
+    let bestLanguage = firstPass?.language || 'unknown';
+    let bestProb = firstPass?.avgTokenProb;
     let bestAnalysis = analyzeVoiceTranscriptProfanity(bestTranscript, profanityConfig, {
       avgTokenProb: bestProb,
       durationSec: wavStats.durationSec,
@@ -852,7 +986,37 @@ async function transcribeAndAnalyzeAudioBuffer(
     });
     let dialectPassUsed: 'auto' | 'bn_sylheti_pass' | 'dual_pass' = 'auto';
 
-    // Dedicated Bangla & Sylheti dialect pass when auto-detect chose another language, low prob, or empty on real voice
+    // Hybrid Gemini multimodal audio verification/fallback:
+    // Triggers when offline whisper failed/timed out, flagged profanity/review, hallucinated, or produced non-high-confidence Bangla
+    const needsGeminiAudioCheck =
+      firstPassFailed ||
+      bestAnalysis.isProfane ||
+      bestAnalysis.needsReview ||
+      bestAnalysis.isHallucinationOrEmpty ||
+      bestLanguage !== 'bn' ||
+      (typeof bestProb === 'number' && bestProb < 0.78);
+
+    if (voiceSettings.voiceUseGeminiApi !== false && needsGeminiAudioCheck) {
+      const gem = await analyzeVoiceForAbuse(audioBuffer, normalizedMime);
+      if (gem.languageOrDialect !== 'error') {
+        const mapped = buildAnalysisFromGeminiAudioResult(gem, profanityConfig);
+        return {
+          durationSec: wavStats.durationSec,
+          transcript: gem.transcript || bestAnalysis.cleanedTranscript || bestTranscript,
+          detectedLanguage: mapped.detectedLanguage,
+          avgTokenProb: bestProb,
+          analysis: mapped.analysis,
+          modelUsed: 'gemini-2.5-flash',
+          dialectPassUsed: 'auto',
+        };
+      }
+    }
+
+    if (firstPassFailed && !bestTranscript) {
+      throw new Error('whisper.cpp ট্রান্সক্রিপশন ব্যর্থ হয়েছে');
+    }
+
+    // Offline fallback: Dedicated Bangla & Sylheti dialect pass when auto-detect chose another language, low prob, or empty on real voice
     const bnOrSylhetiEnabled = profanityConfig.detectBangla || profanityConfig.detectSylheti !== false;
     const autoNotConfidentBn =
       bestLanguage !== 'bn' ||
@@ -892,28 +1056,6 @@ async function transcribeAndAnalyzeAudioBuffer(
           bestProb = bnPass.avgTokenProb;
           bestAnalysis = bnAnalysis;
           dialectPassUsed = bestAnalysis.dialectDetected === 'sylheti' ? 'bn_sylheti_pass' : 'dual_pass';
-        }
-      } catch {}
-    }
-
-    const voiceSettings = getSettings();
-    if (voiceSettings.voiceUseGeminiApi !== false && (bestAnalysis.cleanedTranscript || bestTranscript)) {
-      try {
-        const apiEval = await evaluateVoiceProfanityViaGeminiApi(bestAnalysis.cleanedTranscript || bestTranscript);
-        if (apiEval) {
-          bestAnalysis = {
-            cleanedTranscript: bestAnalysis.cleanedTranscript || bestTranscript,
-            isHallucinationOrEmpty: false,
-            isProfane: apiEval.isProfane,
-            needsReview: apiEval.needsReview,
-            confidenceScore: apiEval.confidenceScore,
-            matchedWords: apiEval.matchedWords,
-            matchedCategories: apiEval.matchedWords.length > 0 ? ['semantic'] : [],
-            semanticSignals: apiEval.semanticSignals,
-            dialectDetected: bestAnalysis.dialectDetected || 'standard_bn',
-            contextReason: apiEval.contextReason,
-            detectedScriptSummary: bestAnalysis.detectedScriptSummary || 'bn',
-          };
         }
       } catch {}
     }
@@ -998,7 +1140,7 @@ async function processVoiceJob(job: QueuedVoiceJob) {
     }
 
     const ext = getExtFromMimeOrName(mimeHint, null);
-    const sttResult = await transcribeAndAnalyzeAudioBuffer(mediaBuf, ext, job.id);
+    const sttResult = await transcribeAndAnalyzeAudioBuffer(mediaBuf, ext, job.id, undefined, mimeHint);
     const audioDurationSec = sttResult.durationSec > 0 ? sttResult.durationSec : durationHint;
     const processingMs = Date.now() - startedAt;
 
@@ -1600,7 +1742,8 @@ export async function testAudioBufferOffline(params: {
     params.audioBuffer,
     ext,
     'manual_test',
-    params.overrideConfig
+    params.overrideConfig,
+    params.mimeType
   );
   return {
     success: true,
