@@ -1484,9 +1484,11 @@ let avatarFetchInFlight = false;
 
 export async function syncConnectedGroupsToInbox(
   sock: WASocket | null,
-  groupsInput: Record<string, any> | Array<{ id: string; name: string; participants: number; isBotAdmin?: boolean }>
+  groupsInput: Record<string, any> | Array<{ id: string; name: string; participants: number; isBotAdmin?: boolean }>,
+  options?: { isFullSnapshot?: boolean }
 ) {
   loadInboxIndex();
+  const isFullSnapshot = options?.isFullSnapshot !== false;
   const list = Array.isArray(groupsInput)
     ? groupsInput
     : Object.values(groupsInput || {}).map((g: any) => ({
@@ -1500,19 +1502,32 @@ export async function syncConnectedGroupsToInbox(
 
   for (const g of list) {
     if (!g.id || !g.id.endsWith('@g.us')) continue;
+    const existing = inboxIndex.groups[g.id];
+    const resolvedParticipants =
+      typeof g.participants === 'number' && g.participants > 0
+        ? g.participants
+        : existing?.participants || 0;
     const summary = updateGroupSummaryFromRecords(g.id, {
       name: g.name,
-      participants: g.participants,
-      isBotAdmin: g.isBotAdmin,
+      participants: resolvedParticipants,
+      isBotAdmin: typeof g.isBotAdmin === 'boolean' ? g.isBotAdmin : existing?.isBotAdmin,
       connected: true,
     });
     emitInboxEvent({ type: 'inbox:group_updated', groupId: g.id, groupSummary: summary, timestamp: Date.now() });
   }
 
-  for (const [gid, existing] of Object.entries(inboxIndex.groups)) {
-    if (!connectedSet.has(gid) && existing.connected) {
-      existing.connected = false;
-      scheduleSaveIndex();
+  if (isFullSnapshot) {
+    for (const [gid, existing] of Object.entries(inboxIndex.groups)) {
+      if (!connectedSet.has(gid) && existing.connected) {
+        existing.connected = false;
+        scheduleSaveIndex();
+        emitInboxEvent({
+          type: 'inbox:group_updated',
+          groupId: gid,
+          groupSummary: existing,
+          timestamp: Date.now(),
+        });
+      }
     }
   }
 

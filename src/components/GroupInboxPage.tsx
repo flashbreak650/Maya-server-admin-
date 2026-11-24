@@ -812,6 +812,39 @@ export function GroupInboxPage({
             setWsConnected(true);
             return;
           }
+          if (payload?.type === 'inbox:group_updated' && payload.groupSummary?.id) {
+            const incomingGroup = payload.groupSummary as InboxGroupSummary;
+            setGroups((prev) => {
+              const exists = prev.some((g) => g.id === incomingGroup.id);
+              const next = exists
+                ? prev.map((g) => (g.id === incomingGroup.id ? { ...g, ...incomingGroup } : g))
+                : [incomingGroup, ...prev];
+              return [...next].sort((a, b) => {
+                if (Boolean(a.connected) !== Boolean(b.connected)) return a.connected ? -1 : 1;
+                const ta = a.lastMessageAt || 0;
+                const tb = b.lastMessageAt || 0;
+                if (ta !== tb) return tb - ta;
+                return (a.name || '').localeCompare(b.name || '');
+              });
+            });
+            return;
+          }
+          if (payload?.type === 'inbox:message_new' && payload.groupSummary?.id) {
+            const summary = payload.groupSummary as InboxGroupSummary;
+            setGroups((prev) => {
+              const exists = prev.some((g) => g.id === summary.id);
+              const next = exists
+                ? prev.map((g) => (g.id === summary.id ? { ...g, ...summary } : g))
+                : [summary, ...prev];
+              return [...next].sort((a, b) => {
+                if (Boolean(a.connected) !== Boolean(b.connected)) return a.connected ? -1 : 1;
+                const ta = a.lastMessageAt || 0;
+                const tb = b.lastMessageAt || 0;
+                if (ta !== tb) return tb - ta;
+                return (a.name || '').localeCompare(b.name || '');
+              });
+            });
+          }
           if (
             (payload?.type === 'inbox:message_new' || payload?.type === 'inbox:message_updated') &&
             payload.message &&

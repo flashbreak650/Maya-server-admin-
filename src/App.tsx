@@ -996,6 +996,9 @@ export default function App() {
 
       if (changed) {
         setLiveStatus(merged);
+        if (!prev.online && merged.online) {
+          void loadGroups({ silent: true });
+        }
       }
     } catch {
       // non-blocking: keep current state intact on transient network failure
@@ -2030,17 +2033,19 @@ export default function App() {
     }
   };
 
-  const loadGroups = async () => {
-    setIsGroupsLoading(true);
+  const loadGroups = async (opts?: { silent?: boolean } | any) => {
+    const isSilent = Boolean(opts && typeof opts === 'object' && 'silent' in opts && opts.silent === true);
+    if (!isSilent) setIsGroupsLoading(true);
     try {
       const data = await callApi('/api/groups');
       if (data.groups && Array.isArray(data.groups)) {
         setGroups(data.groups);
+        setOverview((prev) => ({ ...prev, groups: data.groups.length }));
       }
     } catch {
       // non-blocking
     } finally {
-      setIsGroupsLoading(false);
+      if (!isSilent) setIsGroupsLoading(false);
     }
   };
 
@@ -2476,12 +2481,15 @@ export default function App() {
         companionStatusRef.current.status === 'connecting' ||
         activePageRef.current === 'pairing' ||
         activePageRef.current === 'companion';
-      const delay = isActivelyPairing ? 3000 : 15000;
+      const delay = isActivelyPairing ? 3000 : activePageRef.current === 'groups' ? 10000 : 15000;
 
       pollIntervalRef.current = setTimeout(async () => {
         if (!mounted) return;
         if (document.visibilityState !== 'hidden' && !isPinLockedRef.current) {
           await checkStatus();
+          if (activePageRef.current === 'groups') {
+            await loadGroups({ silent: true });
+          }
           if (
             activePageRef.current === 'companion' ||
             companionStatusRef.current.status === 'pairing' ||
@@ -2499,6 +2507,9 @@ export default function App() {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && mounted && !isPinLockedRef.current) {
         checkStatus();
+        if (activePageRef.current === 'groups') {
+          loadGroups({ silent: true });
+        }
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);

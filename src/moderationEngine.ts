@@ -1661,7 +1661,12 @@ export function restrictUser(
   return restriction;
 }
 
-export function unrestrictUser(groupId: string, senderJid: string, extraJids: string[] = []): boolean {
+export function unrestrictUser(
+  groupId: string,
+  senderJid: string,
+  extraJids: string[] = [],
+  quotedMsg?: any
+): boolean {
   if (!db.restrictedUsers) return false;
 
   let removedAny = false;
@@ -1689,10 +1694,15 @@ export function unrestrictUser(groupId: string, senderJid: string, extraJids: st
     if (globalSocketGetter) {
       const sock = globalSocketGetter();
       if (sock && sock.authState?.creds?.registered) {
-        safeSendMessage(sock, groupId, {
-          text: `✅ *মেসেজ ব্লক প্রত্যাহার*\n\n👤 @${lastRestriction.senderPhone}\nএখন থেকে আপনি আবার স্বাভাবিকভাবে গ্রুপে মেসেজ পাঠাতে পারবেন।`,
-          mentions: [lastRestriction.senderJid],
-        }).catch(() => {});
+        safeSendMessage(
+          sock,
+          groupId,
+          {
+            text: `✅ *মেসেজ ব্লক প্রত্যাহার*\n\n👤 @${lastRestriction.senderPhone}\nএখন থেকে আপনি আবার স্বাভাবিকভাবে গ্রুপে মেসেজ পাঠাতে পারবেন।`,
+            mentions: [lastRestriction.senderJid],
+          },
+          quotedMsg ? { quoted: quotedMsg } : undefined
+        ).catch(() => {});
       }
     }
 
@@ -2331,26 +2341,47 @@ export function getAuthorizedServerAdminDigitsList(): string[] {
 }
 
 function extractQuotedContextInfo(realMsg: any, rawMsg?: any): any {
-  const containers = [
-    realMsg?.extendedTextMessage?.contextInfo,
-    realMsg?.imageMessage?.contextInfo,
-    realMsg?.videoMessage?.contextInfo,
-    realMsg?.audioMessage?.contextInfo,
-    realMsg?.documentMessage?.contextInfo,
-    realMsg?.stickerMessage?.contextInfo,
-  ];
-  for (const c of containers) {
-    if (c?.stanzaId) return c;
-  }
-  if (realMsg && typeof realMsg === 'object') {
-    for (const val of Object.values(realMsg)) {
-      if (val && typeof val === 'object' && (val as any)?.contextInfo?.stanzaId) {
+  const inspectObj = (obj: any): any => {
+    if (!obj || typeof obj !== 'object') return null;
+    const directContainers = [
+      obj?.extendedTextMessage?.contextInfo,
+      obj?.imageMessage?.contextInfo,
+      obj?.videoMessage?.contextInfo,
+      obj?.audioMessage?.contextInfo,
+      obj?.documentMessage?.contextInfo,
+      obj?.stickerMessage?.contextInfo,
+      obj?.contextInfo,
+    ];
+    for (const c of directContainers) {
+      if (c?.stanzaId) return c;
+    }
+    for (const val of Object.values(obj)) {
+      if (val && typeof val === 'object' && !Array.isArray(val) && (val as any)?.contextInfo?.stanzaId) {
         return (val as any).contextInfo;
       }
     }
+    return null;
+  };
+
+  const hit = inspectObj(realMsg);
+  if (hit) return hit;
+
+  if (rawMsg?.message && rawMsg.message !== realMsg) {
+    let cursor: any = rawMsg.message;
+    for (let depth = 0; depth < 6 && cursor && typeof cursor === 'object'; depth++) {
+      const nestedHit = inspectObj(cursor);
+      if (nestedHit) return nestedHit;
+      cursor =
+        cursor?.ephemeralMessage?.message ||
+        cursor?.groupMentionedMessage?.message ||
+        cursor?.associatedChildMessage?.message ||
+        cursor?.documentWithCaptionMessage?.message ||
+        cursor?.editedMessage?.message ||
+        cursor?.viewOnceMessage?.message ||
+        cursor?.viewOnceMessageV2?.message ||
+        null;
+    }
   }
-  const rawCtx = rawMsg?.message?.extendedTextMessage?.contextInfo;
-  if (rawCtx?.stanzaId) return rawCtx;
   return null;
 }
 
@@ -2455,6 +2486,1080 @@ async function isAuthorizedServerAdminSender(
 
   if (metaHit) return { authorized: true, adminPhone: metaHit };
   return { authorized: false };
+}
+
+type ServerAdminCommandAction =
+  | { type: 'remove_msg' }
+  | { type: 'kick' }
+  | { type: 'black'; durationMinutes: number }
+  | { type: 'unblock' }
+  | { type: 'rules' }
+  | { type: 'warn' }
+  | { type: 'resetwarn'; allInGroup: boolean }
+  | { type: 'lock'; durationMinutes?: number }
+  | { type: 'unlock' }
+  | { type: 'promote' }
+  | { type: 'demote' }
+  | { type: 'tagall'; customText: string }
+  | { type: 'toggle'; key: keyof ModerationSettings; label: string; value: boolean }
+  | { type: 'status' }
+  | { type: 'help' };
+
+function normalizeCommandDigits(input: string): string {
+  const bnMap: Record<string, string> = {
+    '০': '0',
+    '১': '1',
+    '২': '2',
+    '৩': '3',
+    '৪': '4',
+    '৫': '5',
+    '৬': '6',
+    '৭': '7',
+    '৮': '8',
+    '৯': '9',
+  };
+  return (input || '').replace(/[০-৯]/g, (d) => bnMap[d] || d);
+}
+
+function extractInlinePhoneNumbers(text: string): string[] {
+  const normalized = normalizeCommandDigits(text || '');
+  const results: string[] = [];
+  const matches = normalized.matchAll(/(?:\+?88)?01[3-9][\d\s-]{7,10}\d|\+?[1-9][\d\s-]{9,15}\d/g);
+  for (const m of matches) {
+    const digits = normalizePhoneDigits(m[0]);
+    if (digits.length >= 10 && digits.length <= 15 && !results.includes(digits)) {
+      results.push(digits);
+    }
+  }
+  return results;
+}
+
+function parseServerAdminGroupCommand(
+  text: string,
+  hasQuotedMessage: boolean,
+  hasMentions = false
+): ServerAdminCommandAction | null {
+  const rawNormalized = normalizeCommandDigits(text || '')
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
+    .trim();
+  if (!rawNormalized || rawNormalized.length > 220) return null;
+
+  const hasExplicitPrefix = /^[.!\/]/.test(rawNormalized);
+  const withoutPrefix = rawNormalized.replace(/^[.!\/]+/, '').trim();
+  if (!withoutPrefix) return null;
+
+  // Handle tagall early so custom announcement text after keyword is preserved
+  const tagallMatch = withoutPrefix.match(/^(?:tagall|hidetag|mention\s*all|সবাইকে\s*মেনশন|ট্যাগঅল|ট্যাগ\s*অল)(?:\s+([\s\S]+))?$/iu);
+  if (tagallMatch) {
+    return { type: 'tagall', customText: (tagallMatch[1] || '').trim() };
+  }
+
+  // Strip @mentions (e.g., @8801712345678, @User) and trailing punctuation for strict command keyword matching
+  const withoutMentions = withoutPrefix
+    .replace(/@\+?[\d][\d\s-]{6,17}\d/g, ' ')
+    .replace(/@[^\s]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Extract standalone phone numbers (10+ digits) cleanly before checking short numbers (duration)
+  const withoutPhones = withoutMentions
+    .replace(/(?:\+?88)?01[3-9][\d\s-]{7,10}\d|\+?[1-9][\d\s-]{9,15}\d/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Extract optional minute duration like "15", "30m", "20 min", "১০ মিনিট"
+  let parsedMinutes: number | undefined;
+  const durMatch = withoutPhones.match(/\b(\d{1,3})\s*(?:m|min|mins|minute|minutes|মি|মিনিট)?\b/iu);
+  if (durMatch) {
+    const val = Number(durMatch[1]);
+    if (Number.isFinite(val) && val >= 1 && val <= 180) {
+      parsedMinutes = val;
+    }
+  }
+
+  const cmdCore = withoutPhones
+    .replace(/\b\d{1,3}\s*(?:m|min|mins|minute|minutes|মি|মিনিট)?\b/giu, ' ')
+    .replace(/[!.,।?~`'"()]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+  // Fallback check for @Display Name with spaces (e.g., "@Md Karim কিক" or "কিক @Md Karim")
+  const matchCmdString = (candidate: string): ServerAdminCommandAction | null => {
+    if (!candidate) return null;
+
+    // 1. Reply-to-delete message/voice ("রিমুভ" / "remove" / "ডিলিট")
+    if (hasQuotedMessage && isAdminReplyDeleteCommand(candidate)) {
+      return { type: 'remove_msg' };
+    }
+
+    const optTargetPrefix = '(?:(?:কে|রে|এর|টাকে|টারে|ওকে|একে|তাকে|মেম্বারকে|এইটাকে|এরে|please|pls|bhai|vai)\\s+)*';
+
+    // 2. Kick member ("কিক", "kick", "kickout", "ban", "ব্যান", "বের করো")
+    if (
+      new RegExp(
+        `^${optTargetPrefix}(?:kick|kickout|kick\\s*out|ban|কিক|ব্যান|বের\\s*করো?|গ্রুপ\\s*থেকে\\s*বের\\s*করো?)(?:\\s+(?:কর|করো|করেন|দাও|করে\\s*দাও|please|pls|him|her|this|now))?$`,
+        'iu'
+      ).test(candidate)
+    ) {
+      return { type: 'kick' };
+    }
+
+    // 3. Block / Black / Mute member ("black", "ব্ল্যাক", "block", "ব্লক", "mute", "মিউট")
+    if (
+      new RegExp(
+        `^${optTargetPrefix}(?:black|blak|block|blok|mute|ব্ল্যাক|ব্লাক|ব্লক|মিউট)(?:\\s+(?:কর|করো|করেন|দাও|করে\\s*দাও|please|pls|him|her|now|for))?$`,
+        'iu'
+      ).test(candidate)
+    ) {
+      return { type: 'black', durationMinutes: parsedMinutes ?? 10 };
+    }
+
+    // 4. Unblock / Unmute member ("unblock", "আনব্লক", "unblack", "unmute", "আনমিউট")
+    if (
+      new RegExp(
+        `^${optTargetPrefix}(?:unblock|unblok|unblack|unblak|unmute|আনব্লক|আনব্ল্যাক|আনব্লাক|আনমিউট|ব্লক\\s*খোলো?|ব্লক\\s*সরাও|মিউট\\s*খোলো?)(?:\\s+(?:কর|করো|করেন|দাও|করে\\s*দাও|please|pls|him|her|now))?$`,
+        'iu'
+      ).test(candidate)
+    ) {
+      return { type: 'unblock' };
+    }
+
+    // 5. Group Rules ("rules", "রোলস", "রুলস", "নিয়ম", "গ্রুপ রুলস")
+    if (
+      new RegExp(
+        `^${optTargetPrefix}(?:group\\s*)?(?:rules|rule|grouprules|রুলস|রোলস|রোল|নিয়ম|নিয়ম|নিয়মাবলী|নিয়মাবলী|গ্রুপ\\s*রুলস|গ্রুপ\\s*রোলস|গ্রুপের\\s*নিয়ম|গ্রুপের\\s*নিয়ম)(?:\\s+(?:দাও|দেও|দেখাও|পাঠাও|send|show))?$`,
+        'iu'
+      ).test(candidate)
+    ) {
+      return { type: 'rules' };
+    }
+
+    // 6. Reset Warning ("resetwarn", "unwarn", "clearwarn", "ওয়ার্ন রিসেট", "সতর্কতা রিসেট")
+    if (
+      new RegExp(
+        `^${optTargetPrefix}(?:reset\\s*warn|resetwarn|unwarn|clear\\s*warn|clearwarn|ওয়ার্ন\\s*রিসেট|ওয়ার্ন\\s*রিসেট|রিসেট\\s*ওয়ার্ন|রিসেট\\s*ওয়ার্ন|সতর্কতা\\s*রিসেট|রিসেট\\s*সতর্কতা)(?:\\s+(?:all|সব|সবার|করো?))?$`,
+        'iu'
+      ).test(candidate)
+    ) {
+      const allInGroup = /\b(?:all|সব|সবার)\b/iu.test(candidate);
+      return { type: 'resetwarn', allInGroup };
+    }
+
+    // 7. Warn member ("warn", "ওয়ার্ন", "ওয়ার্ন", "সতর্ক")
+    if (
+      new RegExp(
+        `^${optTargetPrefix}(?:warn|warning|ওয়ার্ন|ওয়ার্ন|ওয়ার্নিং|ওয়ার্নিং|সতর্ক|সতর্কতা)(?:\\s+(?:কর|করো|দাও))?$`,
+        'iu'
+      ).test(candidate)
+    ) {
+      return { type: 'warn' };
+    }
+
+    // 8. Lock / Unlock Group
+    if (/^(?:group\s*)?(?:lock|লক|গ্রুপ\s*লক|গ্রুপ\s*বন্ধ(?:\s*করো?)?|close\s*group)$/iu.test(candidate)) {
+      return { type: 'lock', durationMinutes: parsedMinutes };
+    }
+    if (/^(?:group\s*)?(?:unlock|আনলক|গ্রুপ\s*আনলক|গ্রুপ\s*খোলো|গ্রুপ\s*খুলো|open\s*group)$/iu.test(candidate)) {
+      return { type: 'unlock' };
+    }
+
+    // 9. Promote / Demote Group Admin
+    if (
+      new RegExp(
+        `^${optTargetPrefix}(?:promote|make\\s*admin|অ্যাডমিন\\s*বানাও|এডমিন\\s*বানাও|এডমিন\\s*দাও|অ্যাডমিন\\s*দাও)$`,
+        'iu'
+      ).test(candidate)
+    ) {
+      return { type: 'promote' };
+    }
+    if (
+      new RegExp(
+        `^${optTargetPrefix}(?:demote|unadmin|remove\\s*admin|অ্যাডমিন\\s*সরাও|এডমিন\\s*সরাও|অ্যাডমিন\\s*রিমুভ|এডমিন\\s*রিমুভ)$`,
+        'iu'
+      ).test(candidate)
+    ) {
+      return { type: 'demote' };
+    }
+
+    return null;
+  };
+
+  if (cmdCore) {
+    const directMatch = matchCmdString(cmdCore);
+    if (directMatch) return directMatch;
+
+    // 10. Quick Feature Toggles ("antisticker on/off", "স্টিকার অফ", "antilink on/off", "লিংক অন", etc.)
+    const toggleMatch = cmdCore.match(
+      /^(antisticker|sticker|স্টিকার|antilink|link|লিংক|antibadword|badword|গালি|antivoice|voice|ভয়েস|ভয়েস|antiviewonce|viewonce|ভিউওয়ান্স|welcome|ওয়েলকাম|ওয়েলকাম|silent|সাইলেন্ট|maya|মায়া|মায়া)\s+(on|off|অন|অফ|চালু|বন্ধ|enable|disable)$/iu
+    );
+    if (toggleMatch) {
+      const targetFeature = toggleMatch[1].toLowerCase();
+      const stateToken = toggleMatch[2].toLowerCase();
+      const enable = ['on', 'অন', 'চালু', 'enable'].includes(stateToken);
+      const featureMap: Record<string, { key: keyof ModerationSettings; label: string }> = {
+        antisticker: { key: 'antiSticker', label: 'Anti-Sticker' },
+        sticker: { key: 'antiSticker', label: 'Anti-Sticker' },
+        স্টিকার: { key: 'antiSticker', label: 'Anti-Sticker' },
+        antilink: { key: 'antiLink', label: 'Anti-Link' },
+        link: { key: 'antiLink', label: 'Anti-Link' },
+        লিংক: { key: 'antiLink', label: 'Anti-Link' },
+        antibadword: { key: 'antiBadword', label: 'Anti-Badword' },
+        badword: { key: 'antiBadword', label: 'Anti-Badword' },
+        গালি: { key: 'antiBadword', label: 'Anti-Badword' },
+        antivoice: { key: 'voiceModerationEnabled', label: 'Voice AI Moderation' },
+        voice: { key: 'voiceModerationEnabled', label: 'Voice AI Moderation' },
+        ভয়েস: { key: 'voiceModerationEnabled', label: 'Voice AI Moderation' },
+        ভয়েস: { key: 'voiceModerationEnabled', label: 'Voice AI Moderation' },
+        antiviewonce: { key: 'antiViewOnce', label: 'Anti-View Once' },
+        viewonce: { key: 'antiViewOnce', label: 'Anti-View Once' },
+        ভিউওয়ান্স: { key: 'antiViewOnce', label: 'Anti-View Once' },
+        welcome: { key: 'autoWelcome', label: 'Auto Welcome' },
+        ওয়েলকাম: { key: 'autoWelcome', label: 'Auto Welcome' },
+        ওয়েলকাম: { key: 'autoWelcome', label: 'Auto Welcome' },
+        silent: { key: 'silentModeration', label: 'Silent Moderation' },
+        সাইলেন্ট: { key: 'silentModeration', label: 'Silent Moderation' },
+        maya: { key: 'mayaGroupReply', label: 'Maya Group AI Reply' },
+        মায়া: { key: 'mayaGroupReply', label: 'Maya Group AI Reply' },
+        মায়া: { key: 'mayaGroupReply', label: 'Maya Group AI Reply' },
+      };
+      const mapped = featureMap[targetFeature];
+      if (mapped) {
+        return { type: 'toggle', key: mapped.key, label: mapped.label, value: enable };
+      }
+    }
+
+    // 11. Status & Help
+    if (/^(?:status|bot\s*status|স্ট্যাটাস|বট\s*স্ট্যাটাস|group\s*status)$/iu.test(cmdCore)) {
+      return { type: 'status' };
+    }
+    if (
+      /^(?:help|commands|command|cmd|cmds|menu|কমান্ড|হেল্প|মেনু|সব\s*কমান্ড|অ্যাডমিন\s*কমান্ড|এডমিন\s*কমান্ড|কমান্ড\s*লিস্ট|তালিকা)$/iu.test(
+        cmdCore
+      ) ||
+      (hasExplicitPrefix && cmdCore === '?')
+    ) {
+      return { type: 'help' };
+    }
+  }
+
+  // If message has an explicit @mention and short length (<= 80 chars), check edge tokens even if @Display Name had spaces
+  if (hasMentions && withoutPrefix.length <= 80 && cmdCore) {
+    const tokens = cmdCore.split(' ').filter(Boolean);
+    if (tokens.length > 1) {
+      const edgeCandidates = [
+        tokens[0],
+        tokens[tokens.length - 1],
+        tokens.slice(0, 2).join(' '),
+        tokens.slice(-2).join(' '),
+      ];
+      for (const edge of edgeCandidates) {
+        const edgeMatch = matchCmdString(edge);
+        if (edgeMatch) return edgeMatch;
+      }
+    }
+  }
+
+  return null;
+}
+
+interface ResolvedCommandTarget {
+  jid: string;
+  altJid?: string;
+  phone: string;
+  isGroupAdmin: boolean;
+  isServerAdmin: boolean;
+  isBot: boolean;
+  candidateJids: string[];
+}
+
+async function resolveCommandTargetMembers(
+  sock: WASocket,
+  groupId: string,
+  realMsg: any,
+  rawMsg: proto.IWebMessageInfo,
+  messageText: string,
+  quotedCtx: any
+): Promise<ResolvedCommandTarget[]> {
+  const rawTargets: string[] = [];
+  const mentions = collectMentionedJidsFromMessage(realMsg, rawMsg);
+  for (const m of mentions) {
+    if (m && !rawTargets.includes(m)) rawTargets.push(m);
+  }
+  if (rawTargets.length === 0 && quotedCtx?.participant) {
+    rawTargets.push(String(quotedCtx.participant));
+  }
+  if (rawTargets.length === 0) {
+    const phones = extractInlinePhoneNumbers(messageText);
+    for (const p of phones) {
+      rawTargets.push(`${p}@s.whatsapp.net`);
+    }
+  }
+  if (rawTargets.length === 0) return [];
+
+  const meta = await getGroupMeta(sock, groupId, false).catch(() => null);
+  learnGroupParticipantsLidPn(meta);
+  const participants: any[] = Array.isArray(meta?.participants) ? meta.participants : [];
+  const serverAdminDigits = new Set(getAuthorizedServerAdminDigitsList());
+  const { botUsers } = collectKnownBotUsersSync(sock);
+
+  const resolved: ResolvedCommandTarget[] = [];
+  const seenKeys = new Set<string>();
+
+  for (const rawTarget of rawTargets) {
+    const cu = cleanJidUser(rawTarget);
+    const norm = normalizeJid(rawTarget);
+    const digits = !isLidJid(rawTarget) ? normalizePhoneDigits(cu) : '';
+    const cands = new Set<string>([cu, digits].filter(Boolean));
+    expandIdSetWithLidMaps(cands);
+
+    let matchedPart: any = null;
+    for (const p of participants) {
+      const pJids = [p.id, p.lid, p.phoneNumber, p.pn, p.jid].filter(Boolean) as string[];
+      const hit = pJids.some((pj) => {
+        const pcu = cleanJidUser(pj);
+        const pnu = !isLidJid(pj) ? normalizePhoneDigits(pcu) : '';
+        return cands.has(pcu) || (pnu && cands.has(pnu));
+      });
+      if (hit) {
+        matchedPart = p;
+        for (const pj of pJids) {
+          const pcu = cleanJidUser(pj);
+          const pnu = !isLidJid(pj) ? normalizePhoneDigits(pcu) : '';
+          if (pcu) cands.add(pcu);
+          if (pnu) cands.add(pnu);
+        }
+        break;
+      }
+    }
+
+    const primaryJid = normalizeJid(matchedPart?.id || norm);
+    if (!primaryJid || seenKeys.has(primaryJid)) continue;
+    seenKeys.add(primaryJid);
+
+    const altRaw =
+      matchedPart?.phoneNumber ||
+      matchedPart?.pn ||
+      (isLidJid(primaryJid) && lidToPnUserMap.get(cleanJidUser(primaryJid))
+        ? `${lidToPnUserMap.get(cleanJidUser(primaryJid))}@s.whatsapp.net`
+        : matchedPart?.lid || '');
+    const altJid = altRaw && normalizeJid(altRaw) !== primaryJid ? normalizeJid(altRaw) : undefined;
+    if (altJid) rememberLidPnPair(primaryJid, altJid);
+
+    const mappedPn = isLidJid(primaryJid) ? lidToPnUserMap.get(cleanJidUser(primaryJid)) : '';
+    const phone =
+      (altJid && isPnJid(altJid) ? cleanJidUser(altJid) : '') ||
+      mappedPn ||
+      cleanJidUser(primaryJid) ||
+      'member';
+
+    const isGroupAdmin = Boolean(
+      matchedPart &&
+        (matchedPart.admin === 'admin' ||
+          matchedPart.admin === 'superadmin' ||
+          matchedPart.isAdmin ||
+          matchedPart.isSuperAdmin)
+    );
+    const isServerAdmin = Array.from(cands).some((c) => serverAdminDigits.has(normalizePhoneDigits(c)));
+    const isBot = Array.from(cands).some((c) => botUsers.has(c));
+
+    const candidateJids = Array.from(
+      new Set(
+        [
+          primaryJid,
+          altJid,
+          matchedPart?.id ? normalizeJid(matchedPart.id) : '',
+          matchedPart?.lid ? normalizeJid(matchedPart.lid) : '',
+          matchedPart?.phoneNumber ? normalizeJid(matchedPart.phoneNumber) : '',
+        ].filter((x): x is string => Boolean(x))
+      )
+    );
+
+    resolved.push({
+      jid: primaryJid,
+      altJid,
+      phone,
+      isGroupAdmin,
+      isServerAdmin,
+      isBot,
+      candidateJids,
+    });
+  }
+
+  return resolved;
+}
+
+async function executeServerAdminGroupCommand(
+  sock: WASocket,
+  ctx: {
+    cmd: ServerAdminCommandAction;
+    groupId: string;
+    groupSubject: string;
+    senderJid: string;
+    senderAltJid?: string;
+    adminPhone: string;
+    msg: proto.IWebMessageInfo;
+    realMsg: any;
+    messageText: string;
+    quotedCtx: any;
+    isBotAdmin: boolean;
+    metaKnown: boolean;
+  }
+): Promise<void> {
+  const { cmd, groupId, groupSubject, senderJid, senderAltJid, adminPhone, msg, realMsg, messageText, quotedCtx } = ctx;
+  const settings = getSettings();
+
+  const { botUsers } = collectKnownBotUsersSync(sock);
+  const quotedParticipantRaw = quotedCtx?.participant || '';
+  const isQuotedFromBot = Boolean(quotedParticipantRaw && botUsers.has(cleanJidUser(quotedParticipantRaw)));
+  const quotedTargetStub = quotedCtx?.stanzaId
+    ? ({
+        key: {
+          remoteJid: groupId,
+          fromMe: isQuotedFromBot,
+          id: quotedCtx.stanzaId,
+          ...(quotedParticipantRaw ? { participant: quotedParticipantRaw } : {}),
+        },
+        message: quotedCtx.quotedMessage || { conversation: '' },
+      } as proto.IWebMessageInfo)
+    : null;
+  const replyTargetQuote = quotedTargetStub || (msg as any);
+
+  const ensureFreshBotAdmin = async (): Promise<boolean> => {
+    if (ctx.metaKnown && ctx.isBotAdmin) return true;
+    const refreshed = await checkPermissions(sock, groupId, senderJid, true, senderAltJid);
+    return refreshed.isBotAdmin;
+  };
+
+  if (cmd.type === 'remove_msg' && quotedCtx?.stanzaId) {
+    const botCanDelete = await ensureFreshBotAdmin();
+    const quotedKey: proto.IMessageKey = {
+      remoteJid: groupId,
+      fromMe: isQuotedFromBot,
+      id: quotedCtx.stanzaId,
+      ...(quotedParticipantRaw ? { participant: quotedParticipantRaw } : {}),
+    };
+
+    const deleted = await deleteMessageSafely(
+      sock,
+      groupId,
+      { key: quotedKey } as proto.IWebMessageInfo,
+      quotedParticipantRaw || undefined,
+      botCanDelete
+    );
+
+    if (deleted) {
+      db.stats.deletedMessages++;
+      saveDatabase();
+      markInboxMessageDeleted(
+        groupId,
+        quotedCtx.stanzaId,
+        'server_admin_reply',
+        `সার্ভার অ্যাডমিন (@${adminPhone}) রিপ্লাই কমান্ডের মাধ্যমে ডিলিট করেছেন`
+      ).catch(() => {});
+      addActivityLog({
+        groupId,
+        groupName: groupSubject,
+        senderJid,
+        senderPhone: adminPhone,
+        action: 'deleted',
+        reason: `সার্ভার অ্যাডমিন (@${adminPhone}) রিপ্লাই রিমুভ কমান্ড`,
+        details: `রিপ্লাই করা মেসেজ/ভয়েস (${quotedCtx.stanzaId}) সাথে সাথে ডিলিট করা হয়েছে`,
+      });
+      sock.sendMessage(groupId, { react: { text: '✅', key: msg.key } }).catch(() => {});
+    } else {
+      addActivityLog({
+        groupId,
+        groupName: groupSubject,
+        senderJid,
+        senderPhone: adminPhone,
+        action: 'error',
+        reason: botCanDelete
+          ? 'রিপ্লাই রিমুভ কমান্ড ব্যর্থ (মেসেজ পাওয়া যায়নি বা পুরোনো)'
+          : 'রিপ্লাই রিমুভ কমান্ড ব্যর্থ (বট গ্রুপের Admin নয়)',
+        details: `টার্গেট: ${quotedCtx.stanzaId}`,
+      });
+    }
+    return;
+  }
+
+  if (cmd.type === 'kick') {
+    const targets = await resolveCommandTargetMembers(sock, groupId, realMsg, msg, messageText, quotedCtx);
+    if (targets.length === 0) {
+      await safeSendMessage(
+        sock,
+        groupId,
+        { text: '⚠️ কিক করার জন্য মেম্বারের মেসেজে রিপ্লাই দিয়ে বা `@mention` দিয়ে লিখুন: `কিক` অথবা `kick`' },
+        { quoted: msg as any }
+      );
+      return;
+    }
+
+    const botCanKick = await ensureFreshBotAdmin();
+    if (!botCanKick) {
+      await safeSendMessage(
+        sock,
+        groupId,
+        { text: '❌ বট এই গ্রুপের Admin না থাকায় মেম্বার কিক করা সম্ভব হয়নি।' },
+        { quoted: replyTargetQuote }
+      );
+      return;
+    }
+
+    for (const target of targets) {
+      if (target.isBot || target.isServerAdmin) {
+        await safeSendMessage(
+          sock,
+          groupId,
+          {
+            text: `🛡️ @${target.phone} সার্ভার অ্যাডমিন/বট হওয়ায় কিক করা যাবে না।`,
+            mentions: [target.jid],
+          },
+          { quoted: replyTargetQuote }
+        );
+        continue;
+      }
+
+      let kickedOk = false;
+      let lastStatus = '';
+      for (const jidCand of target.candidateJids) {
+        try {
+          const res: any = await sock.groupParticipantsUpdate(groupId, [jidCand], 'remove');
+          const status = Array.isArray(res) ? String(res[0]?.status || '200') : '200';
+          lastStatus = status;
+          if (status === '200' || status === '207') {
+            kickedOk = true;
+            break;
+          }
+        } catch (err: any) {
+          lastStatus = err?.message || String(err);
+        }
+      }
+
+      if (kickedOk) {
+        db.stats.kickedMembers++;
+        delete db.warnings[`${groupId}:${target.jid}`];
+        saveDatabase();
+        sock.sendMessage(groupId, { react: { text: '✅', key: msg.key } }).catch(() => {});
+        await safeSendMessage(
+          sock,
+          groupId,
+          {
+            text: `🚫 *অ্যাডমিন কমান্ড (Kick)*\n👤 @${target.phone} কে গ্রুপ থেকে রিমুভ করা হয়েছে।`,
+            mentions: [target.jid],
+          },
+          { quoted: replyTargetQuote }
+        );
+        addActivityLog({
+          groupId,
+          groupName: groupSubject,
+          senderJid: target.jid,
+          senderPhone: target.phone,
+          action: 'kicked',
+          reason: `সার্ভার অ্যাডমিন (@${adminPhone}) কিক কমান্ড`,
+          details: `@${target.phone} কে গ্রুপ থেকে রিমুভ করা হয়েছে`,
+        });
+      } else {
+        await safeSendMessage(
+          sock,
+          groupId,
+          {
+            text: `❌ @${target.phone} কে কিক করা যায়নি (Status: ${lastStatus || 'Unknown'})। তিনি গ্রুপ ক্রিয়েটর হতে পারেন।`,
+            mentions: [target.jid],
+          },
+          { quoted: replyTargetQuote }
+        );
+      }
+    }
+    return;
+  }
+
+  if (cmd.type === 'black') {
+    const targets = await resolveCommandTargetMembers(sock, groupId, realMsg, msg, messageText, quotedCtx);
+    if (targets.length === 0) {
+      await safeSendMessage(
+        sock,
+        groupId,
+        { text: '⚠️ ব্লক করার জন্য মেম্বারের মেসেজে রিপ্লাই দিয়ে বা `@mention` করে লিখুন: `black` বা `black 30`' },
+        { quoted: msg as any }
+      );
+      return;
+    }
+
+    for (const target of targets) {
+      if (target.isBot || target.isServerAdmin) {
+        await safeSendMessage(
+          sock,
+          groupId,
+          { text: `🛡️ @${target.phone} সার্ভার অ্যাডমিন/বট হওয়ায় ব্লক করা যাবে না।`, mentions: [target.jid] },
+          { quoted: replyTargetQuote }
+        );
+        continue;
+      }
+
+      const res = await manualBlockMember(sock, {
+        groupId,
+        memberJid: target.jid,
+        altJid: target.altJid,
+        memberPhone: target.phone,
+        durationMinutes: cmd.durationMinutes,
+        quotedMsg: replyTargetQuote,
+      });
+
+      if (res.success) {
+        sock.sendMessage(groupId, { react: { text: '✅', key: msg.key } }).catch(() => {});
+      } else {
+        await safeSendMessage(
+          sock,
+          groupId,
+          { text: `❌ ${res.error || 'ব্লক করা যায়নি।'}`, mentions: [target.jid] },
+          { quoted: replyTargetQuote }
+        );
+      }
+    }
+    return;
+  }
+
+  if (cmd.type === 'unblock') {
+    const targets = await resolveCommandTargetMembers(sock, groupId, realMsg, msg, messageText, quotedCtx);
+    if (targets.length === 0) {
+      await safeSendMessage(
+        sock,
+        groupId,
+        { text: '⚠️ আনব্লক করার জন্য মেম্বারের মেসেজে রিপ্লাই দিয়ে বা `@mention` করে লিখুন: `unblock`' },
+        { quoted: msg as any }
+      );
+      return;
+    }
+
+    for (const target of targets) {
+      const removed = unrestrictUser(groupId, target.jid, target.candidateJids, replyTargetQuote);
+      if (removed) {
+        sock.sendMessage(groupId, { react: { text: '✅', key: msg.key } }).catch(() => {});
+      } else {
+        await safeSendMessage(
+          sock,
+          groupId,
+          { text: `ℹ️ @${target.phone} বর্তমানে কোনো ব্লক/মিউট তালিকায় নেই।`, mentions: [target.jid] },
+          { quoted: replyTargetQuote }
+        );
+      }
+    }
+    return;
+  }
+
+  if (cmd.type === 'rules') {
+    const meta = await getGroupMeta(sock, groupId, false).catch(() => null);
+    const memberCount = meta?.participants?.length || 0;
+    const targets = await resolveCommandTargetMembers(sock, groupId, realMsg, msg, messageText, quotedCtx);
+    const customRules = (settings.newMemberInboxRulesNotice || '').trim();
+
+    if (targets.length > 0) {
+      const t = targets[0];
+      const rulesText = customRules
+        ? customRules
+            .replace(/\{user\}/gi, `@${t.phone}`)
+            .replace(/\{group\}/gi, groupSubject)
+            .replace(/\{memberCount\}/gi, String(memberCount || ''))
+        : `📜 *${groupSubject} — গ্রুপ রুলস নোটিশ*\n\n👤 প্রিয় @${t.phone}, অনুগ্রহ করে গ্রুপের নিয়মাবলী মেনে চলুন:\n\n১। গ্রুপে কোনো ধরনের গালিগালাজ, অশালীন কথা বা অশ্লীল ভয়েস মেসেজ দেওয়া নিষেধ।\n২। অতিরিক্ত স্টিকার স্প্যাম ও অননুমোদিত লিংক শেয়ার করবেন না।\n৩। সবার সাথে ভদ্র, সম্মানজনক ও বন্ধুত্বপূর্ণ আচরণ বজায় রাখুন।\n৪। নিয়ম ভঙ্গ করলে বট স্বয়ংক্রিয়ভাবে সতর্কবার্তা, মিউট বা রিমুভ করবে।\n\n🤝 নিয়ম মেনে গ্রুপে থাকার জন্য ধন্যবাদ!`;
+
+      await safeSendMessage(
+        sock,
+        groupId,
+        { text: rulesText, mentions: [t.jid] },
+        { quoted: replyTargetQuote }
+      );
+      if (!t.isBot) {
+        const dmTarget = t.altJid && isPnJid(t.altJid) ? t.altJid : t.jid;
+        safeSendMessage(sock, dmTarget, { text: rulesText }).catch(() => {});
+      }
+    } else {
+      const rulesText = customRules
+        ? customRules
+            .replace(/\{user\}/gi, 'সকল সদস্যবৃন্দ')
+            .replace(/\{group\}/gi, groupSubject)
+            .replace(/\{memberCount\}/gi, String(memberCount || ''))
+        : `📜 *${groupSubject} — গ্রুপ রুলস ও নিয়মাবলী*\n\n১। গ্রুপে কোনো ধরনের গালিগালাজ, অশালীন কথা বা অশ্লীল ভয়েস মেসেজ দেওয়া সম্পূর্ণ নিষেধ।\n২। অতিরিক্ত স্টিকার স্প্যাম ও অননুমোদিত লিংক শেয়ার করবেন না।\n৩। সবার সাথে ভদ্র, সম্মানজনক ও বন্ধুত্বপূর্ণ আচরণ বজায় রাখুন।\n৪। নিয়ম ভঙ্গ করলে বট স্বয়ংক্রিয়ভাবে সতর্কবার্তা (১/২/৩), ব্লক বা রিমুভ করবে।\n\n🛡️ নিয়ম মেনে চলার জন্য ধন্যবাদ!`;
+
+      await safeSendMessage(sock, groupId, { text: rulesText }, { quoted: replyTargetQuote });
+    }
+    sock.sendMessage(groupId, { react: { text: '📜', key: msg.key } }).catch(() => {});
+    return;
+  }
+
+  if (cmd.type === 'warn') {
+    const targets = await resolveCommandTargetMembers(sock, groupId, realMsg, msg, messageText, quotedCtx);
+    if (targets.length === 0) {
+      await safeSendMessage(
+        sock,
+        groupId,
+        { text: '⚠️ ওয়ার্ন দেওয়ার জন্য মেম্বারের মেসেজে রিপ্লাই দিয়ে বা `@mention` করে লিখুন: `warn`' },
+        { quoted: msg as any }
+      );
+      return;
+    }
+
+    for (const target of targets) {
+      if (target.isBot || target.isServerAdmin) continue;
+      const warningKey = `${groupId}:${target.jid}`;
+      if (!db.warnings[warningKey]) {
+        db.warnings[warningKey] = {
+          count: 0,
+          lastViolation: Date.now(),
+          violations: [],
+          groupId,
+          groupName: groupSubject,
+          senderJid: target.jid,
+          senderPhone: target.phone,
+        };
+      }
+      db.warnings[warningKey].count++;
+      db.warnings[warningKey].lastViolation = Date.now();
+      db.warnings[warningKey].violations.push({
+        timestamp: Date.now(),
+        reason: `অ্যাডমিন (@${adminPhone}) ম্যানুয়াল ওয়ার্নিং`,
+      });
+      db.stats.warningsGiven++;
+      saveDatabase();
+
+      const count = db.warnings[warningKey].count;
+      if (count >= 3 && settings.autoKick3Warnings && !target.isGroupAdmin && (await ensureFreshBotAdmin())) {
+        await safeSendMessage(
+          sock,
+          groupId,
+          {
+            text: `🚨 [৩য় সতর্কতা — অটো কিক]\n@${target.phone} ৩টি সতর্কবার্তা অতিক্রম করায় গ্রুপ থেকে রিমুভ করা হচ্ছে!`,
+            mentions: [target.jid],
+          },
+          { quoted: replyTargetQuote }
+        );
+        for (const cand of target.candidateJids) {
+          try {
+            const kickRes: any = await sock.groupParticipantsUpdate(groupId, [cand], 'remove');
+            const st = Array.isArray(kickRes) ? String(kickRes[0]?.status || '200') : '200';
+            if (st === '200' || st === '207') {
+              db.stats.kickedMembers++;
+              delete db.warnings[warningKey];
+              saveDatabase();
+              break;
+            }
+          } catch {}
+        }
+      } else {
+        await safeSendMessage(
+          sock,
+          groupId,
+          {
+            text: `⚠️ [অ্যাডমিন সতর্কবার্তা ${count}/3]\nসদস্য @${target.phone}, নিয়ম ভঙ্গের কারণে আপনাকে সতর্ক করা হলো। অনুগ্রহ করে গ্রুপের শৃঙ্খলা মেনে চলুন।`,
+            mentions: [target.jid],
+          },
+          { quoted: replyTargetQuote }
+        );
+      }
+      addActivityLog({
+        groupId,
+        groupName: groupSubject,
+        senderJid: target.jid,
+        senderPhone: target.phone,
+        action: 'warned',
+        reason: `সার্ভার অ্যাডমিন (@${adminPhone}) ওয়ার্ন কমান্ড (${count}/3)`,
+        warningCount: count,
+      });
+    }
+    sock.sendMessage(groupId, { react: { text: '⚠️', key: msg.key } }).catch(() => {});
+    return;
+  }
+
+  if (cmd.type === 'resetwarn') {
+    if (cmd.allInGroup) {
+      let cleared = 0;
+      for (const [k, w] of Object.entries(db.warnings || {})) {
+        if (w?.groupId === groupId || k.startsWith(`${groupId}:`)) {
+          delete db.warnings[k];
+          cleared++;
+        }
+      }
+      saveDatabase();
+      await safeSendMessage(
+        sock,
+        groupId,
+        { text: `✅ এই গ্রুপের মোট ${cleared}টি ওয়ার্নিং রেকর্ড রিসেট করা হয়েছে।` },
+        { quoted: replyTargetQuote }
+      );
+      return;
+    }
+
+    const targets = await resolveCommandTargetMembers(sock, groupId, realMsg, msg, messageText, quotedCtx);
+    if (targets.length === 0) {
+      await safeSendMessage(
+        sock,
+        groupId,
+        { text: '⚠️ ওয়ার্ন রিসেট করতে রিপ্লাই/`@mention` করে লিখুন `resetwarn` অথবা গ্রুপের সবার জন্য `resetwarn all`' },
+        { quoted: msg as any }
+      );
+      return;
+    }
+
+    for (const target of targets) {
+      let deletedCount = 0;
+      for (const [k, w] of Object.entries(db.warnings || {})) {
+        if (
+          (w?.groupId === groupId || k.startsWith(`${groupId}:`)) &&
+          (k === `${groupId}:${target.jid}` ||
+            target.candidateJids.some((c) => k.endsWith(`:${c}`) || w?.senderJid === c))
+        ) {
+          delete db.warnings[k];
+          deletedCount++;
+        }
+      }
+      if (deletedCount > 0) saveDatabase();
+      await safeSendMessage(
+        sock,
+        groupId,
+        {
+          text:
+            deletedCount > 0
+              ? `✅ @${target.phone}-এর সতর্কতা (Warning) রিসেট করে ০ করা হয়েছে।`
+              : `ℹ️ @${target.phone}-এর কোনো সক্রিয় সতর্কতা নেই।`,
+          mentions: [target.jid],
+        },
+        { quoted: replyTargetQuote }
+      );
+    }
+    return;
+  }
+
+  if (cmd.type === 'lock') {
+    if (!(await ensureFreshBotAdmin())) {
+      await safeSendMessage(
+        sock,
+        groupId,
+        { text: '❌ বট গ্রুপের Admin না থাকায় গ্রুপ লক করা যায়নি।' },
+        { quoted: msg as any }
+      );
+      return;
+    }
+    await sock.groupSettingUpdate(groupId, 'announcement');
+    if (cmd.durationMinutes) {
+      db.groupLocks[groupId] = {
+        groupId,
+        groupName: groupSubject,
+        lockedUntil: Date.now() + cmd.durationMinutes * 60 * 1000,
+        originalSetting: 'not_announcement',
+        reason: `অ্যাডমিন (@${adminPhone}) লক কমান্ড (${cmd.durationMinutes} মিনিট)`,
+      };
+      saveDatabase();
+    }
+    addActivityLog({
+      groupId,
+      groupName: groupSubject,
+      senderJid,
+      senderPhone: adminPhone,
+      action: 'locked',
+      reason: `সার্ভার অ্যাডমিন (@${adminPhone}) গ্রুপ লক কমান্ড`,
+    });
+    await safeSendMessage(
+      sock,
+      groupId,
+      {
+        text: cmd.durationMinutes
+          ? `🔒 *গ্রুপ লক করা হয়েছে (${cmd.durationMinutes} মিনিট)*\nশুধুমাত্র অ্যাডমিনরা এখন মেসেজ পাঠাতে পারবেন।`
+          : '🔒 *গ্রুপ লক করা হয়েছে*\nশুধুমাত্র অ্যাডমিনরা এখন মেসেজ পাঠাতে পারবেন। আনলক করতে লিখুন `unlock`।',
+      },
+      { quoted: replyTargetQuote }
+    );
+    return;
+  }
+
+  if (cmd.type === 'unlock') {
+    if (!(await ensureFreshBotAdmin())) {
+      await safeSendMessage(
+        sock,
+        groupId,
+        { text: '❌ বট গ্রুপের Admin না থাকায় গ্রুপ আনলক করা যায়নি।' },
+        { quoted: replyTargetQuote }
+      );
+      return;
+    }
+    await sock.groupSettingUpdate(groupId, 'not_announcement');
+    delete db.groupLocks[groupId];
+    delete db.nightLockedGroups[groupId];
+    saveDatabase();
+    addActivityLog({
+      groupId,
+      groupName: groupSubject,
+      senderJid,
+      senderPhone: adminPhone,
+      action: 'unlocked',
+      reason: `সার্ভার অ্যাডমিন (@${adminPhone}) গ্রুপ আনলক কমান্ড`,
+    });
+    await safeSendMessage(
+      sock,
+      groupId,
+      {
+        text: '🔓 *গ্রুপ আনলক করা হয়েছে*\nএখন সবাই স্বাভাবিকভাবে গ্রুপে মেসেজ পাঠাতে পারবেন।',
+      },
+      { quoted: replyTargetQuote }
+    );
+    return;
+  }
+
+  if (cmd.type === 'promote' || cmd.type === 'demote') {
+    const targets = await resolveCommandTargetMembers(sock, groupId, realMsg, msg, messageText, quotedCtx);
+    if (targets.length === 0) {
+      await safeSendMessage(
+        sock,
+        groupId,
+        { text: `⚠️ মেম্বারের মেসেজে রিপ্লাই দিয়ে বা \`@mention\` করে লিখুন: \`${cmd.type}\`` },
+        { quoted: msg as any }
+      );
+      return;
+    }
+    if (!(await ensureFreshBotAdmin())) {
+      await safeSendMessage(
+        sock,
+        groupId,
+        { text: '❌ বট গ্রুপের Admin না থাকায় রোল পরিবর্তন করা যায়নি।' },
+        { quoted: replyTargetQuote }
+      );
+      return;
+    }
+    for (const target of targets) {
+      if (cmd.type === 'demote' && (target.isBot || target.isServerAdmin)) {
+        await safeSendMessage(
+          sock,
+          groupId,
+          { text: `🛡️ @${target.phone} সার্ভার অ্যাডমিন/বট হওয়ায় ডিমোট করা যাবে না।`, mentions: [target.jid] },
+          { quoted: replyTargetQuote }
+        );
+        continue;
+      }
+      try {
+        await sock.groupParticipantsUpdate(groupId, [target.jid], cmd.type);
+        delete groupMetaCache[groupId];
+        sock.sendMessage(groupId, { react: { text: '✅', key: msg.key } }).catch(() => {});
+        await safeSendMessage(
+          sock,
+          groupId,
+          {
+            text:
+              cmd.type === 'promote'
+                ? `👑 @${target.phone} কে গ্রুপ অ্যাডমিন (Admin) বানানো হয়েছে।`
+                : `⬇️ @${target.phone}-এর গ্রুপ অ্যাডমিন দায়িত্ব সরিয়ে নেওয়া হয়েছে।`,
+            mentions: [target.jid],
+          },
+          { quoted: replyTargetQuote }
+        );
+      } catch (err: any) {
+        await safeSendMessage(
+          sock,
+          groupId,
+          { text: `❌ ব্যর্থ হয়েছে: ${err?.message || 'Permission error'}`, mentions: [target.jid] },
+          { quoted: replyTargetQuote }
+        );
+      }
+    }
+    return;
+  }
+
+  if (cmd.type === 'tagall') {
+    const meta = await getGroupMeta(sock, groupId, false).catch(() => null);
+    const participants: any[] = Array.isArray(meta?.participants) ? meta.participants : [];
+    const mentionJids = participants
+      .map((p) => normalizeJid(p?.id || p?.jid || ''))
+      .filter((j) => j && !botUsers.has(cleanJidUser(j)));
+    if (mentionJids.length === 0) return;
+
+    const textBody = cmd.customText
+      ? `📢 *অ্যাডমিন ঘোষণা*\n\n${cmd.customText}`
+      : `📢 *${groupSubject} — সবার দৃষ্টি আকর্ষণ করা হচ্ছে!*`;
+    await safeSendMessage(
+      sock,
+      groupId,
+      {
+        text: textBody,
+        mentions: mentionJids,
+      },
+      quotedTargetStub ? { quoted: quotedTargetStub } : undefined
+    );
+    sock.sendMessage(groupId, { react: { text: '📢', key: msg.key } }).catch(() => {});
+    return;
+  }
+
+  if (cmd.type === 'toggle') {
+    updateSettings({ [cmd.key]: cmd.value } as Partial<ModerationSettings>);
+    await safeSendMessage(
+      sock,
+      groupId,
+      {
+        text: `${cmd.value ? '✅' : '⛔'} *${cmd.label}* এখন *${cmd.value ? 'ON (চালু)' : 'OFF (বন্ধ)'}* করা হয়েছে।`,
+      },
+      { quoted: replyTargetQuote }
+    );
+    return;
+  }
+
+  if (cmd.type === 'status') {
+    const groupWarnings = Object.entries(db.warnings || {}).filter(
+      ([k, w]) => w?.count > 0 && (w.groupId === groupId || k.startsWith(`${groupId}:`))
+    ).length;
+    const groupMuted = getActiveRestrictedUsers().filter((u) => u.groupId === groupId).length;
+    const botAdminNow = await ensureFreshBotAdmin();
+    await safeSendMessage(
+      sock,
+      groupId,
+      {
+        text:
+          `🛡️ *${groupSubject} — লাইভ বট স্ট্যাটাস*\n\n` +
+          `• বট অ্যাডমিন: ${botAdminNow ? '✅ হ্যাঁ (Full Control)' : '❌ না (Admin দিন)'}\n` +
+          `• Anti-Sticker: ${settings.antiSticker ? 'ON' : 'OFF'}\n` +
+          `• Anti-Link: ${settings.antiLink ? 'ON' : 'OFF'}\n` +
+          `• Anti-Badword: ${settings.antiBadword ? 'ON' : 'OFF'}\n` +
+          `• Voice AI: ${settings.voiceModerationEnabled !== false ? 'ON' : 'OFF'}\n` +
+          `• সক্রিয় ওয়ার্নিং: ${groupWarnings} জন\n` +
+          `• ব্লক/মিউট অবস্থায়: ${groupMuted} জন`,
+      },
+      { quoted: replyTargetQuote }
+    );
+    return;
+  }
+
+  if (cmd.type === 'help') {
+    const menuText =
+      `╔════════════════════════╗\n` +
+      `   ⚡ *WAGuard অ্যাডমিন কমান্ড মেনু*\n` +
+      `╚════════════════════════╝\n` +
+      `🛡️ _শুধুমাত্র অনুমোদিত ২ জন সার্ভার অ্যাডমিনের জন্য_\n\n` +
+      `╭─ 👤 *মেম্বার অ্যাকশন* _(রিপ্লাই বা @mention)_\n` +
+      `│ 🚫 *কিক / kick* — মেম্বারকে গ্রুপ থেকে রিমুভ করবে\n` +
+      `│ 🔇 *black [মিনিট] / block* — সাময়িক ব্লক/মিউট (ডিফল্ট ১০ মি.)\n` +
+      `│ 🔊 *unblock / আনব্লক* — ব্লক/মিউট সাথে সাথে তুলে নেবে\n` +
+      `│ ⚠️ *warn* — সদস্যকে ওয়ার্নিং (১/২/৩) দেবে\n` +
+      `│ 🔄 *resetwarn* / *resetwarn all* — ওয়ার্নিং রিসেট করবে\n` +
+      `│ 👑 *promote* / ⬇️ *demote* — অ্যাডমিন বানাবে বা সরাবে\n` +
+      `╰────────────────────────\n\n` +
+      `╭─ 💬 *মেসেজ ও রুলস কন্ট্রোল*\n` +
+      `│ 🗑️ *রিমুভ / remove / ডিলিট* — যেকোনো মেসেজ/ভয়েসে রিপ্লাই দিলে ডিলিট\n` +
+      `│ 📜 *rules / রুলস* — গ্রুপের নিয়মাবলী দেখাবে _(রিপ্লাই/@ করলে তাকে ট্যাগ+ইনবক্স)_\n` +
+      `╰────────────────────────\n\n` +
+      `╭─ 🔒 *গ্রুপ লক ও ঘোষণা*\n` +
+      `│ 🔒 *lock [মিনিট]* — গ্রুপ শুধু অ্যাডমিনদের জন্য লক করবে\n` +
+      `│ 🔓 *unlock* — সবার জন্য গ্রুপ আনলক করবে\n` +
+      `│ 📢 *tagall [বার্তা]* — গ্রুপের সবাইকে একসাথে মেনশন করবে\n` +
+      `╰────────────────────────\n\n` +
+      `╭─ ⚙️ *সিকিউরিটি অন/অফ ও তথ্য*\n` +
+      `│ 🔹 *antisticker on/off* — স্টিকার প্রোটেকশন\n` +
+      `│ 🔹 *antilink on/off* — লিংক প্রোটেকশন\n` +
+      `│ 🔹 *antibadword on/off* — গালিগালাজ প্রোটেকশন\n` +
+      `│ 🔹 *antivoice on/off* — ভয়েস AI প্রোটেকশন\n` +
+      `│ 🔹 *silent on/off* — সাইলেন্ট মোড\n` +
+      `│ 📊 *status* — গ্রুপের লাইভ সিকিউরিটি স্ট্যাটাস\n` +
+      `╰────────────────────────\n\n` +
+      `💡 _টিপস: যেকোনো মেসেজে রিপ্লাই করে লিখলে অ্যাকশন ঠিক ওই মেসেজ/সদস্যের ওপরই হবে!_`;
+
+    await safeSendMessage(sock, groupId, { text: menuText }, { quoted: replyTargetQuote });
+    sock.sendMessage(groupId, { react: { text: '📋', key: msg.key } }).catch(() => {});
+  }
 }
 
 interface ConflictEvent {
@@ -3329,6 +4434,18 @@ export function upsertCachedGroupMeta(updates: any[]) {
 
 export function getCachedGroupMetadataSync(groupId: string): any | undefined {
   return groupMetaCache[groupId]?.meta;
+}
+
+export function getAllCachedGroupMetasSync(): any[] {
+  return Object.values(groupMetaCache)
+    .map((entry) => entry?.meta)
+    .filter((m) => m?.id && String(m.id).endsWith('@g.us'));
+}
+
+export function removeCachedGroupMeta(groupId: string) {
+  if (groupId && groupMetaCache[groupId]) {
+    delete groupMetaCache[groupId];
+  }
 }
 
 export function incrementMessagesChecked(count: number = 1) {
@@ -5181,6 +6298,7 @@ export async function manualBlockMember(
     memberPhone?: string;
     durationMinutes?: number;
     customNotice?: string;
+    quotedMsg?: any;
   }
 ): Promise<{
   success: boolean;
@@ -5285,10 +6403,15 @@ export async function manualBlockMember(
     const mentions = Array.from(
       new Set([normalizeJid(memberJid), altJid ? normalizeJid(altJid) : ''].filter(Boolean))
     );
-    const sent = await safeSendMessage(sock, groupId, {
-      text: noticeText,
-      mentions,
-    });
+    const sent = await safeSendMessage(
+      sock,
+      groupId,
+      {
+        text: noticeText,
+        mentions,
+      },
+      params.quotedMsg ? { quoted: params.quotedMsg } : undefined
+    );
     noticeSent = Boolean(sent);
   }
 
@@ -5547,85 +6670,36 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
   }
 
   // -------------------------------------------------------------
-  // STRICT 2-SERVER-ADMIN REPLY-TO-DELETE COMMAND ("রিমুভ" / "remove" / "ডিলিট")
-  // Only the two authorized server admin numbers can delete any replied message or voice!
-  // Other group admins CANNOT use this command.
+  // STRICT 2-SERVER-ADMIN GROUP COMMAND SYSTEM
+  // (kick, black/block, unblock, rules, warn, resetwarn, lock, unlock, promote, demote, tagall, toggles, remove, status, help)
+  // ONLY the two authorized server admin numbers can run these commands from the group!
+  // Other group admins & normal members CANNOT execute them.
   // -------------------------------------------------------------
   const quotedCtx = extractQuotedContextInfo(realMsg, msg);
-  if (quotedCtx?.stanzaId && messageText && isAdminReplyDeleteCommand(messageText)) {
+  const hasMentions = collectMentionedJidsFromMessage(realMsg, msg).length > 0;
+  const serverAdminCmd = messageText
+    ? parseServerAdminGroupCommand(messageText, Boolean(quotedCtx?.stanzaId), hasMentions)
+    : null;
+  if (serverAdminCmd) {
     const authCheck = await isAuthorizedServerAdminSender(sock, remoteJid, senderJid, senderAltJid, msg);
     if (authCheck.authorized) {
-      let botCanDelete = isBotAdmin;
-      if (!metaKnown || !botCanDelete) {
-        const refreshed = await checkPermissions(sock, remoteJid, senderJid, true, senderAltJid);
-        botCanDelete = refreshed.isBotAdmin;
-      }
-
-      const botUsersSet = new Set(
-        [
-          sock.user?.id,
-          sock.user?.lid,
-          sock.authState?.creds?.me?.id,
-          sock.authState?.creds?.me?.lid,
-        ]
-          .map((x) => cleanJidUser(x))
-          .filter(Boolean)
-      );
-      const quotedParticipantRaw = quotedCtx.participant || '';
-      const isQuotedFromBot = Boolean(
-        quotedParticipantRaw && botUsersSet.has(cleanJidUser(quotedParticipantRaw))
-      );
-
-      const quotedKey: proto.IMessageKey = {
-        remoteJid,
-        fromMe: isQuotedFromBot,
-        id: quotedCtx.stanzaId,
-        ...(quotedParticipantRaw ? { participant: quotedParticipantRaw } : {}),
-      };
-
-      const deleted = await deleteMessageSafely(
-        sock,
-        remoteJid,
-        { key: quotedKey } as proto.IWebMessageInfo,
-        quotedParticipantRaw || undefined,
-        botCanDelete
-      );
-
-      if (deleted) {
-        db.stats.deletedMessages++;
-        saveDatabase();
-        markInboxMessageDeleted(
-          remoteJid,
-          quotedCtx.stanzaId,
-          'server_admin_reply',
-          `সার্ভার অ্যাডমিন (@${authCheck.adminPhone}) রিপ্লাই কমান্ডের মাধ্যমে ডিলিট করেছেন`
-        ).catch(() => {});
-        addActivityLog({
-          groupId: remoteJid,
-          groupName: groupSubject,
-          senderJid,
-          senderPhone: authCheck.adminPhone || cleanPhone,
-          action: 'deleted',
-          reason: `সার্ভার অ্যাডমিন (@${authCheck.adminPhone}) রিপ্লাই রিমুভ কমান্ড`,
-          details: `রিপ্লাই করা মেসেজ/ভয়েস (${quotedCtx.stanzaId}) সাথে সাথে ডিলিট করা হয়েছে`,
-        });
-        sock.sendMessage(remoteJid, { react: { text: '✅', key: msg.key } }).catch(() => {});
-      } else {
-        addActivityLog({
-          groupId: remoteJid,
-          groupName: groupSubject,
-          senderJid,
-          senderPhone: authCheck.adminPhone || cleanPhone,
-          action: 'error',
-          reason: botCanDelete
-            ? 'রিপ্লাই রিমুভ কমান্ড ব্যর্থ (মেসেজ পাওয়া যায়নি বা পুরোনো)'
-            : 'রিপ্লাই রিমুভ কমান্ড ব্যর্থ (বট গ্রুপের Admin নয়)',
-          details: `টার্গেট: ${quotedCtx.stanzaId}`,
-        });
-      }
+      await executeServerAdminGroupCommand(sock, {
+        cmd: serverAdminCmd,
+        groupId: remoteJid,
+        groupSubject,
+        senderJid,
+        senderAltJid,
+        adminPhone: authCheck.adminPhone || cleanPhone,
+        msg,
+        realMsg,
+        messageText,
+        quotedCtx,
+        isBotAdmin,
+        metaKnown,
+      });
       return;
     }
-    // Non-authorized senders (even other group admins!) cannot trigger this command.
+    // Non-authorized senders (even other group admins!) cannot trigger these commands.
   }
 
   // Note: Clean-behavior Leaderboard tracking runs strictly AFTER spam/sticker/badword checks pass!

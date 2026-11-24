@@ -61,6 +61,9 @@ import {
   manualBlockMember,
   DEFAULT_MANUAL_MEMBER_BLOCK_NOTICE,
   getCachedGroupMetadataSync,
+  getAllCachedGroupMetasSync,
+  removeCachedGroupMeta,
+  getGroupMeta,
   startServerHealthMonitor,
   flushPendingServerNotices,
   reportServerProblem,
@@ -478,6 +481,251 @@ let reconnectAttempts = 0;
 let lastPairingRequestAt = 0;
 const logger = pino({ level: 'silent' });
 
+const recentlyLeftGroups = new Map<string, number>();
+const inFlightGroupTracks = new Map<string, Promise<void>>();
+const recentGroupTrackAt = new Map<string, number>();
+
+function isRecentlyLeftGroup(groupId: string): boolean {
+  const ts = recentlyLeftGroups.get(groupId);
+  if (!ts) return false;
+  if (Date.now() - ts > 60_000) {
+    recentlyLeftGroups.delete(groupId);
+    return false;
+  }
+  return true;
+}
+
+function upsertBotStateGroups(
+  items: Array<{ id: string; name?: string; participants?: number; status?: string }>
+) {
+  if (!Array.isArray(items) || items.length === 0) return;
+  const map = new Map<string, { id: string; name: string; participants: number; status: string }>();
+  for (const existing of botState.groups) {
+    if (existing?.id) map.set(existing.id, existing);
+  }
+  for (const item of items) {
+    if (!item?.id || !String(item.id).endsWith('@g.us')) continue;
+    recentlyLeftGroups.delete(item.id);
+    const prev = map.get(item.id);
+    const incomingName = typeof item.name === 'string' ? item.name.trim() : '';
+    const resolvedName =
+      incomingName && incomingName !== 'WhatsApp Group'
+        ? incomingName
+        : prev?.name || incomingName || 'WhatsApp Group';
+    const incomingCount = Number(item.participants || 0);
+    const resolvedParticipants =
+      Number.isFinite(incomingCount) && incomingCount > 0 ? incomingCount : prev?.participants || 0;
+    map.set(item.id, {
+      id: item.id,
+      name: resolvedName,
+      participants: resolvedParticipants,
+      status: item.status || prev?.status || 'Active',
+    });
+  }
+  botState.groups = Array.from(map.values());
+}
+
+function removeBotStateGroup(groupId: string) {
+  if (!groupId || !groupId.endsWith('@g.us')) return;
+  recentlyLeftGroups.set(groupId, Date.now());
+  botState.groups = botState.groups.filter((g) => g.id !== groupId);
+  removeCachedGroupMeta(groupId);
+  markGroupLeftInInbox(groupId);
+}
+
+function isParticipantMatchingBot(sock: WASocket, rawParticipant: any): boolean {
+  const rawJid =
+    typeof rawParticipant === 'string'
+      ? rawParticipant
+      : rawParticipant?.id || rawParticipant?.jid || rawParticipant?.lid || '';
+  const phoneNum = typeof rawParticipant === 'object' ? rawParticipant?.phoneNumber : '';
+  const cleanUser = (val?: string | null) => (val ? String(val).split('@')[0].split(':')[0].trim() : '');
+  const pUsers = new Set([cleanUser(rawJid), cleanUser(phoneNum)].filter(Boolean));
+  if (pUsers.size === 0) return false;
+  for (const b of [
+    sock.user?.id,
+    sock.user?.lid,
+    sock.authState?.creds?.me?.id,
+    sock.authState?.creds?.me?.lid,
+  ]) {
+    const bu = cleanUser(b);
+    if (bu && pUsers.has(bu)) return true;
+  }
+  return false;
+}
+
+async function ensureGroupTrackedInServer(sock: WASocket, groupId: string, forceMeta = false): Promise<void> {
+  if (!sock || !groupId || !groupId.endsWith('@g.us')) return;
+  if (isRecentlyLeftGroup(groupId)) return;
+
+  const existing = botState.groups.find((g) => g.id === groupId);
+  if (!forceMeta && existing && existing.name && existing.name !== 'WhatsApp Group' && existing.participants > 0) {
+    return;
+  }
+
+  const lastTracked = recentGroupTrackAt.get(groupId) || 0;
+  if (!forceMeta && Date.now() - lastTracked < 15_000) return;
+
+  const active = inFlightGroupTracks.get(groupId);
+  if (active) return active;
+
+  const task = (async () => {
+    recentGroupTrackAt.set(groupId, Date.now());
+    try {
+      const meta = await Promise.race([
+        getGroupMeta(sock, groupId, forceMeta).catch(() => null),
+        new Promise<null>((r) => setTimeout(() => r(null), 8000)),
+      ]);
+      if (meta && meta.id && !isRecentlyLeftGroup(groupId)) {
+        const entry = {
+          id: meta.id,
+          name: meta.subject || existing?.name || 'WhatsApp Group',
+          participants: Array.isArray(meta.participants) ? meta.participants.length : existing?.participants || 0,
+          status: 'Active',
+        };
+        upsertBotStateGroups([entry]);
+        await syncConnectedGroupsToInbox(
+          sock,
+          [
+            {
+              id: entry.id,
+              name: entry.name,
+              participants: entry.participants,
+              isBotAdmin: isBotGroupAdminFromMeta(sock, meta),
+            },
+          ],
+          { isFullSnapshot: false }
+        ).catch(() => {});
+      }
+    } catch {
+      // non-blocking
+    } finally {
+      inFlightGroupTracks.delete(groupId);
+    }
+  })();
+
+  inFlightGroupTracks.set(groupId, task);
+  return task;
+}
+
+async function refreshAllConnectedGroups(sock: WASocket, timeoutMs = 12000): Promise<Record<string, any> | null> {
+  if (!sock) return null;
+  try {
+    const groups = await Promise.race([
+      sock.groupFetchAllParticipating(),
+      new Promise<null>((_, reject) =>
+        setTimeout(() => reject(new Error(`groupFetchAllParticipating timed out after ${timeoutMs}ms`)), timeoutMs)
+      ),
+    ]);
+    if (!groups || typeof groups !== 'object') return null;
+
+    primeGroupMetaCache(groups);
+    const list = Object.values(groups)
+      .filter((g: any) => g?.id && String(g.id).endsWith('@g.us') && !isRecentlyLeftGroup(g.id))
+      .map((g: any) => ({
+        id: g.id,
+        name: g.subject || 'WhatsApp Group',
+        participants: Array.isArray(g.participants) ? g.participants.length : 0,
+        status: 'Active',
+      }));
+
+    if (list.length > 0 || Object.keys(groups).length === 0) {
+      botState.groups = list;
+    }
+
+    await syncConnectedGroupsToInbox(
+      sock,
+      list.map((g) => ({
+        id: g.id,
+        name: g.name,
+        participants: g.participants,
+        isBotAdmin: isBotGroupAdminFromMeta(sock, groups[g.id]),
+      })),
+      { isFullSnapshot: true }
+    ).catch(() => {});
+
+    return groups;
+  } catch (err: any) {
+    console.warn('[Groups Refresh Warning]:', err?.message || err);
+    return null;
+  }
+}
+
+function buildMergedConnectedGroupsResponse() {
+  const inboxGroups = getInboxGroupsList();
+  const inboxMap = new Map(inboxGroups.map((ig) => [ig.id, attachSignedAvatarUrl(ig)]));
+  const merged = new Map<string, any>();
+
+  for (const g of botState.groups) {
+    if (!g?.id || isRecentlyLeftGroup(g.id)) continue;
+    const inboxEntry = inboxMap.get(g.id);
+    merged.set(g.id, {
+      ...(inboxEntry || {}),
+      ...g,
+      name:
+        (g.name && g.name !== 'WhatsApp Group' ? g.name : inboxEntry?.name) ||
+        'WhatsApp Group',
+      participants: Math.max(Number(g.participants || 0), Number(inboxEntry?.participants || 0)),
+      status: g.status || 'Active',
+      connected: true,
+    });
+  }
+
+  for (const cachedMeta of getAllCachedGroupMetasSync()) {
+    const gid = cachedMeta?.id;
+    if (!gid || isRecentlyLeftGroup(gid)) continue;
+    const inboxEntry = inboxMap.get(gid);
+    if (inboxEntry && inboxEntry.connected === false) continue;
+    const prev = merged.get(gid);
+    const cachedCount = Array.isArray(cachedMeta.participants) ? cachedMeta.participants.length : 0;
+    const cachedName = cachedMeta.subject || '';
+    if (!prev) {
+      merged.set(gid, {
+        ...(inboxEntry || {}),
+        id: gid,
+        name:
+          (cachedName && cachedName !== 'WhatsApp Group' ? cachedName : inboxEntry?.name) ||
+          'WhatsApp Group',
+        participants: Math.max(cachedCount, Number(inboxEntry?.participants || 0)),
+        status: 'Active',
+        connected: true,
+      });
+    } else {
+      merged.set(gid, {
+        ...prev,
+        name:
+          (prev.name && prev.name !== 'WhatsApp Group' ? prev.name : cachedName) ||
+          prev.name ||
+          'WhatsApp Group',
+        participants: Math.max(Number(prev.participants || 0), cachedCount),
+      });
+    }
+  }
+
+  for (const ig of inboxGroups) {
+    if (!ig?.id || !ig.connected || isRecentlyLeftGroup(ig.id)) continue;
+    if (!merged.has(ig.id)) {
+      const signed = inboxMap.get(ig.id) || attachSignedAvatarUrl(ig);
+      merged.set(ig.id, {
+        ...signed,
+        status: 'Active',
+      });
+    }
+  }
+
+  const enriched = Array.from(merged.values()).sort((a, b) => {
+    const ta = Number(a.lastMessageAt || 0);
+    const tb = Number(b.lastMessageAt || 0);
+    if (ta !== tb) return tb - ta;
+    return String(a.name || '').localeCompare(String(b.name || ''));
+  });
+
+  return {
+    groups: enriched,
+    inboxGroups: inboxGroups.map(attachSignedAvatarUrl),
+  };
+}
+
 function clearReconnectTimer() {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
@@ -624,8 +872,7 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
         if (socketToken !== activeSocketToken || sock !== currentSock) return;
         try {
           await resolveBotIdentitySet(sock).catch(() => {});
-          const groups = await sock.groupFetchAllParticipating();
-          primeGroupMetaCache(groups);
+          const groups = (await refreshAllConnectedGroups(sock, 15000)) || {};
           notifyStickerQueueSocketReady();
 
           await resolveServerProblem('wa_disconnect_drop', {
@@ -645,24 +892,6 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
           }
 
           await flushPendingServerNotices(sock);
-          const groupList = Object.values(groups).map((g) => ({
-            id: g.id,
-            name: g.subject,
-            participants: g.participants?.length || 0,
-            status: 'Active',
-          }));
-          if (groupList.length > 0) {
-            botState.groups = groupList;
-          }
-          syncConnectedGroupsToInbox(
-            sock,
-            groupList.map((g) => ({
-              id: g.id,
-              name: g.name,
-              participants: g.participants,
-              isBotAdmin: isBotGroupAdminFromMeta(sock, groups[g.id]),
-            }))
-          ).catch(() => {});
         } catch {
           // non-blocking
         }
@@ -842,6 +1071,22 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
       return;
     }
     try {
+      const groupId = update?.id;
+      const participants = Array.isArray(update?.participants) ? update.participants : [];
+      const botWasRemoved =
+        update?.action === 'remove' && participants.some((p) => isParticipantMatchingBot(sock, p));
+      const botWasAdded =
+        update?.action === 'add' && participants.some((p) => isParticipantMatchingBot(sock, p));
+
+      if (groupId && groupId.endsWith('@g.us')) {
+        if (botWasRemoved) {
+          removeBotStateGroup(groupId);
+        } else if (botWasAdded || !botState.groups.some((g) => g.id === groupId)) {
+          recentlyLeftGroups.delete(groupId);
+          void ensureGroupTrackedInServer(sock, groupId, true);
+        }
+      }
+
       await handleGroupParticipantsUpdate(sock, update);
     } catch (err: any) {
       console.error('Error in group-participants.update handler:', err?.message || err);
@@ -877,7 +1122,13 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
         isBotAdmin: isBotGroupAdminFromMeta(sock, g),
       }));
     if (items.length > 0) {
-      syncConnectedGroupsToInbox(sock, items).catch(() => {});
+      upsertBotStateGroups(items);
+      syncConnectedGroupsToInbox(sock, items, { isFullSnapshot: false }).catch(() => {});
+      for (const item of items) {
+        if (!item.participants || item.name === 'WhatsApp Group') {
+          void ensureGroupTrackedInServer(sock, item.id, true);
+        }
+      }
     }
   });
 
@@ -885,18 +1136,27 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
     if (socketToken !== activeSocketToken || sock !== currentSock) return;
     upsertCachedGroupMeta(updates);
     const items = (updates || [])
-      .filter((g) => g?.id && String(g.id).endsWith('@g.us') && g.subject)
+      .filter((g) => g?.id && String(g.id).endsWith('@g.us'))
       .map((g) => {
         const cached = getCachedGroupMetadataSync(g.id);
+        const prev = botState.groups.find((bg) => bg.id === g.id);
         return {
           id: g.id,
-          name: g.subject,
-          participants: Array.isArray(cached?.participants) ? cached.participants.length : 0,
+          name: g.subject || cached?.subject || prev?.name || 'WhatsApp Group',
+          participants: Array.isArray(cached?.participants)
+            ? cached.participants.length
+            : prev?.participants || 0,
           isBotAdmin: cached ? isBotGroupAdminFromMeta(sock, cached) : undefined,
         };
       });
     if (items.length > 0) {
-      syncConnectedGroupsToInbox(sock, items).catch(() => {});
+      upsertBotStateGroups(items);
+      syncConnectedGroupsToInbox(sock, items, { isFullSnapshot: false }).catch(() => {});
+      for (const item of items) {
+        if (!item.participants || item.name === 'WhatsApp Group') {
+          void ensureGroupTrackedInServer(sock, item.id, false);
+        }
+      }
     }
   });
 
@@ -953,6 +1213,17 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
       return;
     }
     if ((type === 'notify' || type === 'append') && Array.isArray(messages)) {
+      const seenUntrackedGroupIds = new Set<string>();
+      for (const msg of messages) {
+        const gid = msg?.key?.remoteJid;
+        if (gid && gid.endsWith('@g.us') && !seenUntrackedGroupIds.has(gid) && !isRecentlyLeftGroup(gid)) {
+          const tracked = botState.groups.find((g) => g.id === gid);
+          if (!tracked || !tracked.participants || tracked.name === 'WhatsApp Group') {
+            seenUntrackedGroupIds.add(gid);
+            void ensureGroupTrackedInServer(sock, gid, false);
+          }
+        }
+      }
       // Capture every WhatsApp group message & media (text, image, video, voice, audio, sticker, document, location, contact, revoke) BEFORE fast-path filter
       captureIncomingGroupMessages(sock, messages, type === 'append' ? 'history_sync' : 'live').catch((err: any) => {
         console.warn('[Inbox Capture Note]:', err?.message || err);
@@ -1714,36 +1985,11 @@ app.post('/api/moderation/clear-logs', (req: Request, res: Response) => {
 });
 
 // 4. Groups List Endpoint
-app.get('/api/groups', async (req: Request, res: Response) => {
-  if (currentSock && botState.status === 'connected') {
-    try {
-      const groups = await currentSock.groupFetchAllParticipating();
-      primeGroupMetaCache(groups);
-      const list = Object.values(groups).map((g) => ({
-        id: g.id,
-        name: g.subject,
-        participants: g.participants?.length || 0,
-        status: 'Active',
-      }));
-      botState.groups = list;
-      await syncConnectedGroupsToInbox(
-        currentSock,
-        list.map((g) => ({
-          id: g.id,
-          name: g.name,
-          participants: g.participants,
-          isBotAdmin: isBotGroupAdminFromMeta(currentSock, groups[g.id]),
-        }))
-      ).catch(() => {});
-    } catch (e) {}
+app.get('/api/groups', async (_req: Request, res: Response) => {
+  if (currentSock && (botState.status === 'connected' || currentSock.authState?.creds?.registered)) {
+    await refreshAllConnectedGroups(currentSock, 10000);
   }
-  const inboxGroups = getInboxGroupsList();
-  const inboxMap = new Map(inboxGroups.map((ig) => [ig.id, attachSignedAvatarUrl(ig)]));
-  const enriched = botState.groups.map((g) => ({
-    ...g,
-    ...(inboxMap.get(g.id) || {}),
-  }));
-  res.json({ groups: enriched, inboxGroups: inboxGroups.map(attachSignedAvatarUrl) });
+  res.json(buildMergedConnectedGroupsResponse());
 });
 
 // 4b. Leave Any Connected WhatsApp Group from Server
@@ -1770,19 +2016,10 @@ app.post('/api/groups/leave', async (req: Request, res: Response) => {
     );
 
     await currentSock.groupLeave(groupId);
-    botState.groups = botState.groups.filter((g) => g.id !== groupId);
-    markGroupLeftInInbox(groupId);
+    removeBotStateGroup(groupId);
     await resolveAdminPermissionProblemsForGroup(groupId, groupName, currentSock).catch(() => {});
 
-    try {
-      const freshGroups = await currentSock.groupFetchAllParticipating();
-      botState.groups = Object.values(freshGroups).map((g) => ({
-        id: g.id,
-        name: g.subject,
-        participants: g.participants?.length || 0,
-        status: 'Active',
-      }));
-    } catch {}
+    await refreshAllConnectedGroups(currentSock, 8000);
 
     addActivityLog({
       groupId,
@@ -2642,27 +2879,8 @@ app.post('/api/voice-moderation/test', async (req: Request, res: Response) => {
 
 app.get('/api/inbox/groups', async (_req: Request, res: Response) => {
   try {
-    if (currentSock && botState.status === 'connected') {
-      try {
-        const groups = await currentSock.groupFetchAllParticipating();
-        primeGroupMetaCache(groups);
-        const list = Object.values(groups).map((g) => ({
-          id: g.id,
-          name: g.subject,
-          participants: g.participants?.length || 0,
-          status: 'Active',
-        }));
-        botState.groups = list;
-        await syncConnectedGroupsToInbox(
-          currentSock,
-          list.map((g) => ({
-            id: g.id,
-            name: g.name,
-            participants: g.participants,
-            isBotAdmin: isBotGroupAdminFromMeta(currentSock, groups[g.id]),
-          }))
-        );
-      } catch {}
+    if (currentSock && (botState.status === 'connected' || currentSock.authState?.creds?.registered)) {
+      await refreshAllConnectedGroups(currentSock, 10000);
     }
 
     const groups = getInboxGroupsList().map(attachSignedAvatarUrl);

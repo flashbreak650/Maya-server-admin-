@@ -1161,8 +1161,8 @@ export function SecurityToolPage({
               </div>
               <p className="text-[10px] text-[#0f291e]/80 font-medium leading-relaxed">
                 {isBn
-                  ? '🛡️ এই ২ জন সার্ভার অ্যাডমিনকে মেনশন করলে একই নোটিশ যাবে এবং শুধুমাত্র এই ২ জন গ্রুপে যেকোনো মেসেজ বা ভয়েসে রিপ্লাই দিয়ে "রিমুভ" লিখলেই তা সাথে সাথে ডিলিট হবে (অন্য কোনো অ্যাডমিন পারবে না)।'
-                  : 'Only these 2 server admin numbers trigger the mention reply notice and can reply "remove" to delete any group message or voice note.'}
+                  ? '🛡️ এই ২ জন সার্ভার অ্যাডমিনকে মেনশন করলে একই নোটিশ যাবে এবং শুধুমাত্র এই ২ জন গ্রুপ থেকে রিপ্লাই/@mention দিয়ে লিখলেই কাজ করবে: রিমুভ (মেসেজ/ভয়েস ডিলিট), কিক / kick, black [মিনিট] / block, unblock, rules / রুলস, warn / resetwarn, lock [মিনিট] / unlock, promote / demote, tagall, antisticker/antilink/antibadword/antivoice on/off, status ও help (অন্য কোনো অ্যাডমিন পারবে না)।'
+                  : 'Only these 2 server admin numbers trigger the mention reply notice and can execute group commands: remove (reply), kick, black [mins], unblock, rules, warn, resetwarn, lock, unlock, promote, demote, tagall, toggles, status, and help.'}
               </p>
             </div>
           )}
