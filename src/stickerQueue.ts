@@ -874,6 +874,28 @@ async function executeRealWhatsAppDelete(
   }
 
   if (sentPrimary) return;
+
+  // Final fallback: try generic admin group delete without explicit participant field
+  try {
+    await Promise.race([
+      sock.sendMessage(
+        item.groupId,
+        {
+          delete: {
+            remoteJid: item.groupId,
+            fromMe: false,
+            id: item.messageId,
+          },
+        },
+        { useCachedGroupMetadata: true }
+      ),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('WhatsApp generic delete timeout (8s)')), 8000)),
+    ]);
+    return;
+  } catch (err: any) {
+    lastError = err;
+  }
+
   throw lastError || new Error('Failed to send WhatsApp delete stanza');
 }
 

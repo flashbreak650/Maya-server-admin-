@@ -1107,10 +1107,10 @@ export async function runCleanup(
 
     // 2. Temporary Files & Temporary Media Cleanup
     const isTightDisk = Boolean(before.isContainerOverlay || before.disk.freeBytes < 45 * 1024 * 1024);
-    const isCriticalDisk = before.disk.freeBytes < 20 * 1024 * 1024;
+    const isCriticalDisk = before.disk.freeBytes < 20 * 1024 * 1024 || mode === 'full';
     if (mode === 'temp' || mode === 'full') {
       const mediaAge = isCriticalDisk
-        ? 30 * 1000
+        ? 0
         : trigger === 'manual'
           ? IN_USE_SAFETY_WINDOW_MS
           : 3 * 60 * 60 * 1000;
@@ -1129,14 +1129,14 @@ export async function runCleanup(
       directBytesFreed += voiceTempRes.bytesFreed;
       skippedProtectedCount += voiceTempRes.protectedSkipped;
 
-      const orphanRes = await cleanOrphanedTmpAndProjectLeftovers(verifiedDirectories, isCriticalDisk ? 15 * 1000 : 120 * 1000);
+      const orphanRes = await cleanOrphanedTmpAndProjectLeftovers(verifiedDirectories, isCriticalDisk ? 0 : 120 * 1000);
       filesDeleted += orphanRes.filesDeleted;
       directBytesFreed += orphanRes.bytesFreed;
       skippedProtectedCount += orphanRes.protectedSkipped;
 
       // Safe quota-aware Inbox media cleanup (strictly preserves important messages & text/deleted history DB)
-      const prunePct = isCriticalDisk ? 85 : trigger === 'manual' && mode === 'full' ? 65 : isTightDisk ? 40 : 0;
-      const targetMaxBytes = isCriticalDisk ? 1024 * 1024 : isTightDisk ? 4 * 1024 * 1024 : undefined;
+      const prunePct = mode === 'full' ? 100 : isCriticalDisk ? 85 : trigger === 'manual' ? 65 : isTightDisk ? 40 : 0;
+      const targetMaxBytes = mode === 'full' ? 0 : isCriticalDisk ? 1024 * 1024 : isTightDisk ? 4 * 1024 * 1024 : undefined;
       const inboxPrune = await enforceInboxMediaStorageLimit(prunePct, targetMaxBytes).catch(() => ({
         filesRemoved: 0,
         bytesFreed: 0,
@@ -1147,7 +1147,7 @@ export async function runCleanup(
       skippedProtectedCount += inboxPrune.protectedImportantSkipped;
 
       if (isCriticalDisk) {
-        const msgTrim = await trimNonImportantInboxMessagesForSpace(450).catch(() => ({
+        const msgTrim = await trimNonImportantInboxMessagesForSpace(mode === 'full' ? 200 : 450).catch(() => ({
           messagesTrimmed: 0,
           bytesEstimateFreed: 0,
         }));
