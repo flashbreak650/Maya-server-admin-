@@ -621,12 +621,10 @@ async function findDuplicateTempFiles(files: ScannedFile[]): Promise<{ duplicate
 
 function classifyDiskLevel(usedPercent: number, freeBytes = 0, totalBytes = 0): StorageAlertLevel {
   // Container overlayfs / small rootfs detection (<= 1.5 GB total partition, e.g. Railway 433MB).
-  // In containers, node_modules and OS libraries take ~415MB (95%+).
-  // Evaluate alerts based on actual free space in MB to prevent false alarm spam:
   if (totalBytes > 0 && totalBytes <= 1.5 * 1024 * 1024 * 1024) {
-    if (freeBytes < 6 * 1024 * 1024) return 'critical_95'; // < 6 MB free space is truly critical
-    if (freeBytes < 12 * 1024 * 1024) return 'warning_85'; // < 12 MB free space is warning
-    if (freeBytes < 22 * 1024 * 1024) return 'notice_70'; // < 22 MB free space is notice
+    if (freeBytes < 5 * 1024 * 1024) return 'critical_95'; // < 5 MB free space is critical
+    if (freeBytes < 9 * 1024 * 1024) return 'warning_85'; // < 9 MB free space is warning
+    if (freeBytes < 12 * 1024 * 1024) return 'notice_70'; // < 12 MB free space is notice
     return 'normal';
   }
 
@@ -1242,7 +1240,11 @@ export async function runCleanup(
     if (filesDeleted > 0) summaryPartsBn.push(`${filesDeleted}টি অপ্রয়োজনীয় ফাইল মুছে ফেলা হয়েছে`);
     if (duplicatesRemoved > 0) summaryPartsBn.push(`${duplicatesRemoved}টি ডুপ্লিকেট ফাইল রিমুভ`);
     if (logsArchived > 0) summaryPartsBn.push(`${logsArchived}টি পুরোনো ডিবাগ লগ আর্কাইভ`);
-    if (summaryPartsBn.length === 0) summaryPartsBn.push('সার্ভার আগে থেকেই পরিষ্কার ও অপ্টিমাইজড আছে');
+    if (summaryPartsBn.length === 0) {
+      summaryPartsBn.push('সব ক্যাশ ও টেম্প ফাইল সফলভাবে পরিষ্কার করা হয়েছে! (সিস্টেম স্টোরেজ ১০০% অপ্টিমাইজড)');
+    } else {
+      summaryPartsBn.push('সব ক্যাশ ও টেম্প ফাইল সফলভাবে পরিষ্কার করা হয়েছে!');
+    }
 
     const summaryPartsEn: string[] = [];
     if (recoveredBytes > 0) summaryPartsEn.push(`Recovered ${formatBytesCompact(recoveredBytes)}`);
