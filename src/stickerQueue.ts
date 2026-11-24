@@ -23,9 +23,14 @@ import {
   resolveServerProblem,
   restrictUser,
   safeSendMessage,
+  sendOneTimeBlockExtensionNotice,
 } from './moderationEngine.ts';
 import { DATA_DIR, STICKER_QUEUE_DB_PATH } from './storagePaths.ts';
-import { markInboxMessageDeleted } from './inboxStore.ts';
+import {
+  getAccumulatedStickerCountsSummary,
+  getAccumulatedStickersForPurge,
+  markInboxMessageDeleted,
+} from './inboxStore.ts';
 
 const QUEUE_DB_PATH = STICKER_QUEUE_DB_PATH;
 
@@ -33,7 +38,7 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-export type StickerPolicy = 'restricted_user' | 'sticker_spam' | 'anti_sticker';
+export type StickerPolicy = 'restricted_user' | 'sticker_spam' | 'anti_sticker' | 'bulk_purge';
 export type StickerTaskStatus =
   | 'pending'
   | 'processing'
@@ -403,7 +408,10 @@ export function enqueueStickerTask(params: {
   }
 
   const settings = getSettings();
-  const maxRetries = Math.max(5, Math.min(12, Number(settings.stickerDeleteMaxRetries ?? 5)));
+  const maxRetries =
+    policy === 'bulk_purge'
+      ? 2
+      : Math.max(5, Math.min(12, Number(settings.stickerDeleteMaxRetries ?? 5)));
 
   const item: StickerQueueItem = {
     uniqueKey,
@@ -531,13 +539,23 @@ export function handleIncomingStickerFastPath(sock: WASocket, msg: proto.IWebMes
     senderAliases
   );
   if (restrictionCheck.restricted) {
-    extendRestrictionBySeconds(
+    const extendedRes = extendRestrictionBySeconds(
       detected.remoteJid,
       canonicalSender,
       senderAliases,
       60,
-      detected.messageId
+      detected.messageId,
+      { isStickerBurst: true }
     );
+    if (extendedRes.shouldSendOneTimeNotice) {
+      sendOneTimeBlockExtensionNotice(sock, {
+        groupId: detected.remoteJid,
+        senderJid: detected.senderJid,
+        senderAltJid: detected.senderAltJid,
+        senderPhone: detected.senderPhone,
+        remainingMs: extendedRes.remainingMs || restrictionCheck.remainingMs,
+      }).catch(() => {});
+    }
     enqueueStickerTask({
       meta: detected,
       groupName,
@@ -831,8 +849,8 @@ async function processStickerTask(item: StickerQueueItem) {
     item.groupName = perms.groupSubject || item.groupName;
     const settings = getSettings();
 
-    // Respect Admin Shield if group metadata wasn't cached when enqueued
-    if (settings.adminShield && perms.isSenderAdmin) {
+    // Respect Admin Shield if group metadata wasn't cached when enqueued (bulk cleanup removes any sticker when triggered manually)
+    if (item.policy !== 'bulk_purge' && settings.adminShield && perms.isSenderAdmin) {
       activeMap.delete(item.uniqueKey);
       recordCompletedKey(item.uniqueKey);
       scheduleSaveQueue(false);
@@ -878,8 +896,11 @@ async function processStickerTask(item: StickerQueueItem) {
     markInboxMessageDeleted(
       item.groupId,
       item.messageId,
-      'sticker_queue',
-      `স্টিকার প্রোটেকশন (${item.policy === 'restricted_user' ? 'রেস্ট্রিক্টেড ইউজার' : item.policy === 'anti_sticker' ? 'Anti-Sticker' : 'Sticker Spam'})`
+      item.policy === 'bulk_purge' ? 'sticker_bulk_purge' : 'sticker_queue',
+      item.policy === 'bulk_purge'
+        ? 'গ্রুপের জমে থাকা আগের স্টিকার এক ক্লিকে সার্ভার থেকে রিমুভ'
+        : `স্টিকার প্রোটেকশন (${item.policy === 'restricted_user' ? 'রেস্ট্রিক্টেড ইউজার' : item.policy === 'anti_sticker' ? 'Anti-Sticker' : 'Sticker Spam'})`,
+      item.policy === 'bulk_purge' ? { deleteLocalMedia: true, markImportant: false } : undefined
     ).catch(() => {});
     scheduleSaveQueue(false);
 
@@ -971,6 +992,18 @@ async function processStickerTask(item: StickerQueueItem) {
       queueStats.totalFailed += 1;
       pushHistoryRecord({ ...item });
       scheduleSaveQueue(false);
+
+      if (item.policy === 'bulk_purge') {
+        // For old bulk-purged stickers whose WhatsApp protocol delete window already expired, clean server cache quietly without flooding Error logs
+        markInboxMessageDeleted(
+          item.groupId,
+          item.messageId,
+          'sticker_bulk_purge',
+          'সার্ভার থেকে পুরোনো স্টিকার পরিষ্কার করা হয়েছে (WA ডিলিট মেয়াদোত্তীর্ণ)',
+          { deleteLocalMedia: true, markImportant: false }
+        ).catch(() => {});
+        return;
+      }
 
       addActivityLog({
         groupId: item.groupId,
@@ -1127,6 +1160,95 @@ export function getStickerQueueStatus() {
     permissionDeniedGroups: Object.values(permissionDeniedGroups),
     pendingItems: pendingItems.slice(0, 50),
     recentHistory: [...recentHistory].reverse().slice(0, 40),
+    accumulatedStickers: getAccumulatedStickerCountsSummary(),
+  };
+}
+
+export function enqueueBulkStickerPurge(
+  sock: WASocket | null,
+  targetGroupId?: string
+): {
+  success: boolean;
+  foundCount: number;
+  enqueuedCount: number;
+  alreadyQueuedCount: number;
+  groupsAffectedCount: number;
+  message: string;
+} {
+  if (!isSocketReadyForDelete(sock)) {
+    return {
+      success: false,
+      foundCount: 0,
+      enqueuedCount: 0,
+      alreadyQueuedCount: 0,
+      groupsAffectedCount: 0,
+      message: 'WhatsApp বট কানেক্টেড নেই — গ্রুপ থেকে পুরোনো স্টিকার ডিলিট করতে আগে WhatsApp কানেক্ট করুন।',
+    };
+  }
+
+  const { items, groupsAffected } = getAccumulatedStickersForPurge(targetGroupId, 600);
+  if (items.length === 0) {
+    return {
+      success: true,
+      foundCount: 0,
+      enqueuedCount: 0,
+      alreadyQueuedCount: 0,
+      groupsAffectedCount: 0,
+      message: 'সার্ভারে রিমুভ করার মতো কোনো পুরোনো অ-ডিলিটেড স্টিকার পাওয়া যায়নি।',
+    };
+  }
+
+  let enqueuedCount = 0;
+  let alreadyQueuedCount = 0;
+  const now = Date.now();
+
+  for (const entry of items) {
+    const added = enqueueStickerTask({
+      meta: {
+        messageId: entry.messageId,
+        remoteJid: entry.groupId,
+        senderJid: entry.senderJid || `${entry.senderPhone}@s.whatsapp.net`,
+        senderAltJid: '',
+        senderPhone: entry.senderPhone || 'member',
+        fromMe: entry.fromMe,
+        stickerKind: 'sticker',
+        receivedAt: now,
+        msgTimestampMs: entry.timestamp || now,
+      },
+      groupName: entry.groupName,
+      policy: 'bulk_purge',
+      priority: 3,
+    });
+    if (added) enqueuedCount++;
+    else alreadyQueuedCount++;
+  }
+
+  if (enqueuedCount > 0) {
+    scheduleSaveQueue(false);
+    schedulePump();
+    addActivityLog({
+      groupId: targetGroupId && targetGroupId !== 'ALL' ? targetGroupId : 'SYSTEM',
+      groupName:
+        groupsAffected.length === 1
+          ? groupsAffected[0].groupName
+          : `${groupsAffected.length}টি গ্রুপ`,
+      senderJid: 'SYSTEM',
+      senderPhone: 'CLEANUP',
+      action: 'deleted',
+      reason: `এক-ক্লিক স্টিকার ক্লিনআপ শুরু হয়েছে (${enqueuedCount}টি পুরোনো স্টিকার কিউ করা হয়েছে)`,
+    });
+  }
+
+  return {
+    success: true,
+    foundCount: items.length,
+    enqueuedCount,
+    alreadyQueuedCount,
+    groupsAffectedCount: groupsAffected.length,
+    message:
+      enqueuedCount > 0
+        ? `${enqueuedCount}টি জমে থাকা স্টিকার রিমুভের জন্য High-Speed Queue-তে যুক্ত করা হয়েছে — বট এগুলো দ্রুত গ্রুপ ও সার্ভার থেকে মুছে ফেলছে!`
+        : 'এই স্টিকারগুলো ইতিমধ্যেই ডিলিট কিউ-তে রয়েছে।',
   };
 }
 

@@ -78,6 +78,7 @@ import {
   getStickerQueueStatus,
   retryFailedStickerQueue,
   clearStickerQueueHistory,
+  enqueueBulkStickerPurge,
   flushStickerQueueSync,
 } from './src/stickerQueue.ts';
 import {
@@ -1597,6 +1598,26 @@ app.post('/api/moderation/sticker-queue/clear-history', (_req: Request, res: Res
     res.json({ success: true, queue: getStickerQueueStatus(), message: 'স্টিকার কিউ হিস্ট্রি পরিষ্কার করা হয়েছে।' });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/moderation/sticker-queue/purge-group-stickers', (req: Request, res: Response) => {
+  try {
+    const groupId = req.body?.groupId ? String(req.body.groupId) : undefined;
+    const result = enqueueBulkStickerPurge(currentSock, groupId);
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        error: result.message,
+        queue: getStickerQueueStatus(),
+      });
+    }
+    res.json({
+      ...result,
+      queue: getStickerQueueStatus(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Could not purge accumulated stickers' });
   }
 });
 

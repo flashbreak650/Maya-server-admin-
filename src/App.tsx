@@ -634,7 +634,13 @@ export default function App() {
     permissionDeniedGroups: Array<{ groupId: string; groupName: string; detectedAt: number; blockedStickerCount: number }>;
     pendingItems: Array<any>;
     recentHistory: Array<any>;
+    accumulatedStickers?: {
+      totalCount: number;
+      groups: Array<{ groupId: string; groupName: string; count: number }>;
+    };
   } | null>(null);
+  const [purgingStickers, setPurgingStickers] = useState(false);
+  const [purgeTargetGroupId, setPurgeTargetGroupId] = useState<string>('ALL');
   const [logFilter, setLogFilter] = useState<'all' | 'warned' | 'blocks' | 'deleted' | 'error'>('all');
   const [isLogsLoading, setIsLogsLoading] = useState(false);
 
@@ -1721,6 +1727,26 @@ export default function App() {
       showNotification(isBn ? 'কিউ হিস্ট্রি পরিষ্কার হয়েছে' : 'Queue history cleared');
     } catch (err: any) {
       showNotification((isBn ? 'ক্লিয়ার ব্যর্থ: ' : 'Clear failed: ') + err.message);
+    }
+  };
+
+  const handlePurgeGroupStickers = async (groupId?: string) => {
+    if (purgingStickers) return;
+    setPurgingStickers(true);
+    try {
+      const target = groupId && groupId !== 'ALL' ? groupId : undefined;
+      const res = await callApi('/api/moderation/sticker-queue/purge-group-stickers', 'POST', {
+        groupId: target,
+      });
+      if (res?.queue) setStickerQueue(res.queue);
+      showNotification(res?.message || (isBn ? 'স্টিকার রিমুভ শুরু হয়েছে!' : 'Bulk sticker purge started!'));
+      setTimeout(() => {
+        handleRefreshStickerQueue();
+      }, 2200);
+    } catch (err: any) {
+      showNotification((isBn ? 'রিমুভ ব্যর্থ: ' : 'Purge failed: ') + err.message);
+    } finally {
+      setPurgingStickers(false);
     }
   };
 
@@ -2840,6 +2866,8 @@ export default function App() {
               customBadwordsText={customBadwordsText}
               setCustomBadwordsText={setCustomBadwordsText}
               stickerQueue={stickerQueue}
+              groups={groups}
+              purgingStickers={purgingStickers}
               activeWarningsCount={activeWarnings.length}
               onBack={() => navigateToPage('home')}
               onNavigate={navigateToPage}
@@ -2849,6 +2877,7 @@ export default function App() {
               onRefreshStickerQueue={handleRefreshStickerQueue}
               onRetryFailedStickers={handleRetryFailedStickers}
               onClearStickerQueueHistory={handleClearStickerQueueHistory}
+              onPurgeGroupStickers={handlePurgeGroupStickers}
               onSaveAdminMentionConfig={handleSaveAdminMentionConfig}
               onSaveBossAndNoticeConfig={handleSaveBossAndNoticeConfig}
               onTestBossAlert={handleTestBossAlert}
@@ -3516,6 +3545,51 @@ export default function App() {
                           </button>
                         </div>
                       )}
+
+                      <div className="pt-2 border-t border-emerald-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="text-[11px] font-extrabold text-slate-900">
+                            {isBn ? 'এক ক্লিকে গ্রুপের আগের জমে থাকা সব স্টিকার রিমুভ' : '1-Click Remove Previous Accumulated Stickers'}
+                          </div>
+                          <div className="text-[10px] text-slate-600">
+                            {isBn
+                              ? `সার্ভারে শনাক্তকৃত অ-ডিলিটেড স্টিকার: ${stickerQueue?.accumulatedStickers?.totalCount ?? 0}টি`
+                              : `Detected accumulated stickers: ${stickerQueue?.accumulatedStickers?.totalCount ?? 0}`}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                          <select
+                            value={purgeTargetGroupId}
+                            onChange={(e) => setPurgeTargetGroupId(e.target.value)}
+                            className="px-2 py-1 border border-slate-300 rounded-lg bg-white text-[11px] font-bold text-slate-800 max-w-[160px]"
+                          >
+                            <option value="ALL">{isBn ? 'সব গ্রুপ একসাথে' : 'All Groups'}</option>
+                            {(stickerQueue?.accumulatedStickers?.groups?.length
+                              ? stickerQueue.accumulatedStickers.groups
+                              : groups.map((g) => ({ groupId: g.id, groupName: g.name, count: 0 }))
+                            ).map((g) => (
+                              <option key={g.groupId} value={g.groupId}>
+                                {g.groupName} {g.count > 0 ? `(${g.count})` : ''}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            disabled={purgingStickers}
+                            onClick={() => handlePurgeGroupStickers(purgeTargetGroupId)}
+                            className="btn danger"
+                          >
+                            <Trash2 size={11} />{' '}
+                            {purgingStickers
+                              ? isBn
+                                ? 'রিমুভ হচ্ছে...'
+                                : 'Removing...'
+                              : isBn
+                              ? 'সব স্টিকার রিমুভ (১ ক্লিক)'
+                              : 'Purge All Stickers'}
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>

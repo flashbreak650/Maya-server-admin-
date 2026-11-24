@@ -40,6 +40,8 @@ interface SecurityToolPageProps {
   customBadwordsText: string;
   setCustomBadwordsText: (v: string) => void;
   stickerQueue: any;
+  groups?: Array<{ id: string; name: string }>;
+  purgingStickers?: boolean;
   activeWarningsCount: number;
   onBack: () => void;
   onNavigate: (page: PageId) => void;
@@ -49,6 +51,7 @@ interface SecurityToolPageProps {
   onRefreshStickerQueue: () => void;
   onRetryFailedStickers: () => void;
   onClearStickerQueueHistory: () => void;
+  onPurgeGroupStickers?: (groupId?: string) => void;
   onSaveAdminMentionConfig: () => void;
   onSaveBossAndNoticeConfig: () => void;
   onTestBossAlert: () => void;
@@ -134,10 +137,13 @@ export function SecurityToolPage({
   onNavigate,
   onUpdateToggle,
   onSaveBadwords,
+  groups,
+  purgingStickers,
   onSaveStickerSpamConfig,
   onRefreshStickerQueue,
   onRetryFailedStickers,
   onClearStickerQueueHistory,
+  onPurgeGroupStickers,
   onSaveAdminMentionConfig,
   onSaveBossAndNoticeConfig,
   onTestBossAlert,
@@ -584,6 +590,56 @@ export function SecurityToolPage({
                     </button>
                   </div>
                 )}
+              </div>
+            )}
+
+            {onPurgeGroupStickers && (
+              <div className="mt-2.5 pt-2.5 border-t border-emerald-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-[11px] font-extrabold text-slate-900">
+                    {isBn ? 'এক ক্লিকে গ্রুপের আগের জমে থাকা সব স্টিকার রিমুভ' : '1-Click Remove Previous Accumulated Stickers'}
+                  </div>
+                  <div className="text-[10px] text-slate-600">
+                    {isBn
+                      ? `সার্ভারে শনাক্তকৃত অ-ডিলিটেড স্টিকার: ${stickerQueue?.accumulatedStickers?.totalCount ?? 0}টি (${stickerQueue?.accumulatedStickers?.groups?.length ?? 0} গ্রুপ)`
+                      : `Detected accumulated stickers: ${stickerQueue?.accumulatedStickers?.totalCount ?? 0}`}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                  <select
+                    id="sec-purge-group-select"
+                    defaultValue="ALL"
+                    className="px-2 py-1.5 border border-slate-300 rounded-lg bg-white text-[11px] font-bold text-slate-800 max-w-[170px]"
+                  >
+                    <option value="ALL">{isBn ? 'সব কানেক্টেড গ্রুপ' : 'All Groups'}</option>
+                    {(stickerQueue?.accumulatedStickers?.groups?.length
+                      ? stickerQueue.accumulatedStickers.groups
+                      : (groups || []).map((g) => ({ groupId: g.id, groupName: g.name, count: 0 }))
+                    ).map((g: any) => (
+                      <option key={g.groupId} value={g.groupId}>
+                        {g.groupName} {g.count > 0 ? `(${g.count})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={Boolean(purgingStickers)}
+                    onClick={() => {
+                      const sel = document.getElementById('sec-purge-group-select') as HTMLSelectElement | null;
+                      onPurgeGroupStickers(sel?.value || 'ALL');
+                    }}
+                    className="btn danger"
+                  >
+                    <Trash2 size={11} />{' '}
+                    {purgingStickers
+                      ? isBn
+                        ? 'রিমুভ হচ্ছে...'
+                        : 'Removing...'
+                      : isBn
+                      ? 'সব স্টিকার রিমুভ (১ ক্লিক)'
+                      : 'Purge All Stickers'}
+                  </button>
+                </div>
               </div>
             )}
           </div>

@@ -1356,7 +1356,8 @@ export async function markInboxMessageDeleted(
   groupId: string,
   messageId: string,
   deletedBy: string,
-  deletionReason: string
+  deletionReason: string,
+  options?: { deleteLocalMedia?: boolean; markImportant?: boolean }
 ) {
   if (!groupId || !messageId || !groupId.endsWith('@g.us')) return;
   loadInboxIndex();
@@ -1369,10 +1370,30 @@ export async function markInboxMessageDeleted(
     target.deletedAt = Date.now();
     target.deletedBy = deletedBy;
     target.deletionReason = deletionReason;
-    // Automatically protect moderation-deleted evidence as important audit if deleted by guard
-    if (deletedBy !== 'sender_revoke') {
+
+    if (options?.deleteLocalMedia && target.media?.relPath) {
+      try {
+        const baseDir = path.resolve(INBOX_MEDIA_DIR);
+        const full = path.resolve(baseDir, target.media.relPath);
+        if (full.startsWith(baseDir + path.sep) && fs.existsSync(full)) {
+          await fs.promises.unlink(full).catch(() => {});
+        }
+      } catch {}
+      target.media = {
+        ...target.media,
+        status: 'pruned_for_space',
+        relPath: undefined,
+        unavailableReason: 'স্টিকার রিমুভ ক্লিনআপ দ্বারা ফাইলটি মুছে ফেলা হয়েছে।',
+      };
+    }
+
+    // Automatically protect moderation-deleted evidence as important audit (except sender revoke or bulk purge)
+    if (typeof options?.markImportant === 'boolean') {
+      target.isImportant = options.markImportant;
+    } else if (deletedBy !== 'sender_revoke' && deletedBy !== 'sticker_bulk_purge') {
       target.isImportant = true;
     }
+
     scheduleSaveGroupMessages(groupId);
     const summary = updateGroupSummaryFromRecords(groupId);
     emitInboxEvent({
@@ -2020,6 +2041,102 @@ export function getRecentGroupVoiceClips(limit = 40, filterGroupId?: string): In
 
   clips.sort((a, b) => b.timestamp - a.timestamp);
   return clips.slice(0, capped);
+}
+
+export interface AccumulatedGroupStickerEntry {
+  messageId: string;
+  groupId: string;
+  groupName: string;
+  senderJid: string;
+  senderPhone: string;
+  fromMe: boolean;
+  timestamp: number;
+}
+
+function isStickerInboxRecord(rec: InboxMessageRecord): boolean {
+  return (
+    rec.messageType === 'sticker' ||
+    rec.rawMessageKind === 'stickerMessage' ||
+    rec.rawMessageKind === 'lottieStickerMessage' ||
+    rec.rawMessageKind === 'stickerPackMessage'
+  );
+}
+
+export function getAccumulatedStickerCountsSummary(): {
+  totalCount: number;
+  groups: Array<{ groupId: string; groupName: string; count: number }>;
+} {
+  loadInboxIndex();
+  const groups: Array<{ groupId: string; groupName: string; count: number }> = [];
+  let totalCount = 0;
+
+  for (const [gid, gInfo] of Object.entries(inboxIndex.groups)) {
+    const records = loadGroupMessages(gid);
+    let count = 0;
+    for (const rec of records) {
+      if (!rec.isDeleted && isStickerInboxRecord(rec)) {
+        count++;
+      }
+    }
+    if (count > 0) {
+      totalCount += count;
+      groups.push({
+        groupId: gid,
+        groupName: gInfo?.name || 'WhatsApp Group',
+        count,
+      });
+    }
+  }
+
+  groups.sort((a, b) => b.count - a.count);
+  return { totalCount, groups };
+}
+
+export function getAccumulatedStickersForPurge(
+  targetGroupId?: string,
+  limit = 600
+): {
+  items: AccumulatedGroupStickerEntry[];
+  groupsAffected: Array<{ groupId: string; groupName: string; count: number }>;
+} {
+  loadInboxIndex();
+  const capped = Math.max(1, Math.min(2000, Number(limit || 600)));
+  const cleanTarget = targetGroupId && targetGroupId !== 'ALL' ? String(targetGroupId).trim() : '';
+  const groupIds = cleanTarget ? [cleanTarget] : Object.keys(inboxIndex.groups);
+
+  const items: AccumulatedGroupStickerEntry[] = [];
+  const countsMap = new Map<string, { groupId: string; groupName: string; count: number }>();
+
+  for (const gid of groupIds) {
+    if (!gid.endsWith('@g.us')) continue;
+    const records = loadGroupMessages(gid);
+    const groupName = inboxIndex.groups[gid]?.name || 'WhatsApp Group';
+    for (const rec of records) {
+      if (rec.isDeleted || !isStickerInboxRecord(rec) || !rec.id) continue;
+      items.push({
+        messageId: rec.id,
+        groupId: gid,
+        groupName: rec.groupName || groupName,
+        senderJid: rec.senderJid || (rec.senderPhone ? `${rec.senderPhone}@s.whatsapp.net` : ''),
+        senderPhone: rec.senderPhone || 'member',
+        fromMe: Boolean(rec.fromMe),
+        timestamp: Number(rec.timestamp || 0),
+      });
+      const prev = countsMap.get(gid);
+      if (prev) {
+        prev.count += 1;
+      } else {
+        countsMap.set(gid, { groupId: gid, groupName: rec.groupName || groupName, count: 1 });
+      }
+    }
+  }
+
+  // Delete newest stickers first so visible stickers disappear immediately
+  items.sort((a, b) => b.timestamp - a.timestamp);
+  return {
+    items: items.slice(0, capped),
+    groupsAffected: Array.from(countsMap.values()).sort((a, b) => b.count - a.count),
+  };
 }
 
 loadInboxIndex();

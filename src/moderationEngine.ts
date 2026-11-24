@@ -212,6 +212,8 @@ export interface RestrictedUser {
   restrictedAt: number;
   expiresAt: number;
   durationMinutes?: number;
+  addedMinutesCount?: number;
+  extensionNoticeSentAt?: number;
   reason: string;
   violationCount: number;
 }
@@ -1406,37 +1408,132 @@ function findRestrictionEntry(
 }
 
 const recentExtendedMsgIds = new Map<string, number>();
+const expiringRestrictionKeys = new Set<string>();
+
+function formatRestrictionExpirySummary(user: RestrictedUser): string {
+  const baseMins = Math.max(
+    1,
+    Number(user.durationMinutes || Math.round((user.expiresAt - user.restrictedAt) / 60000) || 10)
+  );
+  const addedMins = Math.max(0, Number(user.addedMinutesCount || 0));
+  const totalMins = baseMins + addedMins;
+  if (addedMins > 0) {
+    return `${totalMins} মিনিটের (মূল ${baseMins} মি. + ${addedMins} মি. জরিমানা)`;
+  }
+  return `${baseMins} মিনিটের`;
+}
+
+function liftExpiredRestriction(
+  key: string,
+  restriction: RestrictedUser,
+  sockGetter?: () => WASocket | null
+) {
+  if (!db.restrictedUsers?.[key]) return;
+  delete db.restrictedUsers[key];
+  saveDatabase();
+
+  if (expiringRestrictionKeys.has(key)) return;
+  expiringRestrictionKeys.add(key);
+  setTimeout(() => expiringRestrictionKeys.delete(key), 30000);
+
+  const durationLabel = formatRestrictionExpirySummary(restriction);
+  addActivityLog({
+    groupId: restriction.groupId,
+    groupName: restriction.groupName || getKnownGroupSubjectFallback(restriction.groupId),
+    senderJid: restriction.senderJid,
+    senderPhone: restriction.senderPhone,
+    action: 'unmuted',
+    reason: `সাময়িক রেস্ট্রিকশনের মেয়াদ শেষ হয়েছে (${durationLabel} — Auto Lifted)`,
+  });
+
+  const activeGetter = sockGetter || globalSocketGetter;
+  if (activeGetter) {
+    const sock = activeGetter();
+    if (sock && sock.authState?.creds?.registered) {
+      const settings = getSettings();
+      if (!settings.silentModeration) {
+        safeSendMessage(sock, restriction.groupId, {
+          text: `🔔 *মেসেজিং বিরতি সমাপ্ত*\n\n👤 @${restriction.senderPhone}\n✅ আপনার ${durationLabel} সাময়িক নীরবতার সময় শেষ হয়েছে। এখন থেকে পুনরায় গ্রুপে মেসেজ পাঠাতে পারবেন।`,
+          mentions: [restriction.senderJid],
+        }).catch(() => {});
+      }
+    }
+  }
+}
+
+export async function sendOneTimeBlockExtensionNotice(
+  sock: WASocket | null,
+  params: {
+    groupId: string;
+    senderJid: string;
+    senderAltJid?: string;
+    senderPhone: string;
+    remainingMs: number;
+  }
+): Promise<boolean> {
+  if (!sock || !sock.authState?.creds?.registered) return false;
+  const settings = getSettings();
+  if (settings.silentModeration) return false;
+
+  const remainingMins = Math.max(1, Math.ceil((params.remainingMs || 60000) / 60000));
+  const mentions = Array.from(
+    new Set([normalizeJid(params.senderJid), params.senderAltJid ? normalizeJid(params.senderAltJid) : ''].filter(Boolean))
+  );
+  return await safeSendMessage(sock, params.groupId, {
+    text: `⏳ *ব্লক সময় বৃদ্ধি নোটিশ*\n\n👤 @${params.senderPhone}\n🚫 আপনি বর্তমানে মেসেজ ব্লক অবস্থায় আছেন! ব্লক অবস্থায় কোনো মেসেজ বা স্টিকার পাঠালে সেটি অটো-ডিলিট হবে এবং **প্রতিটি মেসেজে ব্লকের সময় +১ মিনিট করে যোগ হবে**।\n⏱️ বর্তমান বাকি সময়: প্রায় ${remainingMins} মিনিট\n\n📌 *(এই সতর্কবার্তাটি শুধু একবারই দেওয়া হলো — এরপর থেকে প্রতি মেসেজে নীরবে +১ মিনিট করে যোগ হতে থাকবে)*`,
+    mentions,
+  });
+}
 
 export function extendRestrictionBySeconds(
   groupId: string,
   senderJid: string,
   extraJids: string[] = [],
   addSeconds: number = 60,
-  messageId?: string
-): { extended: boolean; expiresAt: number; remainingMs: number } {
-  if (!db.restrictedUsers) return { extended: false, expiresAt: 0, remainingMs: 0 };
+  messageId?: string,
+  opts?: { isStickerBurst?: boolean }
+): {
+  extended: boolean;
+  expiresAt: number;
+  remainingMs: number;
+  addedMinutesCount: number;
+  shouldSendOneTimeNotice: boolean;
+} {
+  if (!db.restrictedUsers) {
+    return { extended: false, expiresAt: 0, remainingMs: 0, addedMinutesCount: 0, shouldSendOneTimeNotice: false };
+  }
   const found = findRestrictionEntry(groupId, senderJid, extraJids);
-  if (!found) return { extended: false, expiresAt: 0, remainingMs: 0 };
+  if (!found) {
+    return { extended: false, expiresAt: 0, remainingMs: 0, addedMinutesCount: 0, shouldSendOneTimeNotice: false };
+  }
 
   const now = Date.now();
   if (found.restriction.expiresAt <= now) {
-    return { extended: false, expiresAt: found.restriction.expiresAt, remainingMs: 0 };
+    return {
+      extended: false,
+      expiresAt: found.restriction.expiresAt,
+      remainingMs: 0,
+      addedMinutesCount: found.restriction.addedMinutesCount || 0,
+      shouldSendOneTimeNotice: false,
+    };
   }
 
   if (messageId) {
     const dedupKey = `${groupId}:${messageId}`;
     const prevTs = recentExtendedMsgIds.get(dedupKey);
-    if (prevTs && now - prevTs < 30000) {
+    if (prevTs && now - prevTs < 10 * 60 * 1000) {
       return {
         extended: false,
         expiresAt: found.restriction.expiresAt,
         remainingMs: Math.max(0, found.restriction.expiresAt - now),
+        addedMinutesCount: found.restriction.addedMinutesCount || 0,
+        shouldSendOneTimeNotice: false,
       };
     }
     recentExtendedMsgIds.set(dedupKey, now);
-    if (recentExtendedMsgIds.size > 600) {
+    if (recentExtendedMsgIds.size > 1200) {
       for (const [k, ts] of recentExtendedMsgIds.entries()) {
-        if (now - ts > 60000) recentExtendedMsgIds.delete(k);
+        if (now - ts > 10 * 60 * 1000) recentExtendedMsgIds.delete(k);
       }
     }
   }
@@ -1445,12 +1542,27 @@ export function extendRestrictionBySeconds(
   const maxCap = now + 24 * 60 * 60 * 1000;
   found.restriction.expiresAt = Math.min(maxCap, found.restriction.expiresAt + addMs);
   found.restriction.violationCount = (found.restriction.violationCount || 1) + 1;
+  found.restriction.addedMinutesCount = (found.restriction.addedMinutesCount || 0) + Math.max(1, Math.round(addSeconds / 60));
+
+  let shouldSendOneTimeNotice = false;
+  if (!found.restriction.extensionNoticeSentAt) {
+    // Wait 2s only for rapid initial sticker bursts so we don't clash with the initial spam alert,
+    // while sending immediately for any follow-up message or manual block attempt.
+    const isSameInstantSpamBurst = Boolean(opts?.isStickerBurst) && now - found.restriction.restrictedAt < 2000;
+    if (!isSameInstantSpamBurst) {
+      found.restriction.extensionNoticeSentAt = now;
+      shouldSendOneTimeNotice = true;
+    }
+  }
+
   saveDatabase();
 
   return {
     extended: true,
     expiresAt: found.restriction.expiresAt,
     remainingMs: Math.max(0, found.restriction.expiresAt - now),
+    addedMinutesCount: found.restriction.addedMinutesCount,
+    shouldSendOneTimeNotice,
   };
 }
 
@@ -1472,34 +1584,7 @@ export function isUserRestricted(
   const { key, restriction } = found;
   const now = Date.now();
   if (now >= restriction.expiresAt) {
-    // Restriction duration has elapsed! Automatically remove
-    delete db.restrictedUsers[key];
-    saveDatabase();
-
-    addActivityLog({
-      groupId,
-      groupName: restriction.groupName || 'WhatsApp Group',
-      senderJid: restriction.senderJid,
-      senderPhone: restriction.senderPhone,
-      action: 'unmuted',
-      reason: 'সাময়িক রেস্ট্রিকশনের মেয়াদ শেষ হয়েছে (Auto Lifted)',
-    });
-
-    const durMins =
-      restriction.durationMinutes ||
-      Math.max(1, Math.round((restriction.expiresAt - restriction.restrictedAt) / 60000)) ||
-      10;
-
-    if (globalSocketGetter) {
-      const sock = globalSocketGetter();
-      if (sock && sock.authState?.creds?.registered) {
-        safeSendMessage(sock, groupId, {
-          text: `🔔 *মেসেজিং বিরতি সমাপ্ত*\n\n👤 @${restriction.senderPhone}\n✅ আপনার ${durMins} মিনিটের সাময়িক নীরবতার সময় শেষ হয়েছে। এখন থেকে পুনরায় গ্রুপে মেসেজ পাঠাতে পারবেন।`,
-          mentions: [restriction.senderJid],
-        }).catch(() => {});
-      }
-    }
-
+    liftExpiredRestriction(key, restriction);
     return { restricted: false, remainingMs: 0 };
   }
 
@@ -1522,20 +1607,31 @@ export function restrictUser(
   if (!db.restrictedUsers) db.restrictedUsers = {};
 
   const now = Date.now();
-  const expiresAt = now + Math.max(1, durationMinutes) * 60 * 1000;
-  const key = getRestrictedUserKey(groupId, senderJid);
+  const cleanDur = Math.max(1, Math.round(Number(durationMinutes || 10)));
+  const expiresAt = now + cleanDur * 60 * 1000;
+  const canonical = resolveCanonicalUserIdSync(senderJid, altJid);
+  const key = getRestrictedUserKey(groupId, canonical || senderJid);
 
-  const prevCount = db.restrictedUsers[key]?.violationCount || 0;
+  let prevCount = db.restrictedUsers[key]?.violationCount || 0;
+  // Remove any stale LID/PN duplicate restriction entries for the same member in this group
+  for (let i = 0; i < 4; i++) {
+    const existing = findRestrictionEntry(groupId, senderJid, [altJid || '', canonical].filter(Boolean));
+    if (!existing) break;
+    prevCount = Math.max(prevCount, existing.restriction.violationCount || 0);
+    delete db.restrictedUsers[existing.key];
+  }
 
   const restriction: RestrictedUser = {
     groupId,
     groupName,
-    senderJid: normalizeJid(senderJid),
-    altJid: altJid ? normalizeJid(altJid) : undefined,
+    senderJid: normalizeJid(canonical || senderJid),
+    altJid: altJid ? normalizeJid(altJid) : normalizeJid(senderJid) !== normalizeJid(canonical || senderJid) ? normalizeJid(senderJid) : undefined,
     senderPhone,
     restrictedAt: now,
     expiresAt,
-    durationMinutes: Math.max(1, durationMinutes),
+    durationMinutes: cleanDur,
+    addedMinutesCount: 0,
+    extensionNoticeSentAt: undefined,
     reason,
     violationCount: prevCount + 1,
   };
@@ -1547,11 +1643,11 @@ export function restrictUser(
   addActivityLog({
     groupId,
     groupName,
-    senderJid,
+    senderJid: restriction.senderJid,
     senderPhone,
     action: 'restricted',
-    reason: `Individual Temporary Mute (${durationMinutes} মিনিট): ${reason}`,
-    details: `${durationMinutes} মিনিটের জন্য গ্রুপের সকল নতুন মেসেজ স্বয়ংক্রিয়ভাবে মুছে দেওয়া হবে`,
+    reason: `Individual Temporary Mute (${cleanDur} মিনিট): ${reason}`,
+    details: `${cleanDur} মিনিটের জন্য গ্রুপের সকল নতুন মেসেজ স্বয়ংক্রিয়ভাবে মুছে দেওয়া হবে`,
   });
 
   return restriction;
@@ -1560,17 +1656,24 @@ export function restrictUser(
 export function unrestrictUser(groupId: string, senderJid: string, extraJids: string[] = []): boolean {
   if (!db.restrictedUsers) return false;
 
-  const found = findRestrictionEntry(groupId, senderJid, extraJids);
-  if (found) {
-    const { key, restriction } = found;
-    delete db.restrictedUsers[key];
+  let removedAny = false;
+  let lastRestriction: RestrictedUser | null = null;
+  for (let i = 0; i < 4; i++) {
+    const found = findRestrictionEntry(groupId, senderJid, extraJids);
+    if (!found) break;
+    lastRestriction = found.restriction;
+    delete db.restrictedUsers[found.key];
+    removedAny = true;
+  }
+
+  if (removedAny && lastRestriction) {
     saveDatabase();
 
     addActivityLog({
       groupId,
-      groupName: restriction.groupName || 'WhatsApp Group',
-      senderJid: restriction.senderJid,
-      senderPhone: restriction.senderPhone,
+      groupName: lastRestriction.groupName || getKnownGroupSubjectFallback(groupId),
+      senderJid: lastRestriction.senderJid,
+      senderPhone: lastRestriction.senderPhone,
       action: 'unmuted',
       reason: 'সাময়িক মেসেজ ব্লক তুলে নেওয়া হয়েছে (Manual Unblock)',
     });
@@ -1579,8 +1682,8 @@ export function unrestrictUser(groupId: string, senderJid: string, extraJids: st
       const sock = globalSocketGetter();
       if (sock && sock.authState?.creds?.registered) {
         safeSendMessage(sock, groupId, {
-          text: `✅ *মেসেজ ব্লক প্রত্যাহার*\n\n👤 @${restriction.senderPhone}\nএখন থেকে আপনি আবার স্বাভাবিকভাবে গ্রুপে মেসেজ পাঠাতে পারবেন।`,
-          mentions: [restriction.senderJid],
+          text: `✅ *মেসেজ ব্লক প্রত্যাহার*\n\n👤 @${lastRestriction.senderPhone}\nএখন থেকে আপনি আবার স্বাভাবিকভাবে গ্রুপে মেসেজ পাঠাতে পারবেন।`,
+          mentions: [lastRestriction.senderJid],
         }).catch(() => {});
       }
     }
@@ -1598,21 +1701,7 @@ export function getActiveRestrictedUsers(): Array<RestrictedUser & { remainingSe
 
   for (const [key, user] of Object.entries(db.restrictedUsers)) {
     if (now >= user.expiresAt) {
-      delete db.restrictedUsers[key];
-      saveDatabase();
-      const durMins =
-        user.durationMinutes ||
-        Math.max(1, Math.round((user.expiresAt - user.restrictedAt) / 60000)) ||
-        10;
-      if (globalSocketGetter) {
-        const sock = globalSocketGetter();
-        if (sock && sock.authState?.creds?.registered) {
-          safeSendMessage(sock, user.groupId, {
-            text: `✅ WAGuard Security Update\n\n@${user.senderPhone}-এর ${durMins} মিনিটের Temporary Restriction শেষ হয়েছে। তিনি এখন আবার স্বাভাবিকভাবে গ্রুপে মেসেজ করতে পারবেন।`,
-            mentions: [user.senderJid],
-          }).catch(() => {});
-        }
-      }
+      liftExpiredRestriction(key, user);
     } else {
       const remainingSec = Math.max(0, Math.ceil((user.expiresAt - now) / 1000));
       const mins = Math.floor(remainingSec / 60);
@@ -1657,46 +1746,14 @@ export function startRestrictedUsersMonitor(sockGetter?: () => WASocket | null) 
     globalSocketGetter = sockGetter;
   }
 
-  setInterval(async () => {
+  setInterval(() => {
     if (!db.restrictedUsers) return;
     const now = Date.now();
-    let changed = false;
-
     for (const [key, user] of Object.entries(db.restrictedUsers)) {
       if (now >= user.expiresAt) {
-        delete db.restrictedUsers[key];
-        changed = true;
         console.log(`[Individual Mute] Restriction expired for @${user.senderPhone} in ${user.groupName}. Auto-lifted.`);
-        addActivityLog({
-          groupId: user.groupId,
-          groupName: user.groupName,
-          senderJid: user.senderJid,
-          senderPhone: user.senderPhone,
-          action: 'unmuted',
-          reason: 'সাময়িক রেস্ট্রিকশনের মেয়াদ শেষ হয়েছে (Auto Lifted)',
-        });
-
-        const durMins =
-          user.durationMinutes ||
-          Math.max(1, Math.round((user.expiresAt - user.restrictedAt) / 60000)) ||
-          10;
-        const activeGetter = sockGetter || globalSocketGetter;
-        if (activeGetter) {
-          const sock = activeGetter();
-          if (sock && sock.authState?.creds?.registered) {
-            try {
-              await safeSendMessage(sock, user.groupId, {
-                text: `✅ WAGuard Security Update\n\n@${user.senderPhone}-এর ${durMins} মিনিটের Temporary Restriction শেষ হয়েছে। তিনি এখন আবার স্বাভাবিকভাবে গ্রুপে মেসেজ করতে পারবেন।`,
-                mentions: [user.senderJid],
-              });
-            } catch (e) {}
-          }
-        }
+        liftExpiredRestriction(key, user, sockGetter || globalSocketGetter || undefined);
       }
-    }
-
-    if (changed) {
-      saveDatabase();
     }
   }, 5000);
 }
@@ -3476,22 +3533,39 @@ export async function deleteMessageSafely(
   let lastErr: any = null;
   for (const participant of participantCandidates) {
     try {
-      await sock.sendMessage(remoteJid, {
-        delete: {
-          remoteJid,
-          fromMe: Boolean(key.fromMe),
-          id: key.id,
-          participant,
-        },
-      });
+      await Promise.race([
+        sock.sendMessage(remoteJid, {
+          delete: {
+            remoteJid,
+            fromMe: Boolean(key.fromMe),
+            id: key.id,
+            participant,
+          },
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Delete ACK timeout (7s)')), 7000)),
+      ]);
       return true;
     } catch (err: any) {
       lastErr = err;
+      const errMsg = String(err?.message || '');
+      const status = Number(err?.output?.statusCode || err?.status || 0);
+      if (
+        status === 401 ||
+        status === 403 ||
+        status === 429 ||
+        /connection closed|not connected|socket|closed/i.test(errMsg)
+      ) {
+        console.error('[Delete Message FAILED fast]:', errMsg);
+        return false;
+      }
     }
   }
 
   try {
-    await sock.sendMessage(remoteJid, { delete: key });
+    await Promise.race([
+      sock.sendMessage(remoteJid, { delete: key }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Delete ACK timeout (7s)')), 7000)),
+    ]);
     return true;
   } catch (err: any) {
     lastErr = err;
@@ -3800,13 +3874,13 @@ export function startGroupLockMonitor(sockGetter: () => WASocket | null) {
         try {
           console.log(`Unlocking group ${groupId} after 10-minute spam timeout.`);
           await sock.groupSettingUpdate(groupId, 'not_announcement');
-          await sock.sendMessage(groupId, {
+          await safeSendMessage(sock, groupId, {
             text: '✅ [WAGuard Security]\n১০ মিনিটের লক মেয়াদ শেষ হয়েছে। গ্রুপটি পুনরায় সকল সদস্যের মেসেজ পাঠানোর জন্য উন্মুক্ত করা হলো। সবাইকে নিয়ম মেনে চলার অনুরোধ করা হচ্ছে।',
           });
 
           addActivityLog({
             groupId,
-            groupName: 'Protected Group',
+            groupName: lock.groupName || getKnownGroupSubjectFallback(groupId),
             senderJid: 'SYSTEM',
             senderPhone: 'SYSTEM',
             action: 'unlocked',
@@ -5017,6 +5091,16 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
         }
       } else if (metaKnown && !isBotAdmin) {
         console.warn(`[Individual Mute Warn] Bot lacks admin delete permission in "${groupSubject}".`);
+      }
+
+      if (extendedRes.shouldSendOneTimeNotice) {
+        sendOneTimeBlockExtensionNotice(sock, {
+          groupId: remoteJid,
+          senderJid,
+          senderAltJid,
+          senderPhone: cleanPhone,
+          remainingMs: extendedRes.remainingMs || restrictionCheck.remainingMs,
+        }).catch(() => {});
       }
 
       // Halts all processing!

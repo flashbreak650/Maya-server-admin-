@@ -550,6 +550,7 @@ export function GroupInboxPage({
   const [tabMode, setTabMode] = useState<'all' | 'deleted'>(initialDeletedOnly ? 'deleted' : 'all');
   const [composerText, setComposerText] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [purgingStickers, setPurgingStickers] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
 
   const [imageViewer, setImageViewer] = useState<{ src: string; downloadUrl?: string; title: string; caption?: string } | null>(null);
@@ -899,6 +900,27 @@ export function GroupInboxPage({
     }
   };
 
+  const handlePurgeGroupStickers = async () => {
+    if (!selectedGroup?.id || purgingStickers) return;
+    setPurgingStickers(true);
+    try {
+      const res = await callApi('/api/moderation/sticker-queue/purge-group-stickers', 'POST', {
+        groupId: selectedGroup.id,
+      });
+      showNotification(
+        res?.message || (isBn ? 'গ্রুপের পুরোনো সব স্টিকার রিমুভ শুরু হয়েছে!' : 'Bulk sticker cleanup started!')
+      );
+      setTimeout(() => {
+        loadInboxGroups();
+        loadMessages(selectedGroup.id);
+      }, 1500);
+    } catch (err: any) {
+      showNotification(err?.message || (isBn ? 'স্টিকার রিমুভ ব্যর্থ হয়েছে' : 'Sticker cleanup failed'));
+    } finally {
+      setPurgingStickers(false);
+    }
+  };
+
   const handleOpenDocPreview = async (msg: InboxMessageRecord) => {
     const src = buildApiMediaUrl(msg.media?.mediaUrl, apiBaseUrl);
     const downloadUrl = buildApiMediaUrl(msg.media?.downloadUrl, apiBaseUrl);
@@ -985,6 +1007,17 @@ export function GroupInboxPage({
               </div>
 
               <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  disabled={purgingStickers}
+                  onClick={handlePurgeGroupStickers}
+                  className="px-2.5 py-1 rounded-xl text-[11px] font-extrabold border bg-amber-500/90 hover:bg-amber-500 text-white border-amber-300/60 cursor-pointer flex items-center gap-1 disabled:opacity-60"
+                  title={isBn ? 'এই গ্রুপের জমে থাকা আগের সব স্টিকার ১ ক্লিকে রিমুভ করুন' : 'Remove all previous stickers from this group in 1 click'}
+                >
+                  {purgingStickers ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                  <span className="hidden sm:inline">{isBn ? 'সব স্টিকার রিমুভ' : 'Purge Stickers'}</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => setTabMode((m) => (m === 'all' ? 'deleted' : 'all'))}
