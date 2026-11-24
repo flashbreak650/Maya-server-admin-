@@ -210,6 +210,7 @@ interface ModerationSettings {
   adminMentionReplyTarget?: 'all_admins' | 'boss_only';
   adminMentionReplyMessage?: string;
   bossAdminNumber?: string;
+  secondAdminNumber?: string;
   bossFightAlertEnabled?: boolean;
   bossFightMinPeople?: number;
   bossFightWindowMinutes?: number;
@@ -599,6 +600,7 @@ export default function App() {
     adminMentionReplyTarget: 'all_admins',
     adminMentionReplyMessage: '🛡️ সম্মানিত @{{admin}}, সদস্য @{{user}} আপনাকে মেনশন করেছেন। অ্যাডমিন বর্তমানে ব্যস্ত থাকতে পারেন — অনুগ্রহ করে একটু অপেক্ষা করুন, সময় পেলে উত্তর দেবেন।',
     bossAdminNumber: '8801632222592',
+    secondAdminNumber: '8801346561627',
     bossFightAlertEnabled: true,
     bossFightMinPeople: 3,
     bossFightWindowMinutes: 5,
@@ -1762,6 +1764,7 @@ export default function App() {
   const handleSaveBossAndNoticeConfig = async () => {
     const patch = {
       bossAdminNumber: String(settings.bossAdminNumber || '8801632222592').trim(),
+      secondAdminNumber: String(settings.secondAdminNumber ?? '8801346561627').trim(),
       bossFightAlertEnabled: settings.bossFightAlertEnabled !== false,
       bossFightMinPeople: Math.max(2, Math.min(10, Number(settings.bossFightMinPeople ?? 3))),
       bossFightWindowMinutes: Math.max(1, Math.min(30, Number(settings.bossFightWindowMinutes ?? 5))),
@@ -1782,6 +1785,8 @@ export default function App() {
       adminMentionReplyEnabled: settings.adminMentionReplyEnabled !== false,
       adminMentionReplyTarget: settings.adminMentionReplyTarget === 'boss_only' ? 'boss_only' : 'all_admins',
       adminMentionReplyMessage: String(settings.adminMentionReplyMessage || '').trim(),
+      bossAdminNumber: String(settings.bossAdminNumber || '8801632222592').trim(),
+      secondAdminNumber: String(settings.secondAdminNumber ?? '8801346561627').trim(),
     };
     try {
       const res = await callApi('/api/moderation/settings', 'POST', patch);
@@ -4359,16 +4364,28 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <div className="bg-white p-2 rounded-lg border border-slate-200">
                       <label className="block text-[9.5px] font-bold text-slate-500 mb-1">
-                        {isBn ? 'শুধুমাত্র এই একজন বস অ্যাডমিন নম্বর' : 'Single Boss Admin WhatsApp Number'}
+                        {isBn ? 'প্রধান বস অ্যাডমিন নম্বর' : 'Primary Boss Admin Number'}
                       </label>
                       <input
                         type="text"
                         value={settings.bossAdminNumber ?? '8801632222592'}
                         onChange={(e) => setSettings((prev) => ({ ...prev, bossAdminNumber: e.target.value }))}
                         placeholder="8801632222592"
+                        className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-mono font-bold"
+                      />
+                    </div>
+                    <div className="bg-white p-2 rounded-lg border border-slate-200">
+                      <label className="block text-[9.5px] font-bold text-slate-500 mb-1">
+                        {isBn ? '২য় সার্ভার অ্যাডমিন (মেনশন + রিমুভ)' : '2nd Server Admin (Mention + Remove)'}
+                      </label>
+                      <input
+                        type="text"
+                        value={settings.secondAdminNumber ?? '8801346561627'}
+                        onChange={(e) => setSettings((prev) => ({ ...prev, secondAdminNumber: e.target.value }))}
+                        placeholder="8801346561627"
                         className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-mono font-bold"
                       />
                     </div>

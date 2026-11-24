@@ -130,6 +130,7 @@ export interface ModerationSettings {
   adminMentionReplyTarget?: 'all_admins' | 'boss_only';
   adminMentionReplyMessage?: string;
   bossAdminNumber?: string;
+  secondAdminNumber?: string;
   bossFightAlertEnabled?: boolean;
   bossFightMinPeople?: number;
   bossFightWindowMinutes?: number;
@@ -313,6 +314,7 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   adminMentionReplyTarget: 'all_admins',
   adminMentionReplyMessage: '🛡️ সম্মানিত @{{admin}}, সদস্য @{{user}} আপনাকে মেনশন করেছেন। অ্যাডমিন বর্তমানে ব্যস্ত থাকতে পারেন — অনুগ্রহ করে একটু অপেক্ষা করুন, সময় পেলে উত্তর দেবেন।',
   bossAdminNumber: '8801632222592',
+  secondAdminNumber: '8801346561627',
   bossFightAlertEnabled: true,
   bossFightMinPeople: 3,
   bossFightWindowMinutes: 5,
@@ -2314,6 +2316,147 @@ export function resolveBossAdminJid(): string {
   return `${digits}@s.whatsapp.net`;
 }
 
+export function getAuthorizedServerAdminDigitsList(): string[] {
+  const settings = getSettings();
+  const primary = normalizePhoneDigits(
+    settings.bossAdminNumber ?? DEFAULT_SETTINGS.bossAdminNumber ?? '8801632222592'
+  );
+  const secondary = normalizePhoneDigits(
+    settings.secondAdminNumber ?? DEFAULT_SETTINGS.secondAdminNumber ?? '8801346561627'
+  );
+  const list: string[] = [];
+  if (primary && primary.length >= 10) list.push(primary);
+  if (secondary && secondary.length >= 10 && !list.includes(secondary)) list.push(secondary);
+  return list.length > 0 ? list : ['8801632222592', '8801346561627'];
+}
+
+function extractQuotedContextInfo(realMsg: any, rawMsg?: any): any {
+  const containers = [
+    realMsg?.extendedTextMessage?.contextInfo,
+    realMsg?.imageMessage?.contextInfo,
+    realMsg?.videoMessage?.contextInfo,
+    realMsg?.audioMessage?.contextInfo,
+    realMsg?.documentMessage?.contextInfo,
+    realMsg?.stickerMessage?.contextInfo,
+  ];
+  for (const c of containers) {
+    if (c?.stanzaId) return c;
+  }
+  if (realMsg && typeof realMsg === 'object') {
+    for (const val of Object.values(realMsg)) {
+      if (val && typeof val === 'object' && (val as any)?.contextInfo?.stanzaId) {
+        return (val as any).contextInfo;
+      }
+    }
+  }
+  const rawCtx = rawMsg?.message?.extendedTextMessage?.contextInfo;
+  if (rawCtx?.stanzaId) return rawCtx;
+  return null;
+}
+
+function isAdminReplyDeleteCommand(text: string): boolean {
+  const cleaned = (text || '')
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
+    .trim()
+    .toLowerCase();
+  if (!cleaned || cleaned.length > 50) return false;
+  const noPunct = cleaned.replace(/[!.,।?~`'"()]+$/g, '').replace(/^[!./]+/, '').trim();
+  if (!noPunct) return false;
+
+  const exactOrShortRx =
+    /^(?:(?:এই|এইটা|এটা|ওটা|ওইটা|মেসেজ|মেসেজটা|ভয়েস|ভয়েস|ভয়েসটা|ভয়েসটা|অডিও|স্টিকার|ছবি|ভিডিও|লিংক|প্লিজ|please|pls|bhai|vai|bro|eta|oita|msg|message|voice|audio|sticker|photo|video|link|this|it)\s+)*(?:রিমুভ|রিমুব|রিমিউভ|ডিলিট|মুছে দাও|মুছে ফেলো|মুছে ফেল|মুছো|remove|rmv|rimuv|rimub|delete|dlt|del)(?:\s+(?:কর|করো|করেন|করে দাও|দাও|ফেল|ফেলো|প্লিজ|koro|kor|koren|kore dao|dao|please|pls|it|this|now))?$/iu;
+
+  return exactOrShortRx.test(noPunct);
+}
+
+async function isAuthorizedServerAdminSender(
+  sock: WASocket,
+  groupId: string,
+  senderJid: string,
+  senderAltJid?: string,
+  rawMsg?: proto.IWebMessageInfo
+): Promise<{ authorized: boolean; adminPhone?: string }> {
+  const authorizedDigits = getAuthorizedServerAdminDigitsList();
+  const candidates = new Set<string>();
+
+  const addCandidate = (raw?: string | null) => {
+    if (!raw) return;
+    const cu = cleanJidUser(raw);
+    if (cu) candidates.add(cu);
+    if (!isLidJid(raw)) {
+      const nu = normalizePhoneDigits(cu || raw);
+      if (nu) candidates.add(nu);
+    }
+  };
+
+  addCandidate(senderJid);
+  addCandidate(senderAltJid);
+  addCandidate((rawMsg?.key as any)?.participantPn);
+
+  for (const c of Array.from(candidates)) {
+    const mappedPn = lidToPnUserMap.get(c);
+    if (mappedPn) {
+      candidates.add(mappedPn);
+      const nu = normalizePhoneDigits(mappedPn);
+      if (nu) candidates.add(nu);
+    }
+    const mappedLid = pnToLidUserMap.get(c);
+    if (mappedLid) candidates.add(mappedLid);
+  }
+
+  const lidMappingApi = (sock as any)?.signalRepository?.lidMapping;
+  if (isLidJid(senderJid) && typeof lidMappingApi?.getPNForLID === 'function') {
+    try {
+      const lookedUpPn = await lidMappingApi.getPNForLID(senderJid);
+      if (lookedUpPn) {
+        rememberLidPnPair(senderJid, lookedUpPn);
+        addCandidate(lookedUpPn);
+      }
+    } catch {}
+  }
+
+  const matchDigits = () => {
+    for (const auth of authorizedDigits) {
+      if (candidates.has(auth)) return auth;
+      const authLid = pnToLidUserMap.get(auth);
+      if (authLid && candidates.has(authLid)) return auth;
+    }
+    return null;
+  };
+
+  const quickHit = matchDigits();
+  if (quickHit) return { authorized: true, adminPhone: quickHit };
+
+  // Fallback: inspect group metadata (refresh once if sender wasn't mapped yet)
+  let meta = await getGroupMeta(sock, groupId, false).catch(() => null);
+  learnGroupParticipantsLidPn(meta);
+  const checkMeta = (m: any) => {
+    const parts: any[] = Array.isArray(m?.participants) ? m.participants : [];
+    for (const p of parts) {
+      const pJids = [p.id, p.lid, p.phoneNumber].filter(Boolean) as string[];
+      const matchesSender = pJids.some((j) => {
+        const cu = cleanJidUser(j);
+        const nu = !isLidJid(j) ? normalizePhoneDigits(cu) : '';
+        return candidates.has(cu) || (nu && candidates.has(nu));
+      });
+      if (matchesSender) {
+        for (const j of pJids) addCandidate(j);
+      }
+    }
+    return matchDigits();
+  };
+
+  let metaHit = checkMeta(meta);
+  if (!metaHit) {
+    meta = await getGroupMeta(sock, groupId, true).catch(() => null);
+    learnGroupParticipantsLidPn(meta);
+    metaHit = checkMeta(meta);
+  }
+
+  if (metaHit) return { authorized: true, adminPhone: metaHit };
+  return { authorized: false };
+}
+
 interface ConflictEvent {
   senderKey: string;
   senderPhone: string;
@@ -2378,13 +2521,13 @@ export async function findMentionedAdminInMessage(
   senderJid: string,
   senderAltJid: string | undefined,
   targetMode: 'all_admins' | 'boss_only',
-  bossPhoneDigits: string,
+  bossPhoneDigits: string | string[],
   rawMsg?: any
 ): Promise<{ adminJid: string; adminTag: string; isBoss: boolean } | null> {
   const rawMentions: string[] = collectMentionedJidsFromMessage(realMsg, rawMsg);
   const ctxMentionSet = new Set(rawMentions.map((j) => normalizeJid(j)));
 
-  // Also detect inline numeric mentions like @+8801632222592, @\u2068+8801632222592, @01632222592, @+880 1632-222592
+  // Also detect inline numeric mentions like @+8801632222592, @+8801346561627, @01346561627, @+880 1346-561627
   if (messageText) {
     const cleanedText = messageText.replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '');
     const inlineMatches = cleanedText.matchAll(/@\s*(\+?[\d][\d\s-]{8,17}\d)/g);
@@ -2427,19 +2570,26 @@ export async function findMentionedAdminInMessage(
     if (lid) senderUsers.add(lid);
   }
 
-  const cleanBossDigits = normalizePhoneDigits(bossPhoneDigits);
-  const bossPnJid = cleanBossDigits ? `${cleanBossDigits}@s.whatsapp.net` : '';
+  const rawBossList = Array.isArray(bossPhoneDigits) ? bossPhoneDigits : [bossPhoneDigits];
   const lidMappingApi = (sock as any)?.signalRepository?.lidMapping;
+  const bossEntries: Array<{ digits: string; lidUser: string }> = [];
 
-  let bossLidUser = cleanBossDigits ? pnToLidUserMap.get(cleanBossDigits) || '' : '';
-  if (!bossLidUser && bossPnJid && typeof lidMappingApi?.getLIDForPN === 'function') {
-    try {
-      const lookedUpLid = await lidMappingApi.getLIDForPN(bossPnJid);
-      if (lookedUpLid) {
-        rememberLidPnPair(lookedUpLid, bossPnJid);
-        bossLidUser = cleanJidUser(lookedUpLid);
-      }
-    } catch {}
+  for (const rawBoss of rawBossList) {
+    const cleanBossDigits = normalizePhoneDigits(rawBoss);
+    if (!cleanBossDigits) continue;
+    if (bossEntries.some((b) => b.digits === cleanBossDigits)) continue;
+    const bossPnJid = `${cleanBossDigits}@s.whatsapp.net`;
+    let bossLidUser = pnToLidUserMap.get(cleanBossDigits) || '';
+    if (!bossLidUser && typeof lidMappingApi?.getLIDForPN === 'function') {
+      try {
+        const lookedUpLid = await lidMappingApi.getLIDForPN(bossPnJid);
+        if (lookedUpLid) {
+          rememberLidPnPair(lookedUpLid, bossPnJid);
+          bossLidUser = cleanJidUser(lookedUpLid);
+        }
+      } catch {}
+    }
+    bossEntries.push({ digits: cleanBossDigits, lidUser: bossLidUser });
   }
 
   let meta = await getGroupMeta(sock, groupId, false).catch(() => null);
@@ -2510,23 +2660,25 @@ export async function findMentionedAdminInMessage(
           if (nu) resolvedUsers.add(nu);
         }
       }
-      if (!bossLidUser && cleanBossDigits && resolvedUsers.has(cleanBossDigits)) {
-        const lidPart = pJids.find((j) => isLidJid(j));
-        if (lidPart) bossLidUser = cleanJidUser(lidPart);
+      for (const entry of bossEntries) {
+        if (!entry.lidUser && resolvedUsers.has(entry.digits)) {
+          const lidPart = pJids.find((j) => isLidJid(j));
+          if (lidPart) entry.lidUser = cleanJidUser(lidPart);
+        }
       }
     }
 
     const isSenderSelf = Array.from(resolvedUsers).some((u) => senderUsers.has(u));
     if (isSenderSelf) continue;
 
-    const isBoss = Boolean(
-      (cleanBossDigits && resolvedUsers.has(cleanBossDigits)) ||
-      (bossLidUser && resolvedUsers.has(bossLidUser))
+    const matchedBoss = bossEntries.find(
+      (b) => resolvedUsers.has(b.digits) || (b.lidUser && resolvedUsers.has(b.lidUser))
     );
+    const isBoss = Boolean(matchedBoss);
 
     const isBotSelf = Array.from(resolvedUsers).some((u) => botUsers.has(u));
     // Never trigger on mentioning a non-boss bot account (e.g. standalone Maya AI bot),
-    // but DO allow Boss Admin Mention Reply even if the bot session uses Boss's own WhatsApp number!
+    // but DO allow Server Admin Mention Reply even if the bot session uses a Server Admin's own WhatsApp number!
     if (isBotSelf && !isBoss) continue;
 
     const isGroupAdmin = Boolean(
@@ -2546,8 +2698,8 @@ export async function findMentionedAdminInMessage(
       ? normalizeJid(mentionedJid)
       : matchedParticipant?.id
         ? normalizeJid(matchedParticipant.id)
-        : isBoss && bossLidUser && (meta as any)?.addressingMode === 'lid'
-          ? `${bossLidUser}@lid`
+        : matchedBoss?.lidUser && (meta as any)?.addressingMode === 'lid'
+          ? `${matchedBoss.lidUser}@lid`
           : normalizeJid(mentionedJid);
 
     const hit = {
@@ -2557,7 +2709,7 @@ export async function findMentionedAdminInMessage(
     };
 
     if (isBoss) {
-      return hit; // Prioritize Boss Admin match immediately
+      return hit; // Prioritize Boss/Server Admin match immediately
     }
     if (!firstAdminHit) {
       firstAdminHit = hit;
@@ -5394,6 +5546,88 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
     if (cu2) contactNamesCache[cu2] = msg.pushName;
   }
 
+  // -------------------------------------------------------------
+  // STRICT 2-SERVER-ADMIN REPLY-TO-DELETE COMMAND ("রিমুভ" / "remove" / "ডিলিট")
+  // Only the two authorized server admin numbers can delete any replied message or voice!
+  // Other group admins CANNOT use this command.
+  // -------------------------------------------------------------
+  const quotedCtx = extractQuotedContextInfo(realMsg, msg);
+  if (quotedCtx?.stanzaId && messageText && isAdminReplyDeleteCommand(messageText)) {
+    const authCheck = await isAuthorizedServerAdminSender(sock, remoteJid, senderJid, senderAltJid, msg);
+    if (authCheck.authorized) {
+      let botCanDelete = isBotAdmin;
+      if (!metaKnown || !botCanDelete) {
+        const refreshed = await checkPermissions(sock, remoteJid, senderJid, true, senderAltJid);
+        botCanDelete = refreshed.isBotAdmin;
+      }
+
+      const botUsersSet = new Set(
+        [
+          sock.user?.id,
+          sock.user?.lid,
+          sock.authState?.creds?.me?.id,
+          sock.authState?.creds?.me?.lid,
+        ]
+          .map((x) => cleanJidUser(x))
+          .filter(Boolean)
+      );
+      const quotedParticipantRaw = quotedCtx.participant || '';
+      const isQuotedFromBot = Boolean(
+        quotedParticipantRaw && botUsersSet.has(cleanJidUser(quotedParticipantRaw))
+      );
+
+      const quotedKey: proto.IMessageKey = {
+        remoteJid,
+        fromMe: isQuotedFromBot,
+        id: quotedCtx.stanzaId,
+        ...(quotedParticipantRaw ? { participant: quotedParticipantRaw } : {}),
+      };
+
+      const deleted = await deleteMessageSafely(
+        sock,
+        remoteJid,
+        { key: quotedKey } as proto.IWebMessageInfo,
+        quotedParticipantRaw || undefined,
+        botCanDelete
+      );
+
+      if (deleted) {
+        db.stats.deletedMessages++;
+        saveDatabase();
+        markInboxMessageDeleted(
+          remoteJid,
+          quotedCtx.stanzaId,
+          'server_admin_reply',
+          `সার্ভার অ্যাডমিন (@${authCheck.adminPhone}) রিপ্লাই কমান্ডের মাধ্যমে ডিলিট করেছেন`
+        ).catch(() => {});
+        addActivityLog({
+          groupId: remoteJid,
+          groupName: groupSubject,
+          senderJid,
+          senderPhone: authCheck.adminPhone || cleanPhone,
+          action: 'deleted',
+          reason: `সার্ভার অ্যাডমিন (@${authCheck.adminPhone}) রিপ্লাই রিমুভ কমান্ড`,
+          details: `রিপ্লাই করা মেসেজ/ভয়েস (${quotedCtx.stanzaId}) সাথে সাথে ডিলিট করা হয়েছে`,
+        });
+        sock.sendMessage(remoteJid, { react: { text: '✅', key: msg.key } }).catch(() => {});
+      } else {
+        addActivityLog({
+          groupId: remoteJid,
+          groupName: groupSubject,
+          senderJid,
+          senderPhone: authCheck.adminPhone || cleanPhone,
+          action: 'error',
+          reason: botCanDelete
+            ? 'রিপ্লাই রিমুভ কমান্ড ব্যর্থ (মেসেজ পাওয়া যায়নি বা পুরোনো)'
+            : 'রিপ্লাই রিমুভ কমান্ড ব্যর্থ (বট গ্রুপের Admin নয়)',
+          details: `টার্গেট: ${quotedCtx.stanzaId}`,
+        });
+      }
+      return;
+    }
+    // Non-authorized senders (even other group admins!) cannot trigger this command.
+  }
+
   // Note: Clean-behavior Leaderboard tracking runs strictly AFTER spam/sticker/badword checks pass!
 
   // -------------------------------------------------------------
@@ -5891,7 +6125,7 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
   // Runs BEFORE Auto-Salam so "সলাম @+8801632222592" still replies to Boss/Admin mention!
   // -------------------------------------------------------------
   if (settings.adminMentionReplyEnabled !== false) {
-    const bossDigits = resolveBossAdminJid().split('@')[0];
+    const bossDigitsList = getAuthorizedServerAdminDigitsList();
     const targetMode = settings.adminMentionReplyTarget === 'boss_only' ? 'boss_only' : 'all_admins';
     const adminHit = await findMentionedAdminInMessage(
       sock,
@@ -5901,7 +6135,7 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
       senderJid,
       senderAltJid,
       targetMode,
-      bossDigits,
+      bossDigitsList,
       msg
     );
     if (adminHit) {

@@ -1132,6 +1132,38 @@ export function SecurityToolPage({
                   />
                 </div>
               </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                <div className="bg-white p-2 rounded-[10px] border border-emerald-950/[0.08]">
+                  <label className="block text-[9.5px] font-bold text-[#5f7368] mb-1">
+                    {isBn ? 'সার্ভার অ্যাডমিন ১ (প্রধান বস)' : 'Server Admin 1 (Primary)'}
+                  </label>
+                  <input
+                    type="text"
+                    value={settings.bossAdminNumber ?? '8801632222592'}
+                    onChange={(e) => setSettings((prev: any) => ({ ...prev, bossAdminNumber: e.target.value }))}
+                    placeholder="8801632222592"
+                    className="field font-mono font-bold"
+                  />
+                </div>
+                <div className="bg-white p-2 rounded-[10px] border border-emerald-950/[0.08]">
+                  <label className="block text-[9.5px] font-bold text-[#5f7368] mb-1">
+                    {isBn ? 'সার্ভার অ্যাডমিন ২ (মেনশন + রিপ্লাই রিমুভ)' : 'Server Admin 2 (Mention + Reply Remove)'}
+                  </label>
+                  <input
+                    type="text"
+                    value={settings.secondAdminNumber ?? '8801346561627'}
+                    onChange={(e) => setSettings((prev: any) => ({ ...prev, secondAdminNumber: e.target.value }))}
+                    placeholder="8801346561627"
+                    className="field font-mono font-bold"
+                  />
+                </div>
+              </div>
+              <p className="text-[10px] text-[#0f291e]/80 font-medium leading-relaxed">
+                {isBn
+                  ? '🛡️ এই ২ জন সার্ভার অ্যাডমিনকে মেনশন করলে একই নোটিশ যাবে এবং শুধুমাত্র এই ২ জন গ্রুপে যেকোনো মেসেজ বা ভয়েসে রিপ্লাই দিয়ে "রিমুভ" লিখলেই তা সাথে সাথে ডিলিট হবে (অন্য কোনো অ্যাডমিন পারবে না)।'
+                  : 'Only these 2 server admin numbers trigger the mention reply notice and can reply "remove" to delete any group message or voice note.'}
+              </p>
             </div>
           )}
         </div>
@@ -1297,13 +1329,25 @@ export function SecurityToolPage({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div className="bg-white p-2 rounded-[10px] border border-emerald-950/[0.08]">
                 <label className="block text-[9.5px] font-bold text-[#5f7368] mb-1">
-                  {isBn ? 'শুধুমাত্র এই একজন বস অ্যাডমিন নম্বর' : 'Single Boss Admin WhatsApp Number'}
+                  {isBn ? 'প্রধান বস অ্যাডমিন নম্বর (অ্যালার্ট ও রিমুভ)' : 'Primary Boss Admin Number'}
                 </label>
                 <input
                   type="text"
                   value={settings.bossAdminNumber ?? '8801632222592'}
                   onChange={(e) => setSettings((prev: any) => ({ ...prev, bossAdminNumber: e.target.value }))}
                   placeholder="8801632222592"
+                  className="field font-mono font-bold"
+                />
+              </div>
+              <div className="bg-white p-2 rounded-[10px] border border-emerald-950/[0.08]">
+                <label className="block text-[9.5px] font-bold text-[#5f7368] mb-1">
+                  {isBn ? 'সার্ভার অ্যাডমিন ২ নম্বর (মেনশন + রিপ্লাই রিমুভ)' : 'Second Server Admin Number'}
+                </label>
+                <input
+                  type="text"
+                  value={settings.secondAdminNumber ?? '8801346561627'}
+                  onChange={(e) => setSettings((prev: any) => ({ ...prev, secondAdminNumber: e.target.value }))}
+                  placeholder="8801346561627"
                   className="field font-mono font-bold"
                 />
               </div>
