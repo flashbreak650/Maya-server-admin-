@@ -19,6 +19,7 @@ import {
   rememberLidPnPair,
   reportServerProblem,
   resolveAdminPermissionProblemsForGroup,
+  resolveCanonicalUserIdSync,
   resolveServerProblem,
   restrictUser,
   safeSendMessage,
@@ -97,10 +98,12 @@ export interface DetectedStickerMeta {
   pushName?: string | null;
   stickerKind: 'sticker' | 'lottie_sticker' | 'sticker_pack';
   receivedAt: number;
+  msgTimestampMs: number;
 }
 
 interface BurstWindowEntry {
   timestamp: number;
+  receivedAt: number;
   uniqueKey: string;
   meta: DetectedStickerMeta;
 }
@@ -133,6 +136,9 @@ let rateLimitBackoffUntil = 0;
 let retryWakeTimer: ReturnType<typeof setTimeout> | null = null;
 let saveQueueTimer: ReturnType<typeof setTimeout> | null = null;
 let isPumpScheduled = false;
+let isFlushingQueueAsync = false;
+let pendingQueueFlushAfterAsync = false;
+const penaltyChains = new Map<string, Promise<void>>();
 
 function cleanUserDigits(jid?: string | null): string {
   if (!jid) return '';
@@ -140,7 +146,7 @@ function cleanUserDigits(jid?: string | null): string {
 }
 
 function getBurstKey(groupId: string, senderJid: string, senderAltJid?: string): string {
-  const canonical = normalizeJid(senderAltJid || senderJid);
+  const canonical = resolveCanonicalUserIdSync(senderJid, senderAltJid);
   return `${groupId}:${cleanUserDigits(canonical) || canonical}`;
 }
 
@@ -149,13 +155,13 @@ function makeUniqueKey(groupId: string, messageId: string): string {
 }
 
 // -------------------------------------------------------------
-// ATOMIC DISK PERSISTENCE & RESTART RECOVERY
+// ATOMIC DISK PERSISTENCE & RESTART RECOVERY (Compact Async JSON)
 // -------------------------------------------------------------
 function buildPersistedSnapshot(): PersistedStickerQueue {
   return {
     activeItems: Array.from(activeMap.values()),
-    recentHistory: recentHistory.slice(-150),
-    recentCompletedKeys: Array.from(completedKeys).slice(-2000),
+    recentHistory: recentHistory.slice(-120),
+    recentCompletedKeys: Array.from(completedKeys).slice(-1500),
     permissionDeniedGroups,
     stats: queueStats,
   };
@@ -166,12 +172,53 @@ export function flushStickerQueueSync() {
     clearTimeout(saveQueueTimer);
     saveQueueTimer = null;
   }
+  const tmpPath = QUEUE_DB_PATH + '.tmp';
+  const payload = JSON.stringify(buildPersistedSnapshot());
   try {
-    const tmpPath = QUEUE_DB_PATH + '.tmp';
-    fs.writeFileSync(tmpPath, JSON.stringify(buildPersistedSnapshot(), null, 2), 'utf-8');
+    fs.writeFileSync(tmpPath, payload, 'utf-8');
     fs.renameSync(tmpPath, QUEUE_DB_PATH);
   } catch (err: any) {
+    try {
+      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+    } catch {}
+    if (err?.code === 'ENOSPC') {
+      try {
+        fs.writeFileSync(QUEUE_DB_PATH, payload, 'utf-8');
+        return;
+      } catch {}
+    }
     console.error('[StickerQueue Persist Error]:', err?.message || err);
+  }
+}
+
+async function flushStickerQueueAsync() {
+  if (isFlushingQueueAsync) {
+    pendingQueueFlushAfterAsync = true;
+    return;
+  }
+  isFlushingQueueAsync = true;
+  const tmpPath = QUEUE_DB_PATH + '.tmp';
+  const payload = JSON.stringify(buildPersistedSnapshot());
+  try {
+    await fs.promises.writeFile(tmpPath, payload, 'utf-8');
+    await fs.promises.rename(tmpPath, QUEUE_DB_PATH);
+  } catch (err: any) {
+    try {
+      await fs.promises.unlink(tmpPath);
+    } catch {}
+    if (err?.code === 'ENOSPC') {
+      try {
+        await fs.promises.writeFile(QUEUE_DB_PATH, payload, 'utf-8');
+        return;
+      } catch {}
+    }
+    console.error('[StickerQueue Async Persist Error]:', err?.message || err);
+  } finally {
+    isFlushingQueueAsync = false;
+    if (pendingQueueFlushAfterAsync) {
+      pendingQueueFlushAfterAsync = false;
+      scheduleSaveQueue(false);
+    }
   }
 }
 
@@ -183,8 +230,8 @@ function scheduleSaveQueue(immediate = false) {
   if (saveQueueTimer) return;
   saveQueueTimer = setTimeout(() => {
     saveQueueTimer = null;
-    flushStickerQueueSync();
-  }, 60);
+    void flushStickerQueueAsync();
+  }, 800);
 }
 
 function loadPersistedQueue() {
@@ -295,7 +342,17 @@ export function inspectIncomingSticker(msg: proto.IWebMessageInfo): DetectedStic
   const senderJid = msg.key.participant || (msg as any).participant || '';
   if (!senderJid) return null;
   const senderAltJid = String((msg.key as any).participantAlt || '');
-  const senderPhone = cleanUserDigits(senderAltJid || senderJid) || 'member';
+  const canonicalSender = resolveCanonicalUserIdSync(senderJid, senderAltJid);
+  const senderPhone = cleanUserDigits(senderAltJid || canonicalSender || senderJid) || 'member';
+  const receivedAt = Date.now();
+
+  let rawTs = (msg as any).messageTimestamp;
+  if (rawTs && typeof rawTs === 'object' && typeof rawTs.toNumber === 'function') {
+    rawTs = rawTs.toNumber();
+  }
+  const numTs = Number(rawTs || 0);
+  const parsedTs = numTs > 0 ? (numTs < 10_000_000_000 ? numTs * 1000 : numTs) : receivedAt;
+  const msgTimestampMs = Math.abs(receivedAt - parsedTs) <= 120_000 ? parsedTs : receivedAt;
 
   return {
     messageId: msg.key.id,
@@ -306,7 +363,8 @@ export function inspectIncomingSticker(msg: proto.IWebMessageInfo): DetectedStic
     fromMe: Boolean(msg.key.fromMe),
     pushName: msg.pushName,
     stickerKind,
-    receivedAt: Date.now(),
+    receivedAt,
+    msgTimestampMs,
   };
 }
 
@@ -345,7 +403,7 @@ export function enqueueStickerTask(params: {
   }
 
   const settings = getSettings();
-  const maxRetries = Math.max(1, Math.min(10, Number(settings.stickerDeleteMaxRetries ?? 4)));
+  const maxRetries = Math.max(5, Math.min(12, Number(settings.stickerDeleteMaxRetries ?? 5)));
 
   const item: StickerQueueItem = {
     uniqueKey,
@@ -460,19 +518,23 @@ export function handleIncomingStickerFastPath(sock: WASocket, msg: proto.IWebMes
     return true;
   }
 
-  const canonicalSender = cachedPerms.matchedSenderId || normalizeJid(detected.senderJid);
+  const canonicalSender =
+    cachedPerms.matchedSenderId || resolveCanonicalUserIdSync(detected.senderJid, detected.senderAltJid);
+  const senderAliases = Array.from(
+    new Set([detected.senderJid, detected.senderAltJid, canonicalSender, detected.senderPhone].filter(Boolean))
+  );
 
   // Priority 1a: Sender is ALREADY restricted — enqueue immediately with zero delay
   const restrictionCheck = isUserRestricted(
     detected.remoteJid,
     canonicalSender,
-    [detected.senderJid, detected.senderAltJid, detected.senderPhone].filter(Boolean)
+    senderAliases
   );
   if (restrictionCheck.restricted) {
     extendRestrictionBySeconds(
       detected.remoteJid,
       canonicalSender,
-      [detected.senderJid, detected.senderAltJid, detected.senderPhone].filter(Boolean),
+      senderAliases,
       60,
       detected.messageId
     );
@@ -481,7 +543,7 @@ export function handleIncomingStickerFastPath(sock: WASocket, msg: proto.IWebMes
       groupName,
       policy: 'restricted_user',
       priority: 1,
-      matchedSenderId: cachedPerms.matchedSenderId,
+      matchedSenderId: cachedPerms.matchedSenderId || canonicalSender,
     });
     return true;
   }
@@ -496,8 +558,12 @@ export function handleIncomingStickerFastPath(sock: WASocket, msg: proto.IWebMes
 
     const burstKey = getBurstKey(detected.remoteJid, detected.senderJid, detected.senderAltJid);
     const now = Date.now();
-    const existing = (burstWindowMap.get(burstKey) || []).filter((e) => now - e.timestamp <= windowMs);
-    existing.push({ timestamp: now, uniqueKey, meta: detected });
+    const eventTs = detected.msgTimestampMs || now;
+    const effectiveWindowMs = windowMs + 1500;
+    const existing = (burstWindowMap.get(burstKey) || []).filter(
+      (e) => Math.abs(eventTs - e.timestamp) <= effectiveWindowMs && now - e.receivedAt <= Math.max(effectiveWindowMs * 2, 15000)
+    );
+    existing.push({ timestamp: eventTs, receivedAt: now, uniqueKey, meta: detected });
     burstWindowMap.set(burstKey, existing);
 
     if (existing.length >= stickerLimit) {
@@ -679,15 +745,46 @@ async function executeRealWhatsAppDelete(
             participant,
           },
         }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('WhatsApp delete ACK timeout (15s)')), 15000)),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('WhatsApp delete ACK timeout (7s)')), 7000)),
       ]);
       return; // Genuine revoke stanza accepted by Baileys/WhatsApp
     } catch (err: any) {
       lastError = err;
+      const errKind = classifyDeleteError(err).kind;
+      if (errKind === 'connection' || errKind === 'rate_limit' || errKind === 'permission') {
+        throw err;
+      }
     }
   }
 
   throw lastError || new Error('Failed to send WhatsApp delete stanza');
+}
+
+function enqueueAntiStickerPenaltyAfterDelete(
+  sock: WASocket,
+  params: {
+    groupId: string;
+    groupName: string;
+    senderJid: string;
+    canonicalSender: string;
+    senderAltJid?: string;
+    senderPhone: string;
+  }
+) {
+  const chainKey = `${params.groupId}:${cleanUserDigits(params.canonicalSender) || params.canonicalSender}`;
+  const prev = penaltyChains.get(chainKey) || Promise.resolve();
+  const next = prev
+    .catch(() => {})
+    .then(() => applyVerifiedAntiStickerViolation(sock, params))
+    .catch((err) => {
+      console.error('[StickerQueue Penalty Error]:', err?.message || err);
+    })
+    .finally(() => {
+      if (penaltyChains.get(chainKey) === next) {
+        penaltyChains.delete(chainKey);
+      }
+    });
+  penaltyChains.set(chainKey, next);
 }
 
 function classifyDeleteError(err: any): {
@@ -804,8 +901,10 @@ async function processStickerTask(item: StickerQueueItem) {
     }
 
     if (item.policy === 'anti_sticker') {
-      const canonicalSender = perms.matchedSenderId || normalizeJid(item.senderJid);
-      await applyVerifiedAntiStickerViolation(sock, {
+      const canonicalSender =
+        perms.matchedSenderId || resolveCanonicalUserIdSync(item.senderJid, item.senderAltJid) || normalizeJid(item.senderJid);
+      // Run warning/kick notification sequentially per-user outside the delete worker slot so bursts clear immediately
+      enqueueAntiStickerPenaltyAfterDelete(sock, {
         groupId: item.groupId,
         groupName: item.groupName,
         senderJid: item.senderJid,
@@ -925,9 +1024,9 @@ function pumpQueue() {
   }
 
   const settings = getSettings();
-  const configuredConcurrency = Math.max(1, Math.min(10, Number(settings.stickerQueueConcurrency ?? 5)));
+  const configuredConcurrency = Math.max(4, Math.min(12, Number(settings.stickerQueueConcurrency ?? 8)));
   const now = Date.now();
-  const maxParallel = rateLimitBackoffUntil > now ? Math.min(2, configuredConcurrency) : configuredConcurrency;
+  const maxParallel = rateLimitBackoffUntil > now ? Math.min(3, configuredConcurrency) : configuredConcurrency;
 
   if (inFlightWorkers >= maxParallel) return;
 
@@ -1022,8 +1121,8 @@ export function getStickerQueueStatus() {
       timeWindowSec: Number(settings.individualMuteTimeWindow ?? 5),
       stickerLimit: Number(settings.individualMuteStickerLimit ?? 3),
       muteMinutes: Number(settings.individualMuteDurationMinutes ?? 10),
-      maxRetries: Number(settings.stickerDeleteMaxRetries ?? 4),
-      concurrency: Number(settings.stickerQueueConcurrency ?? 5),
+      maxRetries: Math.max(5, Number(settings.stickerDeleteMaxRetries ?? 5)),
+      concurrency: Math.max(4, Number(settings.stickerQueueConcurrency ?? 8)),
     },
     permissionDeniedGroups: Object.values(permissionDeniedGroups),
     pendingItems: pendingItems.slice(0, 50),

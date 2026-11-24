@@ -957,6 +957,24 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
         console.warn('[Inbox Capture Note]:', err?.message || err);
       });
     }
+    if (type === 'append' && Array.isArray(messages)) {
+      const cutoffMs = Date.now() - 90_000;
+      for (const msg of messages) {
+        let rawTs: any = msg?.messageTimestamp;
+        if (rawTs && typeof rawTs === 'object' && typeof rawTs.toNumber === 'function') {
+          rawTs = rawTs.toNumber();
+        }
+        const numTs = Number(rawTs || 0);
+        const tsMs = numTs > 0 ? (numTs < 10_000_000_000 ? numTs * 1000 : numTs) : 0;
+        if (tsMs >= cutoffMs) {
+          try {
+            handleIncomingStickerFastPath(sock, msg);
+          } catch (stickerErr: any) {
+            console.error('[Sticker Fast-Path Append Error]:', stickerErr?.message || stickerErr);
+          }
+        }
+      }
+    }
     if (type === 'notify' && Array.isArray(messages)) {
       botState.messagesChecked += messages.length;
 
@@ -1667,7 +1685,7 @@ app.post('/api/moderation/reset-warnings', (req: Request, res: Response) => {
 app.post('/api/moderation/clear-logs', (req: Request, res: Response) => {
   try {
     clearActivityLogs();
-    res.json({ success: true, message: 'Activity logs cleared' });
+    res.json({ success: true, message: 'Activity logs cleared', activityLogs: [] });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }

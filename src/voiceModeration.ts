@@ -264,18 +264,59 @@ function loadDB() {
   }
 }
 
+let voiceSaveInFlight = false;
+let voiceSavePending = false;
+
 export function flushVoiceModerationSync() {
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
   }
+  const tmp = `${VOICE_MODERATION_DB_PATH}.tmp`;
+  const payload = JSON.stringify(db);
   try {
     ensureDirectories();
-    const tmp = `${VOICE_MODERATION_DB_PATH}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(db, null, 2), 'utf8');
+    fs.writeFileSync(tmp, payload, 'utf8');
     fs.renameSync(tmp, VOICE_MODERATION_DB_PATH);
   } catch (err: any) {
+    try {
+      if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+    } catch {}
+    if (err?.code === 'ENOSPC' || String(err?.message || '').includes('ENOSPC')) {
+      try {
+        fs.writeFileSync(VOICE_MODERATION_DB_PATH, payload, 'utf8');
+        return;
+      } catch {}
+    }
     console.warn('[VoiceModeration DB Save Warning]:', err?.message || err);
+  }
+}
+
+async function flushVoiceModerationAsync() {
+  if (voiceSaveInFlight) {
+    voiceSavePending = true;
+    return;
+  }
+  voiceSaveInFlight = true;
+  const tmp = `${VOICE_MODERATION_DB_PATH}.tmp`;
+  const payload = JSON.stringify(db);
+  try {
+    ensureDirectories();
+    await fs.promises.writeFile(tmp, payload, 'utf8');
+    await fs.promises.rename(tmp, VOICE_MODERATION_DB_PATH);
+  } catch (err: any) {
+    await fs.promises.unlink(tmp).catch(() => {});
+    if (err?.code === 'ENOSPC' || String(err?.message || '').includes('ENOSPC')) {
+      await fs.promises.writeFile(VOICE_MODERATION_DB_PATH, payload, 'utf8').catch(() => {});
+    } else {
+      console.warn('[VoiceModeration DB Async Save Warning]:', err?.message || err);
+    }
+  } finally {
+    voiceSaveInFlight = false;
+    if (voiceSavePending) {
+      voiceSavePending = false;
+      scheduleSaveDB();
+    }
   }
 }
 
@@ -283,8 +324,8 @@ function scheduleSaveDB() {
   if (saveTimer) return;
   saveTimer = setTimeout(() => {
     saveTimer = null;
-    flushVoiceModerationSync();
-  }, 600);
+    void flushVoiceModerationAsync();
+  }, 900);
 }
 
 function markProcessedId(dedupeKey: string) {

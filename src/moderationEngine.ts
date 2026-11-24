@@ -423,26 +423,35 @@ function loadPersistedActiveProblems() {
   }
 }
 
+let emergencyDiskReclaimHandler: (() => Promise<boolean> | boolean) | null = null;
+let lastEmergencyReclaimAt = 0;
+
+export function registerEmergencyDiskReclaimHandler(fn: () => Promise<boolean> | boolean) {
+  emergencyDiskReclaimHandler = fn;
+}
+
 function savePersistedActiveProblems() {
+  const payload = JSON.stringify({
+    activeProblems: Array.from(activeProblemsMap.values()),
+    pendingRecoveries: pendingServerRecoveries.slice(0, 20),
+  });
+  const tmp = ACTIVE_PROBLEMS_PATH + '.tmp';
   try {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
-    const tmp = ACTIVE_PROBLEMS_PATH + '.tmp';
-    fs.writeFileSync(
-      tmp,
-      JSON.stringify(
-        {
-          activeProblems: Array.from(activeProblemsMap.values()),
-          pendingRecoveries: pendingServerRecoveries.slice(0, 20),
-        },
-        null,
-        2
-      ),
-      'utf-8'
-    );
+    fs.writeFileSync(tmp, payload, 'utf-8');
     fs.renameSync(tmp, ACTIVE_PROBLEMS_PATH);
-  } catch {}
+  } catch (err: any) {
+    try {
+      if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+    } catch {}
+    if (err?.code === 'ENOSPC' || String(err?.message || '').includes('ENOSPC')) {
+      try {
+        fs.writeFileSync(ACTIVE_PROBLEMS_PATH, payload, 'utf-8');
+      } catch {}
+    }
+  }
 }
 
 loadPersistedActiveProblems();
@@ -464,10 +473,10 @@ export function loadDatabase() {
         groupLocks: data.groupLocks || {},
         nightLockedGroups: data.nightLockedGroups || {},
         restrictedUsers: data.restrictedUsers || {},
-        callLogs: Array.isArray(data.callLogs) ? data.callLogs.slice(-100) : [],
+        callLogs: Array.isArray(data.callLogs) ? data.callLogs.slice(-80) : [],
         callCounts: data.callCounts || {},
         memberActivity: data.memberActivity || {},
-        activityLogs: Array.isArray(data.activityLogs) ? data.activityLogs.slice(-100) : [],
+        activityLogs: Array.isArray(data.activityLogs) ? data.activityLogs.slice(-120) : [],
         stats: {
           messagesChecked: data.stats?.messagesChecked || 0,
           warningsGiven: data.stats?.warningsGiven || 0,
@@ -488,8 +497,55 @@ export function loadDatabase() {
   }
 }
 
+function compactInMemoryDbOnTightSpace() {
+  if (Array.isArray(db.activityLogs) && db.activityLogs.length > 80) {
+    db.activityLogs = db.activityLogs.slice(-80);
+  }
+  if (Array.isArray(db.callLogs) && db.callLogs.length > 40) {
+    db.callLogs = db.callLogs.slice(-40);
+  }
+  const memberEntries = Object.entries(db.memberActivity || {});
+  if (memberEntries.length > 400) {
+    memberEntries
+      .sort((a, b) => a[1].lastSeen - b[1].lastSeen)
+      .slice(0, memberEntries.length - 400)
+      .forEach(([k]) => delete db.memberActivity[k]);
+  }
+}
+
+function notifyDbWriteRecovered() {
+  if (typeof resolveServerProblem === 'function' && activeProblemsMap?.has('db_save_error')) {
+    resolveServerProblem('db_save_error', {
+      details: 'ডাটাবেজ ফাইল এখন স্বাভাবিকভাবে সেভ হচ্ছে।',
+      thanksNote: 'ধন্যবাদ বস! স্টোরেজ ও সার্ভার পারমিশন ঠিক হওয়ায় সব তথ্য নিরাপদে সংরক্ষিত হচ্ছে।',
+      sock: globalSocketGetter ? globalSocketGetter() : null,
+    }).catch(() => {});
+  }
+}
+
+function writeDbWithEnospcDirectFallbackSync(payload: string) {
+  const tmpPath = DB_PATH + '.tmp';
+  try {
+    fs.writeFileSync(tmpPath, payload, 'utf-8');
+    fs.renameSync(tmpPath, DB_PATH);
+  } catch (err: any) {
+    try {
+      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+    } catch {}
+    if (err?.code === 'ENOSPC' || String(err?.message || '').includes('ENOSPC')) {
+      compactInMemoryDbOnTightSpace();
+      fs.writeFileSync(DB_PATH, JSON.stringify(db), 'utf-8');
+    } else {
+      throw err;
+    }
+  }
+}
+
 // Atomic save database to disk
 let saveTimeout: NodeJS.Timeout | null = null;
+let dbWriteInFlight = false;
+let dbWritePendingAgain = false;
+
 export function flushDatabaseSync() {
   if (saveTimeout) {
     clearTimeout(saveTimeout);
@@ -499,33 +555,90 @@ export function flushDatabaseSync() {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
-    const tmpPath = DB_PATH + '.tmp';
-    fs.writeFileSync(tmpPath, JSON.stringify(db, null, 2), 'utf-8');
-    fs.renameSync(tmpPath, DB_PATH);
-    if (typeof resolveServerProblem === 'function' && activeProblemsMap?.has('db_save_error')) {
-      resolveServerProblem('db_save_error', {
-        details: 'ডাটাবেজ ফাইল এখন স্বাভাবিকভাবে সেভ হচ্ছে।',
-        thanksNote: 'ধন্যবাদ বস! স্টোরেজ ও সার্ভার পারমিশন ঠিক হওয়ায় সব তথ্য নিরাপদে সংরক্ষিত হচ্ছে।',
-        sock: globalSocketGetter ? globalSocketGetter() : null,
-      }).catch(() => {});
-    }
+    writeDbWithEnospcDirectFallbackSync(JSON.stringify(db));
+    notifyDbWriteRecovered();
   } catch (err: any) {
     console.error('Error saving moderation DB:', err.message);
-    reportServerProblem({
-      category: 'db_save_error',
-      title: 'ডাটাবেজ সেভ ব্যর্থ (DB Write Error)',
-      details: err?.message || 'moderation_db.json সংরক্ষণ করা যায়নি।',
-      suggestion: 'সার্ভারের ডিস্ক স্পেস ও ফোল্ডার পারমিশন পরীক্ষা করুন।',
-    });
+    if (err?.code === 'ENOSPC' && emergencyDiskReclaimHandler && Date.now() - lastEmergencyReclaimAt > 20000) {
+      lastEmergencyReclaimAt = Date.now();
+      Promise.resolve(emergencyDiskReclaimHandler())
+        .then((reclaimed) => {
+          if (reclaimed) {
+            try {
+              writeDbWithEnospcDirectFallbackSync(JSON.stringify(db));
+              notifyDbWriteRecovered();
+            } catch {}
+          }
+        })
+        .catch(() => {});
+    }
+    reportServerProblem(
+      {
+        category: 'db_save_error',
+        title: 'ডাটাবেজ সেভ ব্যর্থ (DB Write Error)',
+        details: err?.message || 'moderation_db.json সংরক্ষণ করা যায়নি।',
+        suggestion: 'সার্ভারের ডিস্ক স্পেস ও ফোল্ডার পারমিশন পরীক্ষা করুন।',
+      },
+      globalSocketGetter ? globalSocketGetter() : null
+    ).catch(() => {});
+  }
+}
+
+async function flushDatabaseAsync() {
+  if (dbWriteInFlight) {
+    dbWritePendingAgain = true;
+    return;
+  }
+  dbWriteInFlight = true;
+  const tmpPath = DB_PATH + '.tmp';
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    const payload = JSON.stringify(db);
+    try {
+      await fs.promises.writeFile(tmpPath, payload, 'utf-8');
+      await fs.promises.rename(tmpPath, DB_PATH);
+    } catch (err: any) {
+      await fs.promises.unlink(tmpPath).catch(() => {});
+      if (err?.code === 'ENOSPC' || String(err?.message || '').includes('ENOSPC')) {
+        if (emergencyDiskReclaimHandler && Date.now() - lastEmergencyReclaimAt > 20000) {
+          lastEmergencyReclaimAt = Date.now();
+          await Promise.resolve(emergencyDiskReclaimHandler()).catch(() => false);
+        }
+        compactInMemoryDbOnTightSpace();
+        await fs.promises.writeFile(DB_PATH, JSON.stringify(db), 'utf-8');
+      } else {
+        throw err;
+      }
+    }
+    notifyDbWriteRecovered();
+  } catch (err: any) {
+    console.error('Error saving moderation DB:', err?.message || err);
+    reportServerProblem(
+      {
+        category: 'db_save_error',
+        title: 'ডাটাবেজ সেভ ব্যর্থ (DB Write Error)',
+        details: err?.message || 'moderation_db.json সংরক্ষণ করা যায়নি।',
+        suggestion: 'সার্ভারের ডিস্ক স্পেস ও ফোল্ডার পারমিশন পরীক্ষা করুন।',
+      },
+      globalSocketGetter ? globalSocketGetter() : null
+    ).catch(() => {});
+  } finally {
+    dbWriteInFlight = false;
+    if (dbWritePendingAgain) {
+      dbWritePendingAgain = false;
+      saveDatabase();
+    }
   }
 }
 
 export function saveDatabase() {
-  if (saveTimeout) clearTimeout(saveTimeout);
+  if (saveTimeout) return;
   saveTimeout = setTimeout(() => {
     saveTimeout = null;
-    flushDatabaseSync();
-  }, 200);
+    void flushDatabaseAsync();
+  }, 1200);
 }
 
 // Initialize on start
@@ -844,6 +957,8 @@ export async function unlockGroupManually(sock: WASocket | null, groupId: string
 
 export function clearActivityLogs(): boolean {
   db.activityLogs = [];
+  pendingServerProblems.length = 0;
+  lastServerProblemAlertAt.clear();
   saveDatabase();
   return true;
 }
@@ -906,21 +1021,43 @@ export function clearAllModerationHistories(): {
   db.warnings = {};
   db.activityLogs = [];
   db.callLogs = [];
+  pendingServerProblems.length = 0;
+  lastServerProblemAlertAt.clear();
   saveDatabase();
   return { warningsCleared, activityLogsCleared, callLogsCleared };
 }
 
-export function addActivityLog(log: Omit<ActivityLog, 'id' | 'timestamp'>) {
+export function addActivityLog(log: Omit<ActivityLog, 'id' | 'timestamp'>, opts?: { skipSave?: boolean }) {
+  const now = Date.now();
+  if (log.action === 'error') {
+    for (let i = db.activityLogs.length - 1; i >= Math.max(0, db.activityLogs.length - 12); i--) {
+      const existing = db.activityLogs[i];
+      if (
+        existing.action === 'error' &&
+        existing.groupId === log.groupId &&
+        existing.reason === log.reason &&
+        now - existing.timestamp < 15 * 60 * 1000
+      ) {
+        existing.timestamp = now;
+        existing.details = log.details;
+        if (!opts?.skipSave) saveDatabase();
+        return;
+      }
+    }
+  }
+
   const newLog: ActivityLog = {
     ...log,
-    id: 'log_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-    timestamp: Date.now(),
+    id: 'log_' + now + '_' + Math.random().toString(36).slice(2, 6),
+    timestamp: now,
   };
   db.activityLogs.push(newLog);
-  if (db.activityLogs.length > 200) {
-    db.activityLogs = db.activityLogs.slice(-200);
+  if (db.activityLogs.length > 150) {
+    db.activityLogs = db.activityLogs.slice(-150);
   }
-  saveDatabase();
+  if (!opts?.skipSave) {
+    saveDatabase();
+  }
 }
 
 // -------------------------------------------------------------
@@ -1040,6 +1177,24 @@ export function rememberLidPnPair(jidA?: string | null, jidB?: string | null) {
     lidToPnUserMap.set(lidUser, pnDigits);
     pnToLidUserMap.set(pnDigits, lidUser);
   }
+}
+
+export function resolveCanonicalUserIdSync(senderJid?: string | null, senderAltJid?: string | null): string {
+  rememberLidPnPair(senderJid, senderAltJid);
+  for (const raw of [senderAltJid, senderJid]) {
+    if (!raw) continue;
+    const str = String(raw).trim();
+    const cu = cleanJidUser(str);
+    if (!cu) continue;
+    if (isLidJid(str)) {
+      const mappedPn = lidToPnUserMap.get(cu);
+      if (mappedPn) return mappedPn;
+    } else if (isPnJid(str) || /^\d{10,15}$/.test(cu)) {
+      return normalizePhoneDigits(cu) || cu;
+    }
+  }
+  const fallback = cleanJidUser(senderAltJid || senderJid);
+  return lidToPnUserMap.get(fallback) || fallback || normalizeJid(senderAltJid || senderJid || '');
 }
 
 function expandIdSetWithLidMaps(users: Set<string>, normalized?: Set<string>) {
@@ -2470,6 +2625,8 @@ function buildServerRecoveryText(recovery: QueuedServerRecovery): string {
   );
 }
 
+let isFlushingServerNotices = false;
+
 async function deliverServerNotice(sock: WASocket, problem: QueuedServerProblem): Promise<boolean> {
   const settings = getSettings();
   if (settings.serverErrorNoticeEnabled === false) return false;
@@ -2501,15 +2658,18 @@ async function deliverServerNotice(sock: WASocket, problem: QueuedServerProblem)
       tracked.notifiedBoss = true;
       savePersistedActiveProblems();
     }
-    addActivityLog({
-      groupId: 'SYSTEM',
-      groupName: 'Server Health Monitor',
-      senderJid: resolveBossAdminJid(),
-      senderPhone: cleanJidUser(resolveBossAdminJid()),
-      action: 'error',
-      reason: `সার্ভার সমস্যা নোটিশ পাঠানো হয়েছে: ${problem.title}`,
-      details: problem.details,
-    });
+    addActivityLog(
+      {
+        groupId: 'SYSTEM',
+        groupName: 'Server Health Monitor',
+        senderJid: resolveBossAdminJid(),
+        senderPhone: cleanJidUser(resolveBossAdminJid()),
+        action: 'error',
+        reason: `সার্ভার সমস্যা নোটিশ পাঠানো হয়েছে: ${problem.title}`,
+        details: problem.details,
+      },
+      { skipSave: problem.category === 'db_save_error' }
+    );
   }
   return deliveredAny;
 }
@@ -2562,6 +2722,8 @@ export async function reportServerProblem(
 
   const now = Date.now();
   const prevTracked = activeProblemsMap.get(params.category);
+  const alreadyNotifiedActive = Boolean(prevTracked?.notifiedBoss && now - prevTracked.reportedAt < 4 * 60 * 60 * 1000);
+
   activeProblemsMap.set(params.category, {
     category: params.category,
     title: params.title,
@@ -2572,8 +2734,13 @@ export async function reportServerProblem(
   });
   savePersistedActiveProblems();
 
+  // Do NOT repeatedly spam Boss DM or activity error logs for an ongoing unresolved problem already notified!
+  if (alreadyNotifiedActive) {
+    return false;
+  }
+
   const lastAt = lastServerProblemAlertAt.get(params.category) || 0;
-  const cooldownMs = params.urgent ? 2 * 60 * 1000 : 8 * 60 * 1000;
+  const cooldownMs = params.urgent ? 10 * 60 * 1000 : 20 * 60 * 1000;
   if (now - lastAt < cooldownMs) {
     return false;
   }
@@ -2694,23 +2861,40 @@ export async function resolveAdminPermissionProblemsForGroup(
 }
 
 export async function flushPendingServerNotices(sock: WASocket | null) {
-  if (!sock) return;
-  while (pendingServerProblems.length > 0) {
-    const next = pendingServerProblems[0];
-    const ok = await deliverServerNotice(sock, next);
-    if (!ok) break;
-    pendingServerProblems.shift();
-  }
-  let flushedRecovery = false;
-  while (pendingServerRecoveries.length > 0) {
-    const nextRec = pendingServerRecoveries[0];
-    const ok = await deliverServerRecoveryNotice(sock, nextRec);
-    if (!ok) break;
-    pendingServerRecoveries.shift();
-    flushedRecovery = true;
-  }
-  if (flushedRecovery) {
-    savePersistedActiveProblems();
+  if (!sock || isFlushingServerNotices) return;
+  isFlushingServerNotices = true;
+  try {
+    while (pendingServerProblems.length > 0) {
+      const next = pendingServerProblems.shift()!;
+      const tracked = activeProblemsMap.get(next.category);
+      if (tracked?.notifiedBoss && Date.now() - tracked.reportedAt < 4 * 60 * 60 * 1000) {
+        continue;
+      }
+      const ok = await deliverServerNotice(sock, next);
+      if (!ok) {
+        if (!pendingServerProblems.some((p) => p.category === next.category)) {
+          pendingServerProblems.unshift(next);
+        }
+        break;
+      }
+    }
+    let flushedRecovery = false;
+    while (pendingServerRecoveries.length > 0) {
+      const nextRec = pendingServerRecoveries.shift()!;
+      const ok = await deliverServerRecoveryNotice(sock, nextRec);
+      if (!ok) {
+        if (!pendingServerRecoveries.some((r) => r.category === nextRec.category)) {
+          pendingServerRecoveries.unshift(nextRec);
+        }
+        break;
+      }
+      flushedRecovery = true;
+    }
+    if (flushedRecovery) {
+      savePersistedActiveProblems();
+    }
+  } finally {
+    isFlushingServerNotices = false;
   }
 }
 
@@ -3203,30 +3387,34 @@ export async function checkPermissions(
       }
     }
 
-    // Last-resort Baileys v7 check: resolve @lid -> @s.whatsapp.net ONLY for admin participants if bot wasn't matched yet
+    // Last-resort Baileys v7 check: resolve @lid -> @s.whatsapp.net ONLY for admin participants if bot wasn't matched yet (parallel & cached)
     if (!isBotAdmin && unresolvedAdminLidParticipants.length > 0 && typeof lidMappingApi?.getPNForLID === 'function') {
-      for (const adminEntry of unresolvedAdminLidParticipants.slice(0, 15)) {
-        try {
-          const lookedUpPn = await Promise.race([
-            lidMappingApi.getPNForLID(adminEntry.id),
-            new Promise<null>((r) => setTimeout(() => r(null), 1000)),
-          ]);
-          if (lookedUpPn) {
-            rememberLidPnPair(adminEntry.id, lookedUpPn);
-            const pnClean = cleanJidUser(lookedUpPn);
-            const pnNorm = normalizePhoneDigits(pnClean);
-            if ((pnClean && botUsers.has(pnClean)) || (pnNorm && botUsers.has(pnNorm))) {
-              isBotAdmin = true;
-              break;
-            }
+      const batch = unresolvedAdminLidParticipants.slice(0, 30);
+      await Promise.allSettled(
+        batch.map(async (adminEntry) => {
+          const lidUser = cleanJidUser(adminEntry.id);
+          if (lidUser && lidToPnUserMap.has(lidUser)) {
+            const cachedPn = lidToPnUserMap.get(lidUser)!;
+            if (botUsers.has(cachedPn)) isBotAdmin = true;
+            return;
           }
-        } catch {}
-      }
+          try {
+            const lookedUpPn = await Promise.race([
+              lidMappingApi.getPNForLID(adminEntry.id),
+              new Promise<null>((r) => setTimeout(() => r(null), 600)),
+            ]);
+            if (lookedUpPn) {
+              rememberLidPnPair(adminEntry.id, lookedUpPn);
+              const pnClean = cleanJidUser(lookedUpPn);
+              const pnNorm = normalizePhoneDigits(pnClean);
+              if ((pnClean && botUsers.has(pnClean)) || (pnNorm && botUsers.has(pnNorm))) {
+                isBotAdmin = true;
+              }
+            }
+          } catch {}
+        })
+      );
     }
-
-    console.log(
-      `[Admin Verification] Group: "${meta.subject}" (${meta.addressingMode || 'pn'}) | Bot IDs: ${Array.from(botUsers).join(',')} | isBotAdmin: ${isBotAdmin} | isSenderAdmin: ${isSenderAdmin}`
-    );
 
     if (isBotAdmin) {
       resolveAdminPermissionProblemsForGroup(groupId, meta.subject || getKnownGroupSubjectFallback(groupId), sock).catch(() => {});

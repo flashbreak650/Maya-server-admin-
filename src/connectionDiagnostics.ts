@@ -81,22 +81,78 @@ function loadDiagnosticsFromDisk() {
   }
 }
 
-export function flushDiagnosticsSync() {
+let diagWriteTimer: ReturnType<typeof setTimeout> | null = null;
+let diagWriteInFlight = false;
+let diagWritePending = false;
+
+function writeDiagnosticsSyncNow() {
+  const payload = JSON.stringify(state);
+  const tmpPath = `${DIAGNOSTICS_DB_PATH}.tmp`;
   try {
-    loadDiagnosticsFromDisk();
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
-    const tmpPath = `${DIAGNOSTICS_DB_PATH}.tmp`;
-    fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2), 'utf8');
+    fs.writeFileSync(tmpPath, payload, 'utf8');
     fs.renameSync(tmpPath, DIAGNOSTICS_DB_PATH);
   } catch (err: any) {
     try {
-      fs.writeFileSync(DIAGNOSTICS_DB_PATH, JSON.stringify(state, null, 2), 'utf8');
+      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+    } catch {}
+    try {
+      fs.writeFileSync(DIAGNOSTICS_DB_PATH, payload, 'utf8');
     } catch {
       console.warn('[Diagnostics] Save note:', err?.message || err);
     }
   }
+}
+
+async function writeDiagnosticsAsyncNow() {
+  if (diagWriteInFlight) {
+    diagWritePending = true;
+    return;
+  }
+  diagWriteInFlight = true;
+  const payload = JSON.stringify(state);
+  const tmpPath = `${DIAGNOSTICS_DB_PATH}.tmp`;
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    await fs.promises.writeFile(tmpPath, payload, 'utf8');
+    await fs.promises.rename(tmpPath, DIAGNOSTICS_DB_PATH);
+  } catch (err: any) {
+    await fs.promises.unlink(tmpPath).catch(() => {});
+    if (err?.code === 'ENOSPC' || String(err?.message || '').includes('ENOSPC')) {
+      try {
+        await fs.promises.writeFile(DIAGNOSTICS_DB_PATH, payload, 'utf8');
+      } catch {}
+    } else {
+      console.warn('[Diagnostics] Async save note:', err?.message || err);
+    }
+  } finally {
+    diagWriteInFlight = false;
+    if (diagWritePending) {
+      diagWritePending = false;
+      scheduleDiagnosticsSave();
+    }
+  }
+}
+
+function scheduleDiagnosticsSave() {
+  if (diagWriteTimer) return;
+  diagWriteTimer = setTimeout(() => {
+    diagWriteTimer = null;
+    void writeDiagnosticsAsyncNow();
+  }, 500);
+}
+
+export function flushDiagnosticsSync() {
+  if (diagWriteTimer) {
+    clearTimeout(diagWriteTimer);
+    diagWriteTimer = null;
+  }
+  loadDiagnosticsFromDisk();
+  writeDiagnosticsSyncNow();
 }
 
 function sourceLabels(source: DiagnosticSource): { bn: string; en: string } {
@@ -308,7 +364,7 @@ function appendEvent(evt: Omit<ConnectionDiagnosticEvent, 'id' | 'occurrences' |
     latest.occurrences = (latest.occurrences || 1) + 1;
     latest.rawError = evt.rawError || latest.rawError;
     latest.autoReconnecting = evt.autoReconnecting;
-    flushDiagnosticsSync();
+    scheduleDiagnosticsSave();
     return latest;
   }
 
@@ -325,7 +381,7 @@ function appendEvent(evt: Omit<ConnectionDiagnosticEvent, 'id' | 'occurrences' |
   if (state.events.length > MAX_EVENTS) {
     state.events = state.events.slice(0, MAX_EVENTS);
   }
-  flushDiagnosticsSync();
+  scheduleDiagnosticsSave();
   return created;
 }
 
@@ -408,7 +464,7 @@ export function recordConnectionOpen(account: 'primary' | 'companion', userJid?:
       latest.phoneNumber = userJid.split(':')[0].split('@')[0];
     }
   }
-  flushDiagnosticsSync();
+  scheduleDiagnosticsSave();
 }
 
 export function recordDisconnectEvent(params: {

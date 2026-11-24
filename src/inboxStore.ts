@@ -172,6 +172,45 @@ const groupMessagesMap = new Map<string, InboxMessageRecord[]>();
 const dirtyMessageGroups = new Set<string>();
 const messageFlushTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let indexFlushTimer: ReturnType<typeof setTimeout> | null = null;
+let indexWriteInFlight = false;
+let indexWritePendingAgain = false;
+const groupWriteInFlight = new Set<string>();
+const groupWritePendingAgain = new Set<string>();
+
+let cachedDiskStatAt = 0;
+let cachedDiskTotalBytes = 0;
+let cachedDiskFreeBytes = Number.MAX_SAFE_INTEGER;
+
+function refreshDiskStatsCached(force = false) {
+  const now = Date.now();
+  if (!force && now - cachedDiskStatAt < 8000) return;
+  cachedDiskStatAt = now;
+  try {
+    const stat = fs.statfsSync(INBOX_DIR);
+    const bsize = Number(stat.bsize || 4096);
+    cachedDiskTotalBytes = Math.max(0, Number(stat.blocks || 0) * bsize);
+    cachedDiskFreeBytes = Math.max(0, Number(stat.bavail ?? stat.bfree ?? 0) * bsize);
+  } catch {}
+}
+
+export function getInboxEffectiveMediaLimitBytes(): number {
+  loadInboxIndex();
+  refreshDiskStatsCached();
+  const configuredBytes = (inboxIndex.settings.mediaStorageLimitMb || 250) * 1024 * 1024;
+  const isSmallContainer = cachedDiskTotalBytes > 0 && cachedDiskTotalBytes <= 1.5 * 1024 * 1024 * 1024;
+  if (cachedDiskFreeBytes < 15 * 1024 * 1024) {
+    return Math.min(configuredBytes, 2 * 1024 * 1024);
+  }
+  if (isSmallContainer || cachedDiskFreeBytes < 60 * 1024 * 1024) {
+    return Math.min(configuredBytes, 8 * 1024 * 1024);
+  }
+  return configuredBytes;
+}
+
+export function isInboxDiskLow(minFreeMb = 12): boolean {
+  refreshDiskStatsCached();
+  return cachedDiskFreeBytes < minFreeMb * 1024 * 1024;
+}
 
 type EventListener = (evt: InboxRealtimeEvent) => void;
 const eventListeners = new Set<EventListener>();
@@ -257,14 +296,64 @@ function loadInboxIndex() {
   }
 }
 
+async function writeCompactJsonSafeAsync(targetPath: string, payloadStr: string) {
+  const tmp = `${targetPath}.tmp`;
+  try {
+    await fs.promises.writeFile(tmp, payloadStr, 'utf8');
+    await fs.promises.rename(tmp, targetPath);
+  } catch (err: any) {
+    await fs.promises.unlink(tmp).catch(() => {});
+    if (err?.code === 'ENOSPC' || String(err?.message || '').includes('ENOSPC')) {
+      await fs.promises.writeFile(targetPath, payloadStr, 'utf8');
+    } else {
+      throw err;
+    }
+  }
+}
+
+function writeCompactJsonSafeSync(targetPath: string, payloadStr: string) {
+  const tmp = `${targetPath}.tmp`;
+  try {
+    fs.writeFileSync(tmp, payloadStr, 'utf8');
+    fs.renameSync(tmp, targetPath);
+  } catch (err: any) {
+    try {
+      if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+    } catch {}
+    if (err?.code === 'ENOSPC' || String(err?.message || '').includes('ENOSPC')) {
+      fs.writeFileSync(targetPath, payloadStr, 'utf8');
+    } else {
+      throw err;
+    }
+  }
+}
+
 function saveInboxIndexSync() {
   try {
     ensureInboxDirs();
-    const tmp = `${INBOX_INDEX_PATH}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(inboxIndex, null, 2), 'utf8');
-    fs.renameSync(tmp, INBOX_INDEX_PATH);
+    writeCompactJsonSafeSync(INBOX_INDEX_PATH, JSON.stringify(inboxIndex));
   } catch (err: any) {
     console.warn('[InboxStore] Index save error:', err?.message || err);
+  }
+}
+
+async function saveInboxIndexAsync() {
+  if (indexWriteInFlight) {
+    indexWritePendingAgain = true;
+    return;
+  }
+  indexWriteInFlight = true;
+  try {
+    ensureInboxDirs();
+    await writeCompactJsonSafeAsync(INBOX_INDEX_PATH, JSON.stringify(inboxIndex));
+  } catch (err: any) {
+    console.warn('[InboxStore] Index async save error:', err?.message || err);
+  } finally {
+    indexWriteInFlight = false;
+    if (indexWritePendingAgain) {
+      indexWritePendingAgain = false;
+      scheduleSaveIndex();
+    }
   }
 }
 
@@ -272,8 +361,8 @@ function scheduleSaveIndex() {
   if (indexFlushTimer) return;
   indexFlushTimer = setTimeout(() => {
     indexFlushTimer = null;
-    saveInboxIndexSync();
-  }, 250);
+    void saveInboxIndexAsync();
+  }, 1000);
 }
 
 function loadGroupMessages(groupId: string): InboxMessageRecord[] {
@@ -303,13 +392,33 @@ function saveGroupMessagesSync(groupId: string) {
   if (!list) return;
   try {
     ensureInboxDirs();
-    const filePath = getGroupMessagesFilePath(groupId);
-    const tmp = `${filePath}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(list), 'utf8');
-    fs.renameSync(tmp, filePath);
+    writeCompactJsonSafeSync(getGroupMessagesFilePath(groupId), JSON.stringify(list));
     dirtyMessageGroups.delete(groupId);
   } catch (err: any) {
     console.warn(`[InboxStore] Save group messages error (${groupId}):`, err?.message || err);
+  }
+}
+
+async function saveGroupMessagesAsync(groupId: string) {
+  const list = groupMessagesMap.get(groupId);
+  if (!list) return;
+  if (groupWriteInFlight.has(groupId)) {
+    groupWritePendingAgain.add(groupId);
+    return;
+  }
+  groupWriteInFlight.add(groupId);
+  try {
+    ensureInboxDirs();
+    await writeCompactJsonSafeAsync(getGroupMessagesFilePath(groupId), JSON.stringify(list));
+    dirtyMessageGroups.delete(groupId);
+  } catch (err: any) {
+    console.warn(`[InboxStore] Async save group messages error (${groupId}):`, err?.message || err);
+  } finally {
+    groupWriteInFlight.delete(groupId);
+    if (groupWritePendingAgain.has(groupId)) {
+      groupWritePendingAgain.delete(groupId);
+      scheduleSaveGroupMessages(groupId);
+    }
   }
 }
 
@@ -318,8 +427,8 @@ function scheduleSaveGroupMessages(groupId: string) {
   if (messageFlushTimers.has(groupId)) return;
   const t = setTimeout(() => {
     messageFlushTimers.delete(groupId);
-    saveGroupMessagesSync(groupId);
-  }, 200);
+    void saveGroupMessagesAsync(groupId);
+  }, 1000);
   messageFlushTimers.set(groupId, t);
 }
 
@@ -567,7 +676,11 @@ function sanitizeExtFromMimeOrName(mimeType?: string, fileName?: string, fallbac
   }
 }
 
-function updateGroupSummaryFromRecords(groupId: string, overrideMeta?: Partial<InboxGroupSummary>): InboxGroupSummary {
+function updateGroupSummaryFromRecords(
+  groupId: string,
+  overrideMeta?: Partial<InboxGroupSummary>,
+  persist = true
+): InboxGroupSummary {
   loadInboxIndex();
   const records = loadGroupMessages(groupId);
   const prev = inboxIndex.groups[groupId] || {
@@ -612,7 +725,9 @@ function updateGroupSummaryFromRecords(groupId: string, overrideMeta?: Partial<I
   };
 
   inboxIndex.groups[groupId] = updated;
-  scheduleSaveIndex();
+  if (persist) {
+    scheduleSaveIndex();
+  }
   return updated;
 }
 
@@ -635,6 +750,8 @@ const queuedMediaKeys = new Set<string>();
 let activeMediaWorkers = 0;
 
 function enqueueMediaDownload(task: PendingMediaTask) {
+  if (isInboxDiskLow(12)) return;
+  if (task.messageType === 'sticker' && isInboxDiskLow(35)) return;
   const key = `${task.groupId}:${task.messageId}`;
   if (queuedMediaKeys.has(key)) return;
   if (pendingMediaQueue.length >= MAX_PENDING_MEDIA_QUEUE) {
@@ -669,6 +786,15 @@ async function processMediaDownloadTask(task: PendingMediaTask) {
   const record = records.find((r) => r.id === messageId);
   if (!record || !record.media) return;
   if (record.media.status === 'saved' && record.media.relPath) return;
+  if (isInboxDiskLow(10)) {
+    record.media = {
+      ...record.media,
+      status: 'pruned_for_space',
+      unavailableReason: 'ডিস্ক স্পেস সংকট থাকায় মিডিয়া ডাউনলোড স্কিপ করা হয়েছে।',
+    };
+    scheduleSaveGroupMessages(groupId);
+    return;
+  }
 
   if (declaredSize && declaredSize > MAX_SINGLE_MEDIA_BYTES) {
     record.media = {
@@ -1430,7 +1556,7 @@ async function refreshGroupAvatarsInBackground(sock: WASocket, groupIds: string[
 
 export function getInboxGroupsList(): InboxGroupSummary[] {
   loadInboxIndex();
-  const list = Object.values(inboxIndex.groups).map((g) => updateGroupSummaryFromRecords(g.id));
+  const list = Object.values(inboxIndex.groups).map((g) => updateGroupSummaryFromRecords(g.id, undefined, false));
   // Sort: Connected groups first, then newest activity, then alphabetical
   list.sort((a, b) => {
     if (Boolean(a.connected) !== Boolean(b.connected)) return a.connected ? -1 : 1;
@@ -1483,7 +1609,7 @@ export function queryGroupInboxMessages(params: InboxMessageQueryParams): {
   const { groupId } = params;
   const limit = Math.max(1, Math.min(100, Number(params.limit || 35)));
   const all = loadGroupMessages(groupId);
-  const groupSummary = inboxIndex.groups[groupId] ? updateGroupSummaryFromRecords(groupId) : null;
+  const groupSummary = inboxIndex.groups[groupId] ? updateGroupSummaryFromRecords(groupId, undefined, false) : null;
 
   const senderNeedle = (params.sender || '').trim().toLowerCase();
   const textNeedle = (params.query || '').trim().toLowerCase();
@@ -1650,13 +1776,13 @@ export function getInboxStorageStats(): InboxStorageStats {
   let totalImportantMessages = 0;
 
   for (const gid of Object.keys(inboxIndex.groups)) {
-    const g = updateGroupSummaryFromRecords(gid);
+    const g = updateGroupSummaryFromRecords(gid, undefined, false);
     totalMessages += g.totalStoredMessages;
     totalDeletedMessages += g.deletedCount;
     totalImportantMessages += g.importantCount;
   }
 
-  const mediaLimitBytes = (inboxIndex.settings.mediaStorageLimitMb || 250) * 1024 * 1024;
+  const mediaLimitBytes = getInboxEffectiveMediaLimitBytes();
   const mediaUsedPercent =
     mediaLimitBytes > 0 ? Number(((mediaStat.bytes / mediaLimitBytes) * 100).toFixed(2)) : 0;
 
@@ -1697,30 +1823,35 @@ export function updateInboxSettings(patch: Partial<InboxStorageSettings>): Inbox
   return { ...inboxIndex.settings };
 }
 
-export async function enforceInboxMediaStorageLimit(forcePrunePercent = 0): Promise<{
+export async function enforceInboxMediaStorageLimit(
+  forcePrunePercent = 0,
+  targetMaxBytesOverride?: number
+): Promise<{
   filesRemoved: number;
   bytesFreed: number;
   protectedImportantSkipped: number;
 }> {
   loadInboxIndex();
-  if (!inboxIndex.settings.autoPruneOldNonImportantMedia && forcePrunePercent <= 0) {
+  if (!inboxIndex.settings.autoPruneOldNonImportantMedia && forcePrunePercent <= 0 && targetMaxBytesOverride === undefined) {
     return { filesRemoved: 0, bytesFreed: 0, protectedImportantSkipped: 0 };
   }
 
-  const limitBytes = (inboxIndex.settings.mediaStorageLimitMb || 250) * 1024 * 1024;
+  const limitBytes = getInboxEffectiveMediaLimitBytes();
   const initialMediaBytes = measureFolderBytesSync(INBOX_MEDIA_DIR).bytes;
 
-  const targetMaxBytes =
-    forcePrunePercent > 0
+  let targetMaxBytes =
+    targetMaxBytesOverride !== undefined
+      ? Math.max(0, targetMaxBytesOverride)
+      : forcePrunePercent > 0
       ? Math.max(0, Math.floor(initialMediaBytes * (1 - Math.min(1, forcePrunePercent / 100))))
       : Math.floor(limitBytes * 0.85);
-
-  if (forcePrunePercent <= 0 && initialMediaBytes <= limitBytes) {
-    return { filesRemoved: 0, bytesFreed: 0, protectedImportantSkipped: 0 };
+  if (forcePrunePercent <= 0 && targetMaxBytesOverride === undefined) {
+    targetMaxBytes = Math.min(targetMaxBytes, Math.floor(limitBytes * 0.85));
   }
 
   // Collect all non-important saved media across groups, oldest first
   const candidates: Array<{ groupId: string; record: InboxMessageRecord; fullPath: string; size: number }> = [];
+  const referencedFiles = new Set<string>();
   let protectedImportantSkipped = 0;
   const baseDir = path.resolve(INBOX_MEDIA_DIR);
 
@@ -1728,12 +1859,13 @@ export async function enforceInboxMediaStorageLimit(forcePrunePercent = 0): Prom
     const records = loadGroupMessages(gid);
     for (const rec of records) {
       if (rec.media?.status === 'saved' && rec.media.relPath) {
+        const fullPath = path.resolve(baseDir, rec.media.relPath);
+        if (!fullPath.startsWith(baseDir + path.sep)) continue;
+        referencedFiles.add(fullPath);
         if (rec.isImportant || rec.deletedBy === 'moderation_engine' || rec.deletedBy === 'sticker_queue') {
           protectedImportantSkipped++;
           continue;
         }
-        const fullPath = path.resolve(baseDir, rec.media.relPath);
-        if (!fullPath.startsWith(baseDir + path.sep)) continue;
         candidates.push({
           groupId: gid,
           record: rec,
@@ -1744,12 +1876,50 @@ export async function enforceInboxMediaStorageLimit(forcePrunePercent = 0): Prom
     }
   }
 
-  candidates.sort((a, b) => a.record.timestamp - b.record.timestamp);
-
   let currentBytes = initialMediaBytes;
   let filesRemoved = 0;
   let bytesFreed = 0;
   const affectedGroups = new Set<string>();
+
+  // 1) Remove orphaned files & .tmp files inside INBOX_MEDIA_DIR that are no longer referenced
+  try {
+    const groupDirs = await fs.promises.readdir(baseDir, { withFileTypes: true });
+    for (const gd of groupDirs) {
+      if (gd.isFile() && gd.name.endsWith('.tmp')) {
+        const p = path.join(baseDir, gd.name);
+        try {
+          const st = await fs.promises.stat(p);
+          await fs.promises.unlink(p);
+          currentBytes = Math.max(0, currentBytes - st.size);
+          bytesFreed += st.size;
+          filesRemoved++;
+        } catch {}
+        continue;
+      }
+      if (!gd.isDirectory()) continue;
+      const subDir = path.join(baseDir, gd.name);
+      const subFiles = await fs.promises.readdir(subDir, { withFileTypes: true }).catch(() => []);
+      for (const sf of subFiles) {
+        if (!sf.isFile()) continue;
+        const fp = path.join(subDir, sf.name);
+        if (sf.name.endsWith('.tmp') || (!referencedFiles.has(fp) && Date.now() - ((await fs.promises.stat(fp).catch(() => null))?.mtimeMs || Date.now()) > 120000)) {
+          try {
+            const st = await fs.promises.stat(fp);
+            await fs.promises.unlink(fp);
+            currentBytes = Math.max(0, currentBytes - st.size);
+            bytesFreed += st.size;
+            filesRemoved++;
+          } catch {}
+        }
+      }
+    }
+  } catch {}
+
+  if (forcePrunePercent <= 0 && targetMaxBytesOverride === undefined && currentBytes <= limitBytes) {
+    return { filesRemoved, bytesFreed, protectedImportantSkipped };
+  }
+
+  candidates.sort((a, b) => a.record.timestamp - b.record.timestamp);
 
   for (const item of candidates) {
     if (currentBytes <= targetMaxBytes) break;
@@ -1787,6 +1957,44 @@ export async function enforceInboxMediaStorageLimit(forcePrunePercent = 0): Prom
   }
 
   return { filesRemoved, bytesFreed, protectedImportantSkipped };
+}
+
+export async function trimNonImportantInboxMessagesForSpace(maxPerGroup = 350): Promise<{ messagesTrimmed: number; bytesEstimateFreed: number }> {
+  loadInboxIndex();
+  const cap = Math.max(100, Math.round(maxPerGroup));
+  let messagesTrimmed = 0;
+  let bytesEstimateFreed = 0;
+  for (const gid of Object.keys(inboxIndex.groups)) {
+    const records = loadGroupMessages(gid);
+    if (records.length <= cap) continue;
+    let idx = 0;
+    let trimmedHere = 0;
+    while (records.length > cap && idx < records.length) {
+      const r = records[idx];
+      if (!r.isImportant && !r.isDeleted) {
+        records.splice(idx, 1);
+        messagesTrimmed++;
+        trimmedHere++;
+        bytesEstimateFreed += 350;
+        if (r.media?.relPath) {
+          const full = path.resolve(INBOX_MEDIA_DIR, r.media.relPath);
+          if (full.startsWith(path.resolve(INBOX_MEDIA_DIR) + path.sep)) {
+            await fs.promises.unlink(full).catch(() => {});
+          }
+        }
+      } else {
+        idx++;
+      }
+    }
+    if (trimmedHere > 0) {
+      saveGroupMessagesSync(gid);
+      updateGroupSummaryFromRecords(gid);
+    }
+  }
+  if (messagesTrimmed > 0) {
+    saveInboxIndexSync();
+  }
+  return { messagesTrimmed, bytesEstimateFreed };
 }
 
 export function getRecentGroupVoiceClips(limit = 40, filterGroupId?: string): InboxMessageRecord[] {
