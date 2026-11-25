@@ -1209,12 +1209,13 @@ export function SecurityToolPage({
                 checked={
                   !Boolean(
                     settings.silentModeration &&
-                      settings.autoWelcome === false &&
-                      settings.newMemberInboxRulesEnabled === false &&
-                      settings.adminMentionReplyEnabled === false &&
-                      settings.autoSalamReplyEnabled === false &&
+                      !settings.autoWelcome &&
+                      !settings.newMemberInboxRulesEnabled &&
+                      !settings.adminMentionReplyEnabled &&
+                      !settings.autoSalamReplyEnabled &&
                       !settings.botReply &&
-                      settings.nightModeNotify === false
+                      !settings.nightModeNotify &&
+                      !settings.keywordAutoReplyEnabled
                   )
                 }
                 onChange={(e) => {
@@ -1232,7 +1233,6 @@ export function SecurityToolPage({
                       }
                     : {
                         silentModeration: true,
-                        hideNameOnDelete: true,
                         autoWelcome: false,
                         newMemberInboxRulesEnabled: false,
                         nightModeNotify: false,
@@ -1307,8 +1307,8 @@ export function SecurityToolPage({
             <label className="switch">
               <input
                 type="checkbox"
-                checked={Boolean(settings.silentModeration)}
-                onChange={(e) => onUpdateToggle('silentModeration', e.target.checked)}
+                checked={!Boolean(settings.silentModeration)}
+                onChange={(e) => onUpdateToggle('silentModeration', !e.target.checked)}
               />
               <span className="slider"></span>
             </label>

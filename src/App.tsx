@@ -422,8 +422,8 @@ export default function App() {
     // New Moderation & AI
     aiBadwordTitle: isBn ? 'Gemini AI Badword Detector (এআই গালি শনাক্তকারী)' : 'Gemini AI Badword Detector',
     aiBadwordDesc: isBn ? 'লিস্টে নেই এমন গালি বা আপত্তিকর কথা জিমিনি এআই এর মাধ্যমে খুঁজে বের করে ডিলিট করবে।' : 'Uses Gemini AI to detect complex badwords not in the custom list.',
-    silentModTitle: isBn ? 'Silent Moderation (নিঃশব্দ মডারেশন)' : 'Silent Moderation',
-    silentModDesc: isBn ? 'মেসেজ ডিলিট করার পর গ্রুপে কোনো সতর্কবার্তা (Warning Message) পাঠাবে না।' : 'Disable bot warning messages after deleting a violation.',
+    silentModTitle: isBn ? 'ডিলিট ও ওয়ার্নিং নোটিশ (Warning Notice)' : 'Delete Warning Notices',
+    silentModDesc: isBn ? 'চালু থাকলে মেসেজ ডিলিটের পর গ্রুপে সতর্কবার্তা পাঠাবে; বন্ধ থাকলে নীরবে ডিলিট করবে।' : 'Send group warning notices after deleting a violation (turn OFF for silent delete).',
 
     // Activity Logs
     activityTitle: isBn ? 'লাইভ মডারেশন অ্যাক্টিভিটি লগ' : 'Real-Time Moderation Activity Log',
@@ -1916,12 +1916,13 @@ export default function App() {
 
   const areAllNoticesOff = Boolean(
     settings.silentModeration &&
-      settings.autoWelcome === false &&
-      settings.newMemberInboxRulesEnabled === false &&
-      settings.adminMentionReplyEnabled === false &&
-      settings.autoSalamReplyEnabled === false &&
+      !settings.autoWelcome &&
+      !settings.newMemberInboxRulesEnabled &&
+      !settings.adminMentionReplyEnabled &&
+      !settings.autoSalamReplyEnabled &&
       !settings.botReply &&
-      settings.nightModeNotify === false
+      !settings.nightModeNotify &&
+      !settings.keywordAutoReplyEnabled
   );
 
   const handleToggleAllNoticesOneButton = (enableNotices: boolean) => {
@@ -1939,7 +1940,6 @@ export default function App() {
     } else {
       updateMultipleSettings({
         silentModeration: true,
-        hideNameOnDelete: true,
         autoWelcome: false,
         newMemberInboxRulesEnabled: false,
         nightModeNotify: false,
@@ -2945,9 +2945,6 @@ export default function App() {
                 }
                 searchQuery={homeToolSearch}
                 setSearchQuery={setHomeToolSearch}
-                areAllNoticesOff={areAllNoticesOff}
-                onToggleAllNotices={handleToggleAllNoticesOneButton}
-                onToggleHideName={(val) => updateSettingToggle('hideNameOnDelete', val)}
                 onNavigate={navigateToPage}
                 onOpenSessionBackup={openSessionBackupSection}
               />
@@ -4266,7 +4263,7 @@ export default function App() {
                   </label>
                 </div>
 
-                {/* Silent Moderation */}
+                {/* Delete Warning Notices (OFF = Silent Delete, ON = Send Warning) */}
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
@@ -4278,8 +4275,8 @@ export default function App() {
                   <label className="switch">
                     <input
                       type="checkbox"
-                      checked={settings.silentModeration}
-                      onChange={(e) => updateSettingToggle('silentModeration', e.target.checked)}
+                      checked={!settings.silentModeration}
+                      onChange={(e) => updateSettingToggle('silentModeration', !e.target.checked)}
                     />
                     <span className="slider"></span>
                   </label>

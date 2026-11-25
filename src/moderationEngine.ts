@@ -3594,7 +3594,6 @@ async function executeServerAdminGroupCommand(
     } else {
       updateSettings({
         silentModeration: true,
-        hideNameOnDelete: true,
         autoWelcome: false,
         newMemberInboxRulesEnabled: false,
         nightModeNotify: false,
@@ -3603,7 +3602,6 @@ async function executeServerAdminGroupCommand(
         botReply: false,
         keywordAutoReplyEnabled: false,
       });
-      void syncBotProfileNamePrivacy(sock).catch(() => {});
     }
     await safeSendMessage(
       sock,

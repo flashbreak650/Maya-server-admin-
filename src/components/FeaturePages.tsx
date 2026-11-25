@@ -304,9 +304,6 @@ export function HomeFeatureHub({
   storageRecoveredLabel,
   searchQuery,
   setSearchQuery,
-  areAllNoticesOff,
-  onToggleAllNotices,
-  onToggleHideName,
   onNavigate,
   onOpenSessionBackup,
 }: {
@@ -325,20 +322,16 @@ export function HomeFeatureHub({
   storageRecoveredLabel?: string;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
-  areAllNoticesOff?: boolean;
-  onToggleAllNotices?: (enableNotices: boolean) => void;
-  onToggleHideName?: (hide: boolean) => void;
   onNavigate: (page: PageId) => void;
   onOpenSessionBackup: () => void;
 }) {
   type HubCard = {
-    id: PageId | 'backup' | 'all_notices_btn' | 'hide_name_btn';
+    id: PageId | 'backup';
     title: string;
     desc: string;
     keywords: string;
     statusText: string;
     isOn: boolean;
-    isToggle?: boolean;
     iconBg: string;
     iconText: string;
     icon: React.ReactNode;
@@ -534,52 +527,7 @@ export function HomeFeatureHub({
     },
   ];
 
-  const noticesActive = !areAllNoticesOff;
-  const hideNameActive = Boolean(settings.hideNameOnDelete);
-
   const featureCards: HubCard[] = [
-    {
-      id: 'all_notices_btn',
-      title: isBn ? 'সব নোটিশ ON / OFF' : 'All Notices ON / OFF',
-      desc: isBn
-        ? 'এক বাটনে সব নোটিশ চালু বা বন্ধ (অফ = শুধু নীরব রিমুভ)'
-        : 'One-tap all group notices toggle (OFF = silent remove)',
-      keywords: 'notice notices all off on silent নোটিশ সব বন্ধ চালু রিমুভ',
-      statusText: noticesActive
-        ? isBn
-          ? 'সব নোটিশ ON'
-          : 'Notices ON'
-        : isBn
-        ? 'সব নোটিশ OFF'
-        : 'Notices OFF',
-      isOn: noticesActive,
-      isToggle: true,
-      iconBg: noticesActive ? 'bg-emerald-50' : 'bg-slate-100',
-      iconText: noticesActive ? 'text-emerald-700' : 'text-slate-600',
-      icon: <BellRing size={18} />,
-      onClick: () => onToggleAllNotices?.(!noticesActive),
-    },
-    {
-      id: 'hide_name_btn',
-      title: isBn ? 'রিমুভে নাম হাইড' : 'Hide Name on Remove',
-      desc: isBn
-        ? 'মেসেজ রিমুভে বটের প্রোফাইল ও মেম্বারের নাম লুকান'
-        : 'Hides bot profile & member name when removing messages',
-      keywords: 'hide name bot delete remove নাম হাইড লুকানো বট ডিলিট',
-      statusText: hideNameActive
-        ? isBn
-          ? 'নাম হাইড ON'
-          : 'Hide Name ON'
-        : isBn
-        ? 'নাম হাইড OFF'
-        : 'Hide Name OFF',
-      isOn: hideNameActive,
-      isToggle: true,
-      iconBg: hideNameActive ? 'bg-emerald-50' : 'bg-slate-100',
-      iconText: hideNameActive ? 'text-emerald-700' : 'text-slate-600',
-      icon: <EyeOff size={18} />,
-      onClick: () => onToggleHideName?.(!hideNameActive),
-    },
     {
       id: 'security',
       title: isBn ? 'সব সিকিউরিটি রুলস (একসাথে)' : 'All Security Rules',
@@ -859,19 +807,7 @@ export function HomeFeatureHub({
               <span className={`w-8 h-8 rounded-[10px] ${card.iconBg} ${card.iconText} flex items-center justify-center shrink-0 transition-transform duration-200 group-hover:scale-105 [&>svg]:w-4 [&>svg]:h-4`}>
                 {card.icon}
               </span>
-              {card.isToggle ? (
-                <span
-                  className={`px-2 py-0.5 rounded-md text-[9.5px] font-extrabold tracking-wide border shrink-0 ${
-                    card.isOn
-                      ? 'bg-emerald-50 text-[#087f55] border-emerald-200'
-                      : 'bg-slate-100 text-slate-600 border-slate-200'
-                  }`}
-                >
-                  {card.isOn ? 'ON' : 'OFF'}
-                </span>
-              ) : (
-                <ArrowRight size={12} className="text-slate-300 group-hover:text-[#087f55] group-hover:translate-x-0.5 transition-all shrink-0" />
-              )}
+              <ArrowRight size={12} className="text-slate-300 group-hover:text-[#087f55] group-hover:translate-x-0.5 transition-all shrink-0" />
             </div>
             <div className="text-[11.5px] sm:text-[12.5px] font-extrabold text-[#0f291e] leading-snug tracking-tight">
               {card.title}
