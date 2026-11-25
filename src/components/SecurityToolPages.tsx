@@ -7,7 +7,6 @@ import {
   BellRing,
   Bot,
   EyeOff,
-  Inbox,
   Link as LinkIcon,
   MessageSquareHeart,
   RefreshCw,
@@ -25,7 +24,6 @@ export type SecurityToolId =
   | 'sec_links'
   | 'sec_shield'
   | 'sec_welcome'
-  | 'sec_inbox_rules'
   | 'sec_stickers'
   | 'sec_media'
   | 'sec_badwords'
@@ -56,7 +54,6 @@ interface SecurityToolPageProps {
   onPurgeGroupStickers?: (groupId?: string, includeUnverified?: boolean) => void;
   onSaveAdminMentionConfig: () => void;
   onSaveBossAndNoticeConfig: () => void;
-  onSaveNewMemberRulesConfig?: () => void;
   onTestBossAlert: () => void;
   renderInfoBtn: (id: string) => React.ReactNode;
 }
@@ -87,12 +84,6 @@ const TOOL_META: Record<
     titleEn: 'Auto Welcome New Members (@Mention)',
     subBn: 'গ্রুপে নতুন কেউ যুক্ত হলে অটো @মেনশন দিয়ে ওয়েলকাম জানানো ও কাস্টম মেসেজ সেট করুন।',
     subEn: 'Automatically greet newly added members with @mention and custom template.',
-  },
-  sec_inbox_rules: {
-    titleBn: 'নতুন মেম্বার ইনবক্স রুলস ও গ্রুপ মেনশন নোটিশ',
-    titleEn: 'New Member Inbox Rules & Group Mention Notice',
-    subBn: 'গ্রুপে নতুন মেম্বার এড হলেই তার ইনবক্সে গ্রুপ রুলস নোটিশ পাঠাবে এবং গ্রুপে @মেনশন দিয়ে ছোট্ট করে জানাবে।',
-    subEn: 'Automatically DMs group rules to newly added members and posts a short @mention notice in the group.',
   },
   sec_stickers: {
     titleBn: 'অ্যান্টি-স্টিকার ও হাই-প্রায়োরিটি স্প্যাম কিউ',
@@ -125,10 +116,10 @@ const TOOL_META: Record<
     subEn: 'Manage Zero-API Salam replies, typing presence, silent moderation, and Maya AI triggers.',
   },
   sec_bossalert: {
-    titleBn: 'বস ইনবক্স অ্যালার্ট ও সার্ভার নোটিশ',
-    titleEn: 'Boss Inbox Fight Alert & Server Notice',
-    subBn: 'গ্রুপে ঝগড়া/গালি বা সার্ভারে সমস্যা হলে সরাসরি বস ইনবক্সে সতর্কবার্তা পাঠানোর সেটিংস।',
-    subEn: 'Single Boss Admin inbox alert for heated group fights and server health warnings.',
+    titleBn: 'বস ইনবক্স ঝগড়া অ্যালার্ট',
+    titleEn: 'Boss Inbox Fight Alert',
+    subBn: 'গ্রুপে ঝগড়া/গালি শুরু হলে আপনার বস ইনবক্সে সতর্কবার্তা পাঠানোর সেটিংস।',
+    subEn: 'Single Boss Admin inbox alert for heated group fights.',
   },
 };
 
@@ -155,7 +146,6 @@ export function SecurityToolPage({
   onPurgeGroupStickers,
   onSaveAdminMentionConfig,
   onSaveBossAndNoticeConfig,
-  onSaveNewMemberRulesConfig,
   onTestBossAlert,
   renderInfoBtn,
 }: SecurityToolPageProps) {
@@ -405,162 +395,6 @@ export function SecurityToolPage({
               </div>
             </div>
           )}
-
-          <div className="mt-3 pt-2.5 border-t border-emerald-950/[0.06] flex items-center justify-between gap-2 flex-wrap">
-            <span className="text-[11px] font-semibold text-[#5f7368]">
-              {isBn
-                ? 'নতুন মেম্বারের ইনবক্সে গ্রুপ রুলস ও গ্রুপে মেনশন নোটিশ সেট করুন:'
-                : 'Configure new member private inbox rules & group mention notice:'}
-            </span>
-            <button type="button" className="btn soft" onClick={() => onNavigate('sec_inbox_rules')}>
-              <Inbox size={12} /> {isBn ? 'ইনবক্স রুলস নোটিশ খুলুন' : 'Open Inbox Rules Notice'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 3B. NEW MEMBER INBOX RULES NOTICE + SHORT GROUP MENTION */}
-      {toolId === 'sec_inbox_rules' && (
-        <div className="card space-y-3">
-          <div className="card-head">
-            <div>
-              <h3 className="font-extrabold text-[13px]">
-                {isBn ? 'নতুন মেম্বার ইনবক্স রুলস ও গ্রুপ মেনশন' : 'New Member Inbox Rules & Group Mention'}
-              </h3>
-              <p>
-                {isBn
-                  ? 'নতুন সদস্য গ্রুপে এড হলে সাথে সাথে তার ইনবক্সে রুলস নোটিশ যাবে এবং গ্রুপে @মেনশন দিয়ে ছোট্ট করে জানাবে।'
-                  : 'Sends customizable group rules to the new member DM and posts a short @mention notice in the group.'}
-              </p>
-            </div>
-            <div className="symbol sg">
-              <Inbox size={15} />
-            </div>
-          </div>
-
-          <div className="toggle-row">
-            <div className="toggle-info">
-              <h4>
-                {isBn
-                  ? 'ইনবক্সে গ্রুপ রুলস + গ্রুপে মেনশন নোটিশ (ON/OFF)'
-                  : 'Auto Inbox Rules DM + Group Mention Notice'}
-              </h4>
-              <p>
-                {isBn
-                  ? 'চালু থাকলে নতুন মেম্বার এড হলেই তার প্রাইভেট ইনবক্সে গ্রুপ রুলস যাবে এবং গ্রুপে ছোট্ট নোটিশ দেবে।'
-                  : 'When enabled, new members receive group rules in DM plus a short @mention notice in group.'}
-              </p>
-            </div>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={settings.newMemberInboxRulesEnabled !== false}
-                onChange={(e) => onUpdateToggle('newMemberInboxRulesEnabled', e.target.checked)}
-              />
-              <span className="slider"></span>
-            </label>
-          </div>
-
-          <div className="subpanel-soft space-y-3">
-            <div>
-              <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
-                <label className="block text-[11px] font-bold text-[#0f291e]">
-                  {isBn
-                    ? '১. নতুন মেম্বারের ইনবক্সে যাওয়া গ্রুপ রুলস নোটিশ (সার্ভার থেকে পরিবর্তনযোগ্য)'
-                    : '1. Group Rules Notice Sent to New Member Inbox'}
-                </label>
-                {Boolean(settings.newMemberInboxRulesNotice) && (
-                  <button
-                    type="button"
-                    className="text-[10.5px] font-bold text-rose-600 hover:underline cursor-pointer"
-                    onClick={() => setSettings((prev: any) => ({ ...prev, newMemberInboxRulesNotice: '' }))}
-                  >
-                    {isBn ? 'ডিফল্ট রুলসে ফিরুন' : 'Reset Default'}
-                  </button>
-                )}
-              </div>
-              <textarea
-                rows={6}
-                className="field w-full text-[11.5px] leading-relaxed"
-                value={settings.newMemberInboxRulesNotice || ''}
-                onChange={(e) =>
-                  setSettings((prev: any) => ({ ...prev, newMemberInboxRulesNotice: e.target.value }))
-                }
-                placeholder={
-                  isBn
-                    ? 'ফাঁকা রাখলে ডিফল্ট সুন্দর গ্রুপ রুলস পাঠাবে...\nচাইলে নিজের মতো লিখুন — {user} দিলে মেনশন ও {group} দিলে গ্রুপের নাম বসবে।'
-                    : 'Leave blank for default Bengali group rules notice... Supports {user} & {group}.'
-                }
-              />
-              <p className="text-[10px] text-[#5f7368] mt-1">
-                {isBn
-                  ? 'টিপস: {user} লিখলে নতুন মেম্বারের নাম/নম্বর এবং {group} লিখলে গ্রুপের নাম অটো বসে যাবে।'
-                  : 'Tip: Use {user} for member mention and {group} for group name.'}
-              </p>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
-                <label className="block text-[11px] font-bold text-[#0f291e]">
-                  {isBn
-                    ? '২. গ্রুপে @মেনশন দিয়ে ছোট্ট নোটিশ'
-                    : '2. Short @Mention Notice Posted in Group'}
-                </label>
-                {Boolean(settings.newMemberGroupNoticeText) && (
-                  <button
-                    type="button"
-                    className="text-[10.5px] font-bold text-rose-600 hover:underline cursor-pointer"
-                    onClick={() => setSettings((prev: any) => ({ ...prev, newMemberGroupNoticeText: '' }))}
-                  >
-                    {isBn ? 'ডিফল্ট টেক্সট ব্যবহার করুন' : 'Reset Default'}
-                  </button>
-                )}
-              </div>
-              <input
-                type="text"
-                className="field w-full text-[11.5px]"
-                value={settings.newMemberGroupNoticeText || ''}
-                onChange={(e) =>
-                  setSettings((prev: any) => ({ ...prev, newMemberGroupNoticeText: e.target.value }))
-                }
-                placeholder={
-                  isBn
-                    ? 'ডিফল্ট: 📩 {user}, {group} গ্রুপের রুলস নোটিশ আপনার ইনবক্সে দেওয়া হলো। দয়া করে ইনবক্স চেক করুন!'
-                    : 'Default: 📩 {user}, group rules notice has been sent to your inbox!'
-                }
-              />
-            </div>
-
-            <div className="p-2.5 rounded-xl bg-white border border-emerald-950/[0.08] space-y-1.5">
-              <div className="text-[10.5px] font-extrabold text-[#087f55] uppercase tracking-wide">
-                {isBn ? 'লাইভ প্রিভিউ (গ্রুপে যা দেখাবে)' : 'Live Preview (Group @Mention)'}
-              </div>
-              <p className="text-[11.5px] text-slate-800 break-words">
-                {(settings.newMemberGroupNoticeText || '').trim()
-                  ? (settings.newMemberGroupNoticeText || '')
-                      .replace(/\{user\}/gi, '@8801XXXXXXXXX')
-                      .replace(/\{group\}/gi, 'WAGuard Official')
-                  : '📩 @8801XXXXXXXXX, *WAGuard Official* গ্রুপের রুলস নোটিশ আপনার ইনবক্সে দেওয়া হলো। দয়া করে ইনবক্স চেক করুন!'}
-              </p>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-1">
-              <button
-                type="button"
-                className="btn primary"
-                onClick={() => {
-                  if (onSaveNewMemberRulesConfig) {
-                    onSaveNewMemberRulesConfig();
-                  } else {
-                    onUpdateToggle('newMemberInboxRulesNotice', settings.newMemberInboxRulesNotice || '');
-                    onUpdateToggle('newMemberGroupNoticeText', settings.newMemberGroupNoticeText || '');
-                  }
-                }}
-              >
-                <Save size={12} /> {isBn ? 'সার্ভারে নোটিশ সেভ করুন' : 'Save Notice to Server'}
-              </button>
-            </div>
-          </div>
         </div>
       )}
 
@@ -1161,8 +995,8 @@ export function SecurityToolPage({
               </div>
               <p className="text-[10px] text-[#0f291e]/80 font-medium leading-relaxed">
                 {isBn
-                  ? '🛡️ এই ২ জন সার্ভার অ্যাডমিনকে মেনশন করলে একই নোটিশ যাবে এবং শুধুমাত্র এই ২ জন গ্রুপ থেকে রিপ্লাই/@mention দিয়ে লিখলেই কাজ করবে: রিমুভ (মেসেজ/ভয়েস ডিলিট), কিক / kick, black [মিনিট] / block, unblock, rules / রুলস, warn / resetwarn, lock [মিনিট] / unlock, promote / demote, tagall, antisticker/antilink/antibadword/antivoice on/off, status ও help (অন্য কোনো অ্যাডমিন পারবে না)।'
-                  : 'Only these 2 server admin numbers trigger the mention reply notice and can execute group commands: remove (reply), kick, black [mins], unblock, rules, warn, resetwarn, lock, unlock, promote, demote, tagall, toggles, status, and help.'}
+                  ? '🛡️ এই ২ জন সার্ভার অ্যাডমিনকে মেনশন করলে বট অটো উত্তর দেবে এবং শুধুমাত্র এই ২ জন গ্রুপ থেকে রিপ্লাই/@mention দিয়ে লিখলেই কাজ করবে: রিমুভ (মেসেজ/ভয়েস ডিলিট), কিক / kick, black [মিনিট] / block, unblock, rules / রুলস, warn / resetwarn, lock [মিনিট] / unlock, promote / demote, tagall, antisticker/antilink/antibadword/antivoice on/off, status ও help (অন্য কোনো অ্যাডমিন পারবে না)।'
+                  : 'Only these 2 server admin numbers trigger the mention reply and can execute group commands: remove (reply), kick, black [mins], unblock, rules, warn, resetwarn, lock, unlock, promote, demote, tagall, toggles, status, and help.'}
               </p>
             </div>
           )}
@@ -1272,18 +1106,18 @@ export function SecurityToolPage({
         </div>
       )}
 
-      {/* 9. BOSS INBOX FIGHT ALERT & SERVER NOTICE */}
+      {/* 9. BOSS INBOX FIGHT ALERT */}
       {toolId === 'sec_bossalert' && (
         <div className="card">
           <div className="card-head">
             <div>
               <h3 className="font-extrabold text-[13px]">
-                {isBn ? 'বস ইনবক্স অ্যালার্ট ও অটো সার্ভার নোটিশ' : 'Boss Inbox Fight Alert & Server Notice'}
+                {isBn ? 'বস ইনবক্স ঝগড়া অ্যালার্ট' : 'Boss Inbox Fight Alert'}
               </h3>
               <p>
                 {isBn
-                  ? 'গ্রুপে ৩+ জন ঝগড়া/গালি দিলে বা সার্ভারে সমস্যা হলে আপনার বস ইনবক্সে সাথে সাথে অ্যালার্ট পাঠাবে।'
-                  : 'Sends instant Boss inbox alerts for group fights or server issues without AI API.'}
+                  ? 'গ্রুপে ৩+ জন ঝগড়া/গালি দিলে আপনার বস ইনবক্সে সাথে সাথে অ্যালার্ট পাঠাবে।'
+                  : 'Sends instant Boss inbox alerts for group fights without AI API.'}
               </p>
             </div>
             <div className="symbol so">
@@ -1302,23 +1136,6 @@ export function SecurityToolPage({
                 checked={settings.bossFightAlertEnabled !== false}
                 onChange={(e) =>
                   setSettings((prev: any) => ({ ...prev, bossFightAlertEnabled: e.target.checked }))
-                }
-              />
-              <span className="slider"></span>
-            </label>
-          </div>
-
-          <div className="toggle-row">
-            <div className="toggle-info">
-              <h4>{isBn ? 'অটো সার্ভার হেলথ নোটিশ' : 'Auto Server Health Notice'}</h4>
-              <p>{isBn ? 'সার্ভারে ডিসকানেক্ট বা মেমোরি সমস্যা দেখা দিলে স্বয়ংক্রিয় সতর্কবার্তা পাঠাবে।' : 'Automatic notification on server issues or disconnections.'}</p>
-            </div>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={settings.serverErrorNoticeEnabled !== false}
-                onChange={(e) =>
-                  setSettings((prev: any) => ({ ...prev, serverErrorNoticeEnabled: e.target.checked }))
                 }
               />
               <span className="slider"></span>
@@ -1350,25 +1167,6 @@ export function SecurityToolPage({
                   placeholder="8801346561627"
                   className="field font-mono font-bold"
                 />
-              </div>
-              <div className="bg-white p-2 rounded-[10px] border border-emerald-950/[0.08]">
-                <label className="block text-[9.5px] font-bold text-[#5f7368] mb-1">
-                  {isBn ? 'সার্ভার সমস্যা হলে কোথায় নোটিশ যাবে' : 'Server Problem Notice Target'}
-                </label>
-                <select
-                  value={settings.serverErrorNoticeTarget || 'boss_inbox'}
-                  onChange={(e) =>
-                    setSettings((prev: any) => ({
-                      ...prev,
-                      serverErrorNoticeTarget: e.target.value as 'boss_inbox' | 'groups' | 'both',
-                    }))
-                  }
-                  className="field font-bold"
-                >
-                  <option value="boss_inbox">{isBn ? 'শুধু বস অ্যাডমিনের ইনবক্সে' : 'Boss Inbox Only'}</option>
-                  <option value="groups">{isBn ? 'সক্রিয় গ্রুপগুলোতে' : 'Active Groups'}</option>
-                  <option value="both">{isBn ? 'বস ইনবক্স + গ্রুপ উভয় জায়গায়' : 'Both Boss & Groups'}</option>
-                </select>
               </div>
             </div>
 

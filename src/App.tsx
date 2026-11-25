@@ -690,7 +690,6 @@ export default function App() {
   const [memberDirGroupId, setMemberDirGroupId] = useState('');
   const [memberDirIsBotAdmin, setMemberDirIsBotAdmin] = useState(false);
   const [memberDirMembers, setMemberDirMembers] = useState<GroupMemberDirectoryViewItem[]>([]);
-  const [defaultManualBlockNotice, setDefaultManualBlockNotice] = useState('');
   const [blockingMemberJid, setBlockingMemberJid] = useState<string | null>(null);
   const memberLoadSeqRef = useRef(0);
 
@@ -1417,7 +1416,6 @@ export default function App() {
         setMemberDirGroupId(res.selectedGroupId || nextGroups[0]?.id || '');
         setMemberDirIsBotAdmin(Boolean(res.isBotAdmin));
         setMemberDirMembers(Array.isArray(res.members) ? res.members : []);
-        if (res.defaultNotice) setDefaultManualBlockNotice(res.defaultNotice);
       }
     } catch (err: any) {
       if (seq === memberLoadSeqRef.current) {
@@ -1438,8 +1436,7 @@ export default function App() {
 
   const handleBlockMemberFromList = async (
     member: GroupMemberDirectoryViewItem,
-    durationMinutes: number,
-    customNotice: string
+    durationMinutes: number
   ) => {
     const targetGroupId = memberDirGroupId || memberDirGroups[0]?.id || '';
     if (!targetGroupId) {
@@ -1454,7 +1451,6 @@ export default function App() {
         altJid: member.altJid,
         memberPhone: member.phone,
         durationMinutes,
-        customNotice,
       });
       if (res?.success) {
         if (Array.isArray(res.restrictedUsers)) {
@@ -1477,7 +1473,7 @@ export default function App() {
         showNotification(
           res.message ||
             (isBn
-              ? `${member.name}-কে ${durationMinutes} মিনিটের জন্য ব্লক করা হয়েছে এবং ভিন্ন নোটিশ পাঠানো হয়েছে!`
+              ? `${member.name}-কে ${durationMinutes} মিনিটের জন্য ব্লক করা হয়েছে!`
               : `Blocked ${member.name} for ${durationMinutes}m!`)
         );
       }
@@ -1507,16 +1503,6 @@ export default function App() {
       showNotification((isBn ? 'আনব্লক ব্যর্থ: ' : 'Unblock failed: ') + err.message);
     } finally {
       setBlockingMemberJid(null);
-    }
-  };
-
-  const handleSaveManualBlockNotice = async (notice: string) => {
-    try {
-      const res = await callApi('/api/moderation/settings', 'POST', { manualBlockNotice: notice });
-      if (res?.settings) setSettings(res.settings);
-      showNotification(isBn ? 'ভিন্ন নোটিশ টেমপ্লেট সেভ হয়েছে!' : 'Distinct notice template saved!');
-    } catch (err: any) {
-      showNotification((isBn ? 'সেভ ব্যর্থ: ' : 'Save failed: ') + err.message);
     }
   };
 
@@ -1773,13 +1759,11 @@ export default function App() {
       bossFightAlertEnabled: settings.bossFightAlertEnabled !== false,
       bossFightMinPeople: Math.max(2, Math.min(10, Number(settings.bossFightMinPeople ?? 3))),
       bossFightWindowMinutes: Math.max(1, Math.min(30, Number(settings.bossFightWindowMinutes ?? 5))),
-      serverErrorNoticeEnabled: settings.serverErrorNoticeEnabled !== false,
-      serverErrorNoticeTarget: settings.serverErrorNoticeTarget || 'boss_inbox',
     };
     try {
       const res = await callApi('/api/moderation/settings', 'POST', patch);
       if (res?.settings) setSettings(res.settings);
-      showNotification(isBn ? 'বস অ্যালার্ট ও সার্ভার নোটিশ সেটিংস সেভ হয়েছে!' : 'Boss & Server Alert settings saved!');
+      showNotification(isBn ? 'বস অ্যালার্ট ও অ্যাডমিন সেটিংস সেভ হয়েছে!' : 'Boss Alert settings saved!');
     } catch (err: any) {
       showNotification((isBn ? 'সেভ ব্যর্থ: ' : 'Save failed: ') + err.message);
     }
@@ -1797,25 +1781,6 @@ export default function App() {
       const res = await callApi('/api/moderation/settings', 'POST', patch);
       if (res?.settings) setSettings(res.settings);
       showNotification(isBn ? 'অ্যাডমিন মেনশন রিপ্লাই সেটিংস সেভ হয়েছে!' : 'Admin Mention Reply settings saved!');
-    } catch (err: any) {
-      showNotification((isBn ? 'সেভ ব্যর্থ: ' : 'Save failed: ') + err.message);
-    }
-  };
-
-  const handleSaveNewMemberRulesConfig = async () => {
-    const patch = {
-      newMemberInboxRulesEnabled: settings.newMemberInboxRulesEnabled !== false,
-      newMemberInboxRulesNotice: String(settings.newMemberInboxRulesNotice || '').trim(),
-      newMemberGroupNoticeText: String(settings.newMemberGroupNoticeText || '').trim(),
-    };
-    try {
-      const res = await callApi('/api/moderation/settings', 'POST', patch);
-      if (res?.settings) setSettings(res.settings);
-      showNotification(
-        isBn
-          ? 'নতুন মেম্বার ইনবক্স রুলস ও মেনশন নোটিশ সার্ভারে সেভ হয়েছে!'
-          : 'New member inbox rules notice saved to server!'
-      );
     } catch (err: any) {
       showNotification((isBn ? 'সেভ ব্যর্থ: ' : 'Save failed: ') + err.message);
     }
@@ -2917,7 +2882,6 @@ export default function App() {
               onPurgeGroupStickers={handlePurgeGroupStickers}
               onSaveAdminMentionConfig={handleSaveAdminMentionConfig}
               onSaveBossAndNoticeConfig={handleSaveBossAndNoticeConfig}
-              onSaveNewMemberRulesConfig={handleSaveNewMemberRulesConfig}
               onTestBossAlert={handleTestBossAlert}
               renderInfoBtn={renderInfoBtn}
             />
@@ -2968,8 +2932,6 @@ export default function App() {
               isBotAdmin={memberDirIsBotAdmin}
               members={memberDirMembers}
               adminShieldEnabled={settings.adminShield}
-              noticeTemplate={settings.manualBlockNotice || ''}
-              defaultNotice={defaultManualBlockNotice}
               blockingJid={blockingMemberJid}
               onSelectGroup={(gid) => {
                 setMemberDirGroupId(gid);
@@ -2978,7 +2940,6 @@ export default function App() {
               onRefresh={() => loadGroupMembers(memberDirGroupId, true)}
               onBlockMember={handleBlockMemberFromList}
               onUnblockMember={handleUnblockMemberFromList}
-              onSaveNoticeTemplate={handleSaveManualBlockNotice}
               onGoConnect={() => navigateToPage('pairing')}
               onBack={() => navigateToPage('home')}
             />
@@ -3361,34 +3322,6 @@ export default function App() {
                     </div>
                   </div>
                 )}
-
-                {/* New Member Inbox Rules + Group Short Mention */}
-                <div className="toggle-row">
-                  <div className="toggle-info">
-                    <h4>{isBn ? 'নতুন মেম্বার ইনবক্স রুলস ও মেনশন নোটিশ' : 'New Member Inbox Rules Notice'}</h4>
-                    <p>
-                      {isBn
-                        ? 'নতুন সদস্য এড হলে তার ইনবক্সে গ্রুপ রুলস দেবে এবং গ্রুপে @মেনশন দিয়ে ছোট্ট করে জানাবে।'
-                        : 'DMs group rules to new members and sends a short @mention notice in group.'}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => navigateToPage('sec_inbox_rules')}
-                      className="mt-1 inline-flex items-center gap-1 text-[10.5px] font-bold text-[#087f55] hover:underline cursor-pointer"
-                    >
-                      <span>{isBn ? 'ইনবক্স রুলস ও নোটিশ পরিবর্তন করুন' : 'Edit Rules & Group Notice'}</span>
-                      <ArrowRight size={11} />
-                    </button>
-                  </div>
-                  <label className="switch">
-                    <input
-                      type="checkbox"
-                      checked={settings.newMemberInboxRulesEnabled !== false}
-                      onChange={(e) => updateSettingToggle('newMemberInboxRulesEnabled', e.target.checked)}
-                    />
-                    <span className="slider"></span>
-                  </label>
-                </div>
 
                 <div className="policy-box">
                   <h4>{isBn ? 'ডিফল্ট ভায়োলেশন পলিসি' : 'Default violation policy'}</h4>
@@ -4345,17 +4278,17 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Boss Admin Fight Alert & Zero-API Server Health Notice */}
+                {/* Boss Admin Fight Alert */}
                 <div className="subpanel-soft space-y-2.5">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <div>
                       <h4 className="text-[11.5px] font-extrabold text-[#0f291e] flex items-center gap-1.5 flex-wrap">
-                        <span>{isBn ? 'বস অ্যাডমিন ইনবক্স অ্যালার্ট ও সার্ভার নোটিশ' : 'Boss Inbox Fight Alert & Server Notice'}</span>
+                        <span>{isBn ? 'বস অ্যাডমিন ইনবক্স ঝগড়া অ্যালার্ট ও ২য় অ্যাডমিন' : 'Boss Inbox Fight Alert & 2nd Admin'}</span>
                       </h4>
                       <p className="text-[10px] text-slate-600 mt-0.5">
                         {isBn
-                          ? 'গ্রুপে ৩+ জন গালি/ঝগড়া করলে বা সার্ভারে কোনো সমস্যা হলে শুধু নিচের এক অ্যাডমিন ইনবক্সে (বস) অটো নক দেবে।'
-                          : 'Alerts single Boss Admin inbox on multi-member fights or server problems without AI API.'}
+                          ? 'গ্রুপে ৩+ জন গালি/ঝগড়া করলে শুধু নিচের প্রধান বস অ্যাডমিন ইনবক্সে অটো নক দেবে।'
+                          : 'Alerts primary Boss Admin inbox on multi-member fights without AI API.'}
                       </p>
                     </div>
                     <div className="flex items-center gap-1.5">
@@ -4368,7 +4301,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div className="bg-white p-2 rounded-lg border border-slate-200">
                       <label className="block text-[9.5px] font-bold text-slate-500 mb-1">
                         {isBn ? 'প্রধান বস অ্যাডমিন নম্বর' : 'Primary Boss Admin Number'}
@@ -4393,42 +4326,15 @@ export default function App() {
                         className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-mono font-bold"
                       />
                     </div>
-                    <div className="bg-white p-2 rounded-lg border border-slate-200">
-                      <label className="block text-[9.5px] font-bold text-slate-500 mb-1">
-                        {isBn ? 'সার্ভার সমস্যা হলে কোথায় নোটিশ যাবে' : 'Server Problem Notice Target'}
-                      </label>
-                      <select
-                        value={settings.serverErrorNoticeTarget || 'boss_inbox'}
-                        onChange={(e) =>
-                          setSettings((prev) => ({
-                            ...prev,
-                            serverErrorNoticeTarget: e.target.value as 'boss_inbox' | 'groups' | 'both',
-                          }))
-                        }
-                        className="w-full px-2 py-1 border border-slate-300 rounded text-xs font-bold bg-white"
-                      >
-                        <option value="boss_inbox">{isBn ? 'শুধু বস অ্যাডমিনের ইনবক্সে' : 'Boss Inbox Only'}</option>
-                        <option value="groups">{isBn ? 'সক্রিয় গ্রুপগুলোতে' : 'Active Groups'}</option>
-                        <option value="both">{isBn ? 'বস ইনবক্স + গ্রুপ উভয় জায়গায়' : 'Both Boss & Groups'}</option>
-                      </select>
-                    </div>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <div className="bg-white p-2 rounded-lg border border-slate-200 flex items-center justify-between gap-2">
                       <span className="text-[10px] font-bold text-slate-700">{isBn ? 'ঝগড়া অ্যালার্ট' : 'Fight Alert'}</span>
                       <input
                         type="checkbox"
                         checked={settings.bossFightAlertEnabled !== false}
                         onChange={(e) => setSettings((prev) => ({ ...prev, bossFightAlertEnabled: e.target.checked }))}
-                      />
-                    </div>
-                    <div className="bg-white p-2 rounded-lg border border-slate-200 flex items-center justify-between gap-2">
-                      <span className="text-[10px] font-bold text-slate-700">{isBn ? 'সার্ভার নোটিশ' : 'Server Notice'}</span>
-                      <input
-                        type="checkbox"
-                        checked={settings.serverErrorNoticeEnabled !== false}
-                        onChange={(e) => setSettings((prev) => ({ ...prev, serverErrorNoticeEnabled: e.target.checked }))}
                       />
                     </div>
                     <div className="bg-white p-2 rounded-lg border border-slate-200">

@@ -59,7 +59,6 @@ export type PageId =
   | 'sec_links'
   | 'sec_shield'
   | 'sec_welcome'
-  | 'sec_inbox_rules'
   | 'sec_stickers'
   | 'sec_media'
   | 'sec_badwords'
@@ -385,20 +384,6 @@ export function HomeFeatureHub({
       onClick: () => onNavigate('sec_welcome'),
     },
     {
-      id: 'sec_inbox_rules',
-      title: isBn ? 'নতুন মেম্বার ইনবক্স রুলস নোটিশ' : 'New Member Inbox Rules Notice',
-      desc: isBn
-        ? 'নতুন মেম্বার এলে ইনবক্সে রুলস ও গ্রুপে @মেনশন নোটিশ (এডিটযোগ্য)'
-        : 'Send group rules to new member DM & @mention notice in group',
-      keywords: 'new member rules inbox notice mention নতুন মেম্বার রুলস ইনবক্স নোটিশ মেনশন এডিট',
-      statusText: settings.newMemberInboxRulesEnabled !== false ? (isBn ? 'চালু আছে' : 'ACTIVE') : 'OFF',
-      isOn: settings.newMemberInboxRulesEnabled !== false,
-      iconBg: 'bg-emerald-50',
-      iconText: 'text-emerald-700',
-      icon: <Inbox size={18} />,
-      onClick: () => onNavigate('sec_inbox_rules'),
-    },
-    {
       id: 'sec_stickers',
       title: isBn ? 'অ্যান্টি-স্টিকার ও স্প্যাম কিউ' : 'Anti-Sticker & Spam Queue',
       desc: isBn ? 'স্টিকার ব্লক, লিমিট, ১০ মি. মিউট ও লাইভ কিউ' : 'Burst sticker mute & deletion queue',
@@ -507,9 +492,9 @@ export function HomeFeatureHub({
     },
     {
       id: 'sec_bossalert',
-      title: isBn ? 'বস অ্যালার্ট ও সার্ভার নোটিশ' : 'Boss Fight & Server Alert',
-      desc: isBn ? 'ঝগড়া অ্যালার্ট ও সার্ভার নোটিশ বস ইনবক্সে' : 'Boss inbox alerts for fights & server health',
-      keywords: 'boss inbox alert fight server health বস ইনবক্স ঝগড়া সার্ভার নোটিশ',
+      title: isBn ? 'বস ইনবক্স ঝগড়া অ্যালার্ট' : 'Boss Fight Inbox Alert',
+      desc: isBn ? 'গ্রুপে ঝগড়া বা গালি শুরু হলে বস ইনবক্সে অ্যালার্ট' : 'Boss inbox alert for group fights',
+      keywords: 'boss inbox alert fight ঝগড়া গালি বস ইনবক্স অ্যালার্ট',
       statusText: settings.bossFightAlertEnabled !== false ? (isBn ? 'অ্যালার্ট চালু' : 'Alerts ON') : 'OFF',
       isOn: Boolean(settings.bossFightAlertEnabled !== false),
       iconBg: 'bg-indigo-50',
@@ -559,7 +544,7 @@ export function HomeFeatureHub({
     {
       id: 'memberblock',
       title: isBn ? 'মেম্বার লিস্ট ও ১০ মি. ব্লক' : 'Members 10-Min Mute',
-      desc: isBn ? 'নাম-নাম্বার দেখে ১ ক্লিকে ১০ মি. ব্লক ও ভিন্ন নোটিশ' : 'Member directory & 1-click 10m mute',
+      desc: isBn ? 'নাম-নাম্বার দেখে ১ ক্লিকে ১০ মি. ব্লক করুন' : 'Member directory & 1-click 10m mute',
       keywords: 'member list mute directory মেম্বার লিস্ট ব্লক',
       statusText: isBn ? `${groupsCount}টি গ্রুপ রেডি` : `${groupsCount} groups`,
       isOn: isConnected,
@@ -1327,21 +1312,6 @@ export function NightModePage({
                 type="checkbox"
                 checked={Boolean(settings.nightModeEnabled)}
                 onChange={(e) => onSaveNightSettings({ nightModeEnabled: e.target.checked })}
-              />
-              <span className="slider"></span>
-            </label>
-          </div>
-
-          <div className="toggle-row">
-            <div className="toggle-info">
-              <h4>{isBn ? 'শুভ রাত্রি / সুপ্রভাত নোটিশ' : 'Send Night/Morning Notice in Group'}</h4>
-              <p>{isBn ? 'লক ও আনলক হওয়ার সময় গ্রুপে সুন্দর মেসেজ পাঠাবে' : 'Posts notice when locking & unlocking'}</p>
-            </div>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={settings.nightModeNotify !== false}
-                onChange={(e) => onSaveNightSettings({ nightModeNotify: e.target.checked })}
               />
               <span className="slider"></span>
             </label>
@@ -2253,14 +2223,11 @@ export function MemberBlockPage({
   isBotAdmin,
   members,
   adminShieldEnabled,
-  noticeTemplate,
-  defaultNotice,
   blockingJid,
   onSelectGroup,
   onRefresh,
   onBlockMember,
   onUnblockMember,
-  onSaveNoticeTemplate,
   onGoConnect,
   onBack,
 }: {
@@ -2272,26 +2239,17 @@ export function MemberBlockPage({
   isBotAdmin: boolean;
   members: GroupMemberDirectoryViewItem[];
   adminShieldEnabled: boolean;
-  noticeTemplate: string;
-  defaultNotice: string;
   blockingJid: string | null;
   onSelectGroup: (groupId: string) => void;
   onRefresh: () => void;
-  onBlockMember: (member: GroupMemberDirectoryViewItem, durationMinutes: number, customNotice: string) => Promise<void>;
+  onBlockMember: (member: GroupMemberDirectoryViewItem, durationMinutes: number) => Promise<void>;
   onUnblockMember: (groupId: string, memberJid: string) => Promise<void>;
-  onSaveNoticeTemplate: (notice: string) => Promise<void>;
   onGoConnect: () => void;
   onBack: () => void;
 }) {
   const [search, setSearch] = useState('');
   const [filterMode, setFilterMode] = useState<'members' | 'all' | 'blocked'>('all');
   const [durationMinutes, setDurationMinutes] = useState<number>(10);
-  const [showNoticeEditor, setShowNoticeEditor] = useState(false);
-  const [draftNotice, setDraftNotice] = useState(noticeTemplate || defaultNotice);
-
-  React.useEffect(() => {
-    setDraftNotice(noticeTemplate || defaultNotice);
-  }, [noticeTemplate, defaultNotice]);
 
   const nonSelfMembers = members.filter((m) => !m.isSelf);
   const blockedCount = nonSelfMembers.filter((m) => m.isBlocked).length;
@@ -2311,8 +2269,8 @@ export function MemberBlockPage({
         title={isBn ? 'গ্রুপ মেম্বার ও ১০ মিনিট ব্লক' : 'Group Members & 10-Min Block'}
         subtitle={
           isBn
-            ? 'গ্রুপের সব সদস্যের নাম ও নাম্বার লিস্ট। ক্লিক করলেই ১০ মিনিট মেসেজ ব্লক হবে এবং অ্যাডমিনের নাম ছাড়াই ভিন্ন ডিসিপ্লিনারি নোটিশ যাবে।'
-            : 'Click any member to mute their messages for 10 minutes with a distinct notice without showing any admin name.'
+            ? 'গ্রুপের সব সদস্যের নাম ও নাম্বার লিস্ট। ক্লিক করলেই ১০ মিনিট মেসেজ ব্লক করা যাবে।'
+            : 'Click any member to mute their messages for 10 minutes.'
         }
         isBn={isBn}
         onBack={onBack}
@@ -2449,58 +2407,6 @@ export function MemberBlockPage({
                 </button>
               </div>
             </div>
-
-            {/* Distinct Admin-Anonymous Notice Template Editor */}
-            <div className="pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setShowNoticeEditor((p) => !p)}
-                className="text-[11px] font-extrabold text-emerald-700 flex items-center gap-1.5 cursor-pointer"
-              >
-                <VolumeX size={13} />
-                <span>
-                  {showNoticeEditor
-                    ? isBn
-                      ? '▲ নোটিশ মেসেজ এডিটর লুকান'
-                      : '▲ Hide Notice Template'
-                    : isBn
-                    ? '▼ গ্রুপ নোটিশ মেসেজ দেখুন / কাস্টমাইজ করুন (অ্যাডমিনের নাম ছাড়াই)'
-                    : '▼ Customize Distinct Group Notice (No Admin Name)'}
-                </span>
-              </button>
-
-              {showNoticeEditor && (
-                <div className="mt-2.5 p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
-                  <p className="text-[10.5px] text-slate-600 leading-relaxed">
-                    {isBn
-                      ? 'এই নোটিশটি অ্যান্টি-স্প্যাম নোটিশ থেকে সম্পূর্ণ আলাদা এবং এখানে কোনো অ্যাডমিনের নাম উঠবে না। মেম্বার ট্যাগ করতে {{user}} এবং মিনিট দেখাতে {{minutes}} ব্যবহার করুন।'
-                      : 'This notice is completely separate from spam alerts and never includes any admin name. Use {{user}} and {{minutes}}.'}
-                  </p>
-                  <textarea
-                    rows={5}
-                    value={draftNotice}
-                    onChange={(e) => setDraftNotice(e.target.value)}
-                    className="w-full p-2.5 rounded-xl border border-slate-300 bg-white text-xs outline-none focus:border-emerald-600"
-                  />
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <button
-                      type="button"
-                      onClick={() => setDraftNotice(defaultNotice)}
-                      className="btn outline"
-                    >
-                      <RotateCcw size={12} /> {isBn ? 'ডিফল্ট ফিরিয়ে আনুন' : 'Reset Default'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onSaveNoticeTemplate(draftNotice)}
-                      className="btn primary"
-                    >
-                      <Save size={12} /> {isBn ? 'নোটিশ সেভ করুন' : 'Save Notice'}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
           </div>
 
           {/* Members List */}
@@ -2570,7 +2476,7 @@ export function MemberBlockPage({
                         <button
                           type="button"
                           disabled={isBusy}
-                          onClick={() => onBlockMember(m, durationMinutes, draftNotice)}
+                          onClick={() => onBlockMember(m, durationMinutes)}
                           className="btn danger"
                         >
                           {isBusy ? (
