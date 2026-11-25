@@ -117,6 +117,9 @@ export interface ModerationSettings {
   // AI Moderation & Silent Mode
   aiBadwordDetection: boolean;
   silentModeration: boolean;
+  hideNameOnDelete?: boolean;
+  savedBotOriginalProfileName?: string;
+  silentAllPresetMigratedV1?: boolean;
   mayaReplyMode: 'group' | 'inbox' | 'off';
   // AI Provider Management
   aiKeys: AiKey[];
@@ -256,12 +259,12 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   antiLink: true,
   allowCarromLinks: true,
   autoKick3Warnings: true,
-  autoWelcome: true,
+  autoWelcome: false,
   welcomeMessage: '',
-  newMemberInboxRulesEnabled: true,
+  newMemberInboxRulesEnabled: false,
   newMemberInboxRulesNotice: '',
   newMemberGroupNoticeText: '',
-  botReply: true,
+  botReply: false,
   customBadwords: [],
   dashboardPinEnabled: false,
   dashboardPin: '',
@@ -269,7 +272,7 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   nightLockStart: '00:00',
   nightLockEnd: '06:00',
   nightModeTimezone: 'Asia/Dhaka',
-  nightModeNotify: true,
+  nightModeNotify: false,
   antiCallEnabled: true,
   antiCallMessage: '📵 দুঃখিত! এটি একটি অটোমেটেড WhatsApp সিকিউরিটি বট। অনুগ্রহ করে কল না করে মেসেজ পাঠান।',
   antiCallAutoBlockCount: 3,
@@ -277,7 +280,7 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   mayaVisionEnabled: true,
   antiNsfwImage: false,
   activityTrackingEnabled: true,
-  keywordAutoReplyEnabled: true,
+  keywordAutoReplyEnabled: false,
   keywordTriggers: [],
   individualMuteEnabled: true,
   individualMuteStickerLimit: 3,
@@ -302,15 +305,17 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   mayaLanguage: 'auto',
   mayaMemoryLimit: 20,
   aiBadwordDetection: true,
-  silentModeration: false,
+  silentModeration: true,
+  hideNameOnDelete: true,
+  silentAllPresetMigratedV1: true,
   mayaReplyMode: 'group',
   aiKeys: [],
   aiAutoRotate: true,
   aiProviderPriority: ['gemini', 'groq', 'openrouter'],
-  autoSalamReplyEnabled: true,
+  autoSalamReplyEnabled: false,
   botTypingEnabled: true,
   leaderboardCleanOnly: true,
-  adminMentionReplyEnabled: true,
+  adminMentionReplyEnabled: false,
   adminMentionReplyTarget: 'all_admins',
   adminMentionReplyMessage: '🛡️ সম্মানিত @{{admin}}, সদস্য @{{user}} আপনাকে মেনশন করেছেন। অ্যাডমিন বর্তমানে ব্যস্ত থাকতে পারেন — অনুগ্রহ করে একটু অপেক্ষা করুন, সময় পেলে উত্তর দেবেন।',
   bossAdminNumber: '8801632222592',
@@ -498,6 +503,22 @@ export function loadDatabase() {
           callsRejected: data.stats?.callsRejected || 0,
         },
       };
+      if (!data.settings?.silentAllPresetMigratedV1) {
+        db.settings = {
+          ...db.settings,
+          silentModeration: true,
+          hideNameOnDelete: true,
+          autoWelcome: false,
+          newMemberInboxRulesEnabled: false,
+          nightModeNotify: false,
+          adminMentionReplyEnabled: false,
+          autoSalamReplyEnabled: false,
+          botReply: false,
+          keywordAutoReplyEnabled: false,
+          silentAllPresetMigratedV1: true,
+        };
+        saveDatabase();
+      }
       console.log('Moderation DB loaded successfully. Logs count:', db.activityLogs.length, 'Restricted users:', Object.keys(db.restrictedUsers).length);
     } else {
       saveDatabase();
@@ -705,6 +726,46 @@ export function pruneExpiredRuntimeCaches(): number {
   }
 
   return pruned;
+}
+
+export async function syncBotProfileNamePrivacy(sock: WASocket | null | undefined): Promise<{ updated: boolean; hidden: boolean }> {
+  if (!sock || !sock.authState?.creds?.registered) {
+    return { updated: false, hidden: false };
+  }
+  const settings = getSettings();
+  const hideName = Boolean(settings.hideNameOnDelete);
+  const currentName = String(sock.user?.name || '').trim();
+  const INVISIBLE_PROFILE_NAME = '\u2800'; // Braille Pattern Blank (renders empty, accepted as non-empty PushName by WhatsApp)
+
+  try {
+    if (hideName) {
+      if (currentName && currentName !== INVISIBLE_PROFILE_NAME && !settings.savedBotOriginalProfileName) {
+        db.settings.savedBotOriginalProfileName = currentName;
+        saveDatabase();
+      }
+      if (currentName !== INVISIBLE_PROFILE_NAME) {
+        await sock.updateProfileName(INVISIBLE_PROFILE_NAME);
+        if (sock.user) {
+          sock.user.name = INVISIBLE_PROFILE_NAME;
+        }
+        return { updated: true, hidden: true };
+      }
+      return { updated: false, hidden: true };
+    } else {
+      const original = (settings.savedBotOriginalProfileName || '').trim();
+      if (original && (currentName === INVISIBLE_PROFILE_NAME || !currentName)) {
+        await sock.updateProfileName(original);
+        if (sock.user) {
+          sock.user.name = original;
+        }
+        return { updated: true, hidden: false };
+      }
+      return { updated: false, hidden: false };
+    }
+  } catch (err: any) {
+    console.warn('[syncBotProfileNamePrivacy] Could not update WhatsApp profile name:', err?.message || err);
+    return { updated: false, hidden: hideName };
+  }
 }
 
 const unmaskedKeyVault = new Map<string, string>();
@@ -1487,9 +1548,12 @@ export async function sendOneTimeBlockExtensionNotice(
   const mentions = Array.from(
     new Set([normalizeJid(params.senderJid), params.senderAltJid ? normalizeJid(params.senderAltJid) : ''].filter(Boolean))
   );
+  const hideName = Boolean(settings.hideNameOnDelete);
   return await safeSendMessage(sock, params.groupId, {
-    text: `⏳ *ব্লক সময় বৃদ্ধি নোটিশ*\n\n👤 @${params.senderPhone}\n🚫 আপনি বর্তমানে মেসেজ ব্লক অবস্থায় আছেন! ব্লক অবস্থায় কোনো মেসেজ বা স্টিকার পাঠালে সেটি অটো-ডিলিট হবে এবং **প্রতিটি মেসেজে ব্লকের সময় +১ মিনিট করে যোগ হবে**।\n⏱️ বর্তমান বাকি সময়: প্রায় ${remainingMins} মিনিট\n\n📌 *(এই সতর্কবার্তাটি শুধু একবারই দেওয়া হলো — এরপর থেকে প্রতি মেসেজে নীরবে +১ মিনিট করে যোগ হতে থাকবে)*`,
-    mentions,
+    text: hideName
+      ? `⏳ *ব্লক সময় বৃদ্ধি নোটিশ*\n\n🚫 আপনি বর্তমানে মেসেজ ব্লক অবস্থায় আছেন! ব্লক অবস্থায় কোনো মেসেজ বা স্টিকার পাঠালে সেটি অটো-ডিলিট হবে এবং **প্রতিটি মেসেজে ব্লকের সময় +১ মিনিট করে যোগ হবে**।\n⏱️ বর্তমান বাকি সময়: প্রায় ${remainingMins} মিনিট\n\n📌 *(এই সতর্কবার্তাটি শুধু একবারই দেওয়া হলো — এরপর থেকে প্রতি মেসেজে নীরবে +১ মিনিট করে যোগ হতে থাকবে)*`
+      : `⏳ *ব্লক সময় বৃদ্ধি নোটিশ*\n\n👤 @${params.senderPhone}\n🚫 আপনি বর্তমানে মেসেজ ব্লক অবস্থায় আছেন! ব্লক অবস্থায় কোনো মেসেজ বা স্টিকার পাঠালে সেটি অটো-ডিলিট হবে এবং **প্রতিটি মেসেজে ব্লকের সময় +১ মিনিট করে যোগ হবে**।\n⏱️ বর্তমান বাকি সময়: প্রায় ${remainingMins} মিনিট\n\n📌 *(এই সতর্কবার্তাটি শুধু একবারই দেওয়া হলো — এরপর থেকে প্রতি মেসেজে নীরবে +১ মিনিট করে যোগ হতে থাকবে)*`,
+    ...(hideName ? {} : { mentions }),
   });
 }
 
@@ -1693,13 +1757,17 @@ export function unrestrictUser(
 
     if (globalSocketGetter) {
       const sock = globalSocketGetter();
-      if (sock && sock.authState?.creds?.registered) {
+      const settings = getSettings();
+      if (sock && sock.authState?.creds?.registered && !settings.silentModeration) {
+        const hideName = Boolean(settings.hideNameOnDelete);
         safeSendMessage(
           sock,
           groupId,
           {
-            text: `✅ *মেসেজ ব্লক প্রত্যাহার*\n\n👤 @${lastRestriction.senderPhone}\nএখন থেকে আপনি আবার স্বাভাবিকভাবে গ্রুপে মেসেজ পাঠাতে পারবেন।`,
-            mentions: [lastRestriction.senderJid],
+            text: hideName
+              ? `✅ *মেসেজ ব্লক প্রত্যাহার*\n\nসদস্য এখন থেকে আবার স্বাভাবিকভাবে গ্রুপে মেসেজ পাঠাতে পারবেন।`
+              : `✅ *মেসেজ ব্লক প্রত্যাহার*\n\n👤 @${lastRestriction.senderPhone}\nএখন থেকে আপনি আবার স্বাভাবিকভাবে গ্রুপে মেসেজ পাঠাতে পারবেন।`,
+            ...(hideName ? {} : { mentions: [lastRestriction.senderJid] }),
           },
           quotedMsg ? { quoted: quotedMsg } : undefined
         ).catch(() => {});
@@ -2502,6 +2570,7 @@ type ServerAdminCommandAction =
   | { type: 'demote' }
   | { type: 'tagall'; customText: string }
   | { type: 'toggle'; key: keyof ModerationSettings; label: string; value: boolean }
+  | { type: 'master_notices'; enable: boolean }
   | { type: 'status' }
   | { type: 'help' };
 
@@ -2689,9 +2758,19 @@ function parseServerAdminGroupCommand(
     const directMatch = matchCmdString(cmdCore);
     if (directMatch) return directMatch;
 
+    // 9b. One-Tap All Notices ON/OFF ("notice on/off", "নোটিশ অন/অফ")
+    const masterNoticeMatch = cmdCore.match(
+      /^(?:notice|notices|allnotice|allnotices|নোটিশ|সব\s*নোটিশ)\s+(on|off|অন|অফ|চালু|বন্ধ|enable|disable)$/iu
+    );
+    if (masterNoticeMatch) {
+      const stateToken = masterNoticeMatch[1].toLowerCase();
+      const enable = ['on', 'অন', 'চালু', 'enable'].includes(stateToken);
+      return { type: 'master_notices', enable };
+    }
+
     // 10. Quick Feature Toggles ("antisticker on/off", "স্টিকার অফ", "antilink on/off", "লিংক অন", etc.)
     const toggleMatch = cmdCore.match(
-      /^(antisticker|sticker|স্টিকার|antilink|link|লিংক|antibadword|badword|গালি|antivoice|voice|ভয়েস|ভয়েস|antiviewonce|viewonce|ভিউওয়ান্স|welcome|ওয়েলকাম|ওয়েলকাম|silent|সাইলেন্ট|maya|মায়া|মায়া)\s+(on|off|অন|অফ|চালু|বন্ধ|enable|disable)$/iu
+      /^(antisticker|sticker|স্টিকার|antilink|link|লিংক|antibadword|badword|গালি|antivoice|voice|ভয়েস|ভয়েস|antiviewonce|viewonce|ভিউওয়ান্স|welcome|ওয়েলকাম|ওয়েলকাম|silent|সাইলেন্ট|hidename|নাম|maya|মায়া|মায়া)\s+(on|off|অন|অফ|চালু|বন্ধ|enable|disable)$/iu
     );
     if (toggleMatch) {
       const targetFeature = toggleMatch[1].toLowerCase();
@@ -2719,6 +2798,8 @@ function parseServerAdminGroupCommand(
         ওয়েলকাম: { key: 'autoWelcome', label: 'Auto Welcome' },
         silent: { key: 'silentModeration', label: 'Silent Moderation' },
         সাইলেন্ট: { key: 'silentModeration', label: 'Silent Moderation' },
+        hidename: { key: 'hideNameOnDelete', label: 'Hide Name on Delete' },
+        নাম: { key: 'hideNameOnDelete', label: 'Hide Name on Delete' },
         maya: { key: 'mayaGroupReply', label: 'Maya Group AI Reply' },
         মায়া: { key: 'mayaGroupReply', label: 'Maya Group AI Reply' },
         মায়া: { key: 'mayaGroupReply', label: 'Maya Group AI Reply' },
@@ -3041,15 +3122,20 @@ async function executeServerAdminGroupCommand(
         delete db.warnings[`${groupId}:${target.jid}`];
         saveDatabase();
         sock.sendMessage(groupId, { react: { text: '✅', key: msg.key } }).catch(() => {});
-        await safeSendMessage(
-          sock,
-          groupId,
-          {
-            text: `🚫 *অ্যাডমিন কমান্ড (Kick)*\n👤 @${target.phone} কে গ্রুপ থেকে রিমুভ করা হয়েছে।`,
-            mentions: [target.jid],
-          },
-          { quoted: replyTargetQuote }
-        );
+        if (!settings.silentModeration) {
+          const hideName = Boolean(settings.hideNameOnDelete);
+          await safeSendMessage(
+            sock,
+            groupId,
+            {
+              text: hideName
+                ? `🚫 *অ্যাডমিন কমান্ড (Kick)*\nগ্রুপ থেকে সদস্যকে রিমুভ করা হয়েছে।`
+                : `🚫 *অ্যাডমিন কমান্ড (Kick)*\n👤 @${target.phone} কে গ্রুপ থেকে রিমুভ করা হয়েছে।`,
+              ...(hideName ? {} : { mentions: [target.jid] }),
+            },
+            { quoted: replyTargetQuote }
+          );
+        }
         addActivityLog({
           groupId,
           groupName: groupSubject,
@@ -3223,16 +3309,21 @@ async function executeServerAdminGroupCommand(
       saveDatabase();
 
       const count = db.warnings[warningKey].count;
+      const hideName = Boolean(settings.hideNameOnDelete);
       if (count >= 3 && settings.autoKick3Warnings && !target.isGroupAdmin && (await ensureFreshBotAdmin())) {
-        await safeSendMessage(
-          sock,
-          groupId,
-          {
-            text: `🚨 [৩য় সতর্কতা — অটো কিক]\n@${target.phone} ৩টি সতর্কবার্তা অতিক্রম করায় গ্রুপ থেকে রিমুভ করা হচ্ছে!`,
-            mentions: [target.jid],
-          },
-          { quoted: replyTargetQuote }
-        );
+        if (!settings.silentModeration) {
+          await safeSendMessage(
+            sock,
+            groupId,
+            {
+              text: hideName
+                ? `🚨 [৩য় সতর্কতা — অটো কিক]\n৩টি সতর্কবার্তা অতিক্রম করায় সদস্যকে গ্রুপ থেকে রিমুভ করা হচ্ছে!`
+                : `🚨 [৩য় সতর্কতা — অটো কিক]\n@${target.phone} ৩টি সতর্কবার্তা অতিক্রম করায় গ্রুপ থেকে রিমুভ করা হচ্ছে!`,
+              ...(hideName ? {} : { mentions: [target.jid] }),
+            },
+            { quoted: replyTargetQuote }
+          );
+        }
         for (const cand of target.candidateJids) {
           try {
             const kickRes: any = await sock.groupParticipantsUpdate(groupId, [cand], 'remove');
@@ -3245,13 +3336,15 @@ async function executeServerAdminGroupCommand(
             }
           } catch {}
         }
-      } else {
+      } else if (!settings.silentModeration) {
         await safeSendMessage(
           sock,
           groupId,
           {
-            text: `⚠️ [অ্যাডমিন সতর্কবার্তা ${count}/3]\nসদস্য @${target.phone}, নিয়ম ভঙ্গের কারণে আপনাকে সতর্ক করা হলো। অনুগ্রহ করে গ্রুপের শৃঙ্খলা মেনে চলুন।`,
-            mentions: [target.jid],
+            text: hideName
+              ? `⚠️ [অ্যাডমিন সতর্কবার্তা ${count}/3]\nনিয়ম ভঙ্গের কারণে সতর্ক করা হলো। অনুগ্রহ করে গ্রুপের শৃঙ্খলা মেনে চলুন।`
+              : `⚠️ [অ্যাডমিন সতর্কবার্তা ${count}/3]\nসদস্য @${target.phone}, নিয়ম ভঙ্গের কারণে আপনাকে সতর্ক করা হলো। অনুগ্রহ করে গ্রুপের শৃঙ্খলা মেনে চলুন।`,
+            ...(hideName ? {} : { mentions: [target.jid] }),
           },
           { quoted: replyTargetQuote }
         );
@@ -3486,8 +3579,50 @@ async function executeServerAdminGroupCommand(
     return;
   }
 
+  if (cmd.type === 'master_notices') {
+    if (cmd.enable) {
+      updateSettings({
+        silentModeration: false,
+        autoWelcome: true,
+        newMemberInboxRulesEnabled: true,
+        nightModeNotify: true,
+        adminMentionReplyEnabled: true,
+        autoSalamReplyEnabled: true,
+        botReply: true,
+        keywordAutoReplyEnabled: true,
+      });
+    } else {
+      updateSettings({
+        silentModeration: true,
+        hideNameOnDelete: true,
+        autoWelcome: false,
+        newMemberInboxRulesEnabled: false,
+        nightModeNotify: false,
+        adminMentionReplyEnabled: false,
+        autoSalamReplyEnabled: false,
+        botReply: false,
+        keywordAutoReplyEnabled: false,
+      });
+      void syncBotProfileNamePrivacy(sock).catch(() => {});
+    }
+    await safeSendMessage(
+      sock,
+      groupId,
+      {
+        text: cmd.enable
+          ? '✅ *সব নোটিশ সিস্টেম* এক বাটনে *ON (চালু)* করা হয়েছে।'
+          : '⛔ *সব নোটিশ সিস্টেম* এক বাটনে *OFF (বন্ধ)* করা হয়েছে — এখন শুধু নীরবে রিমুভ হবে এবং নাম হাইড থাকবে।',
+      },
+      { quoted: replyTargetQuote }
+    );
+    return;
+  }
+
   if (cmd.type === 'toggle') {
     updateSettings({ [cmd.key]: cmd.value } as Partial<ModerationSettings>);
+    if (cmd.key === 'hideNameOnDelete') {
+      void syncBotProfileNamePrivacy(sock).catch(() => {});
+    }
     await safeSendMessage(
       sock,
       groupId,
@@ -5238,17 +5373,23 @@ export async function applyVerifiedAntiStickerViolation(
   const lastNotice = lastAntiStickerNoticeAt.get(throttleKey) || 0;
   const canSendNotice = now - lastNotice > 3500;
 
+  const hideName = Boolean(settings.hideNameOnDelete);
+
   if (warningCount === 1 && !settings.silentModeration && canSendNotice) {
     lastAntiStickerNoticeAt.set(throttleKey, now);
     await safeSendMessage(sock, groupId, {
-      text: `⚠️ [সতর্কবার্তা ১/৩]\nসদস্য @${senderPhone}, গ্রুপে স্টিকার পাঠানো নিষিদ্ধ!\nআপনার স্টিকারটি মুছে দেওয়া হয়েছে। নিয়ম মেনে চলার অনুরোধ করা হচ্ছে।`,
-      mentions: [senderJid],
+      text: hideName
+        ? `⚠️ [সতর্কবার্তা ১/৩]\nগ্রুপে স্টিকার পাঠানো নিষিদ্ধ! নিয়ম ভঙ্গকারী স্টিকারটি মুছে দেওয়া হয়েছে। সবাইকে নিয়ম মেনে চলার অনুরোধ করা হচ্ছে।`
+        : `⚠️ [সতর্কবার্তা ১/৩]\nসদস্য @${senderPhone}, গ্রুপে স্টিকার পাঠানো নিষিদ্ধ!\nআপনার স্টিকারটি মুছে দেওয়া হয়েছে। নিয়ম মেনে চলার অনুরোধ করা হচ্ছে।`,
+      ...(hideName ? {} : { mentions: [senderJid] }),
     });
   } else if (warningCount === 2 && !settings.silentModeration && canSendNotice) {
     lastAntiStickerNoticeAt.set(throttleKey, now);
     await safeSendMessage(sock, groupId, {
-      text: `⚠️ [সতর্কবার্তা ২/৩]\nসদস্য @${senderPhone}, এটি আপনার দ্বিতীয় সতর্কতা (স্টিকার পাঠানো নিষিদ্ধ)!\nপরবর্তী আরেকটি নিয়মলঙ্ঘনে আপনাকে স্বয়ংক্রিয়ভাবে গ্রুপ থেকে রিমুভ (Kick) করা হবে!`,
-      mentions: [senderJid],
+      text: hideName
+        ? `⚠️ [সতর্কবার্তা ২/৩]\nগ্রুপে স্টিকার পাঠানো নিষিদ্ধ! নিয়ম ভঙ্গকারী স্টিকারটি মুছে দেওয়া হয়েছে। পরবর্তী নিয়মলঙ্ঘনে স্বয়ংক্রিয়ভাবে গ্রুপ থেকে রিমুভ (Kick) করা হবে!`
+        : `⚠️ [সতর্কবার্তা ২/৩]\nসদস্য @${senderPhone}, এটি আপনার দ্বিতীয় সতর্কতা (স্টিকার পাঠানো নিষিদ্ধ)!\nপরবর্তী আরেকটি নিয়মলঙ্ঘনে আপনাকে স্বয়ংক্রিয়ভাবে গ্রুপ থেকে রিমুভ (Kick) করা হবে!`,
+      ...(hideName ? {} : { mentions: [senderJid] }),
     });
   } else if (warningCount >= 3 && settings.autoKick3Warnings) {
     const freshPerms = await checkPermissions(sock, groupId, senderJid, true, senderAltJid);
@@ -5265,8 +5406,10 @@ export async function applyVerifiedAntiStickerViolation(
       if (!settings.silentModeration && canSendNotice) {
         lastAntiStickerNoticeAt.set(throttleKey, now);
         await safeSendMessage(sock, groupId, {
-          text: `🚨 [চূড়ান্ত অ্যাকশন - ৩য় সতর্কতা]\nসদস্য @${senderPhone} ৩ বার স্টিকার নিয়ম লঙ্ঘন করেছেন।\nনিরাপত্তার স্বার্থে তাকে গ্রুপ থেকে রিমুভ করা হচ্ছে!`,
-          mentions: [senderJid],
+          text: hideName
+            ? `🚨 [চূড়ান্ত অ্যাকশন - ৩য় সতর্কতা]\n৩ বার স্টিকার নিয়ম লঙ্ঘন করায় নিরাপত্তার স্বার্থে সদস্যকে গ্রুপ থেকে রিমুভ করা হচ্ছে!`
+            : `🚨 [চূড়ান্ত অ্যাকশন - ৩য় সতর্কতা]\nসদস্য @${senderPhone} ৩ বার স্টিকার নিয়ম লঙ্ঘন করেছেন।\nনিরাপত্তার স্বার্থে তাকে গ্রুপ থেকে রিমুভ করা হচ্ছে!`,
+          ...(hideName ? {} : { mentions: [senderJid] }),
         });
       }
 
@@ -5384,22 +5527,33 @@ export async function applyVoiceAbusePenalty(
   saveDatabase();
 
   const warningCount = db.warnings[warningKey].count;
+  const hideName = Boolean(settings.hideNameOnDelete);
 
   if (warningCount === 1 && !settings.silentModeration) {
     await safeSendMessage(sock, groupId, {
-      text: `⚠️ [সতর্কবার্তা ১/৩ — Voice Guard]\nসদস্য @${senderPhone}, ${noticeReason}!\n${
-        deleteSuccessful
-          ? 'আপনার ভয়েস মেসেজটি মুছে দেওয়া হয়েছে।'
-          : !isBotAdmin
-            ? '⚠️ বটের অ্যাডমিন পারমিশন না থাকায় ভয়েস মেসেজটি মুছে ফেলা যায়নি।'
-            : '⚠️ ভয়েস মেসেজটি মুছে ফেলা সম্ভব হয়নি।'
-      }`,
-      mentions: [senderJid],
+      text: hideName
+        ? `⚠️ [সতর্কবার্তা ১/৩]\n${noticeReason}!\n${
+            deleteSuccessful
+              ? 'অশালীন ভয়েস মেসেজটি মুছে দেওয়া হয়েছে।'
+              : !isBotAdmin
+                ? '⚠️ অ্যাডমিন পারমিশন না থাকায় ভয়েস মেসেজটি মুছে ফেলা যায়নি।'
+                : '⚠️ ভয়েস মেসেজটি মুছে ফেলা সম্ভব হয়নি।'
+          }`
+        : `⚠️ [সতর্কবার্তা ১/৩ — Voice Guard]\nসদস্য @${senderPhone}, ${noticeReason}!\n${
+            deleteSuccessful
+              ? 'আপনার ভয়েস মেসেজটি মুছে দেওয়া হয়েছে।'
+              : !isBotAdmin
+                ? '⚠️ বটের অ্যাডমিন পারমিশন না থাকায় ভয়েস মেসেজটি মুছে ফেলা যায়নি।'
+                : '⚠️ ভয়েস মেসেজটি মুছে ফেলা সম্ভব হয়নি।'
+          }`,
+      ...(hideName ? {} : { mentions: [senderJid] }),
     });
   } else if (warningCount === 2 && !settings.silentModeration) {
     await safeSendMessage(sock, groupId, {
-      text: `⚠️ [সতর্কবার্তা ২/৩ — Voice Guard]\nসদস্য @${senderPhone}, এটি আপনার দ্বিতীয় সতর্কতা (${noticeReason})!\nপরবর্তী নিয়মভঙ্গে আপনাকে গ্রুপ থেকে স্বয়ংক্রিয়ভাবে রিমুভ (Kick) করা হবে!`,
-      mentions: [senderJid],
+      text: hideName
+        ? `⚠️ [সতর্কবার্তা ২/৩]\n${noticeReason}!\nপরবর্তী নিয়মভঙ্গে গ্রুপ থেকে স্বয়ংক্রিয়ভাবে রিমুভ (Kick) করা হবে!`
+        : `⚠️ [সতর্কবার্তা ২/৩ — Voice Guard]\nসদস্য @${senderPhone}, এটি আপনার দ্বিতীয় সতর্কতা (${noticeReason})!\nপরবর্তী নিয়মভঙ্গে আপনাকে গ্রুপ থেকে স্বয়ংক্রিয়ভাবে রিমুভ (Kick) করা হবে!`,
+      ...(hideName ? {} : { mentions: [senderJid] }),
     });
   } else if (warningCount >= 3 && settings.autoKick3Warnings) {
     const freshPerms = await checkPermissions(sock, groupId, senderJid, true, senderAltJid);
@@ -5415,8 +5569,10 @@ export async function applyVoiceAbusePenalty(
 
       if (!settings.silentModeration) {
         await safeSendMessage(sock, groupId, {
-          text: `🚨 [চূড়ান্ত অ্যাকশন - ৩য় সতর্কতা — Voice Guard]\nসদস্য @${senderPhone} ৩ বার নিয়ম লঙ্ঘন করেছেন (${noticeReason})।\nনিরাপত্তার স্বার্থে তাকে গ্রুপ থেকে রিমুভ করা হচ্ছে!`,
-          mentions: [senderJid],
+          text: hideName
+            ? `🚨 [চূড়ান্ত অ্যাকশন - ৩য় সতর্কতা]\n৩ বার নিয়ম লঙ্ঘন করায় (${noticeReason}) নিরাপত্তার স্বার্থে সদস্যকে গ্রুপ থেকে রিমুভ করা হচ্ছে!`
+            : `🚨 [চূড়ান্ত অ্যাকশন - ৩য় সতর্কতা — Voice Guard]\nসদস্য @${senderPhone} ৩ বার নিয়ম লঙ্ঘন করেছেন (${noticeReason})।\nনিরাপত্তার স্বার্থে তাকে গ্রুপ থেকে রিমুভ করা হচ্ছে!`,
+          ...(hideName ? {} : { mentions: [senderJid] }),
         });
       }
 
@@ -5487,9 +5643,11 @@ export function startGroupLockMonitor(sockGetter: () => WASocket | null) {
         try {
           console.log(`Unlocking group ${groupId} after 10-minute spam timeout.`);
           await sock.groupSettingUpdate(groupId, 'not_announcement');
-          await safeSendMessage(sock, groupId, {
-            text: '✅ [WAGuard Security]\n১০ মিনিটের লক মেয়াদ শেষ হয়েছে। গ্রুপটি পুনরায় সকল সদস্যের মেসেজ পাঠানোর জন্য উন্মুক্ত করা হলো। সবাইকে নিয়ম মেনে চলার অনুরোধ করা হচ্ছে।',
-          });
+          if (!getSettings().silentModeration) {
+            await safeSendMessage(sock, groupId, {
+              text: '✅ [WAGuard Security]\n১০ মিনিটের লক মেয়াদ শেষ হয়েছে। গ্রুপটি পুনরায় সকল সদস্যের মেসেজ পাঠানোর জন্য উন্মুক্ত করা হলো। সবাইকে নিয়ম মেনে চলার অনুরোধ করা হচ্ছে।',
+            });
+          }
 
           addActivityLog({
             groupId,
@@ -5638,7 +5796,7 @@ export async function applyNightModeManually(sock: WASocket | null, lock: boolea
         await sock.groupSettingUpdate(groupId, 'announcement');
         db.nightLockedGroups[groupId] = { groupName: meta.subject || 'WhatsApp Group', lockedAt: Date.now() };
         affected++;
-        if (settings.nightModeNotify !== false) {
+        if (settings.nightModeNotify !== false && !settings.silentModeration) {
           await safeSendMessage(sock, groupId, {
             text: `🌙 *শুভ রাত্রি — নাইট মোড চালু হয়েছে*\n\nগ্রুপটি সাময়িকভাবে অ্যাডমিনদের জন্য লক করা হয়েছে (${settings.nightLockStart || '00:00'} – ${settings.nightLockEnd || '06:00'})।\n☀️ সকালে নির্ধারিত সময়ে গ্রুপটি আবার সবার জন্য খুলে দেওয়া হবে।`,
           });
@@ -5662,7 +5820,7 @@ export async function applyNightModeManually(sock: WASocket | null, lock: boolea
       try {
         await sock.groupSettingUpdate(groupId, 'not_announcement');
         affected++;
-        if (settings.nightModeNotify !== false) {
+        if (settings.nightModeNotify !== false && !settings.silentModeration) {
           await safeSendMessage(sock, groupId, {
             text: `☀️ *সুপ্রভাত — নাইট মোড শেষ হয়েছে*\n\nগ্রুপটি আবার সকল সদস্যের জন্য উন্মুক্ত করা হলো। সবার দিনটি শুভ হোক! 🌸`,
           });
@@ -6391,24 +6549,27 @@ export async function manualBlockMember(
   );
 
   let noticeSent = false;
-  if (sock && sock.authState?.creds?.registered) {
+  if (sock && sock.authState?.creds?.registered && !settings.silentModeration) {
+    const hideName = Boolean(settings.hideNameOnDelete);
     const rawTemplate = (params.customNotice ?? settings.manualBlockNotice ?? '').trim();
     const template = rawTemplate || DEFAULT_MANUAL_MEMBER_BLOCK_NOTICE;
     // Strip any accidental {admin} placeholder so no admin name can ever appear in the notice
     const noticeText = template
       .replace(/\{\{?admin\}?\}/gi, '')
-      .replace(/\{\{?user\}?\}/gi, cleanPhone)
+      .replace(/@?\{\{?user\}?\}/gi, hideName ? 'নিয়ম ভঙ্গকারী সদস্য' : `@${cleanPhone}`)
       .replace(/\{\{?minutes\}?\}/gi, String(durationMinutes));
 
-    const mentions = Array.from(
-      new Set([normalizeJid(memberJid), altJid ? normalizeJid(altJid) : ''].filter(Boolean))
-    );
+    const mentions = hideName
+      ? []
+      : Array.from(
+          new Set([normalizeJid(memberJid), altJid ? normalizeJid(altJid) : ''].filter(Boolean))
+        );
     const sent = await safeSendMessage(
       sock,
       groupId,
       {
         text: noticeText,
-        mentions,
+        ...(mentions.length > 0 ? { mentions } : {}),
       },
       params.quotedMsg ? { quoted: params.quotedMsg } : undefined
     );
@@ -6818,9 +6979,12 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
 
         // 3. Send warning notice alert to the group if not silent
         if (!settings.silentModeration) {
+          const hideName = Boolean(settings.hideNameOnDelete);
           await safeSendMessage(sock, remoteJid, {
-            text: `🚨 WAGuard Security Alert\n\n⚠️ @${cleanPhone} অতিরিক্ত স্টিকার পাঠানোর কারণে Anti-Spam Protection-এর আওতায় এসেছে।\n\n🔒 Temporary Messaging Restriction Activated\n\n⏳ Restriction Duration: ${durationMins} Minutes\n\n📌 এই সময়ে ওই সদস্যের পাঠানো নতুন মেসেজ স্বয়ংক্রিয়ভাবে মুছে ফেলার চেষ্টা করা হবে।\n\n🛡️ গ্রুপের অন্য সদস্যরা স্বাভাবিকভাবে মেসেজ করতে পারবেন।`,
-            mentions: [senderJid],
+            text: hideName
+              ? `🚨 Security Alert\n\n⚠️ অতিরিক্ত স্টিকার পাঠানোর কারণে Anti-Spam Protection কার্যকর করা হয়েছে।\n\n🔒 Temporary Messaging Restriction Activated\n\n⏳ Restriction Duration: ${durationMins} Minutes\n\n📌 এই সময়ে স্প্যামকারীর নতুন মেসেজ স্বয়ংক্রিয়ভাবে মুছে ফেলার চেষ্টা করা হবে।\n\n🛡️ গ্রুপের অন্য সদস্যরা স্বাভাবিকভাবে মেসেজ করতে পারবেন।`
+              : `🚨 WAGuard Security Alert\n\n⚠️ @${cleanPhone} অতিরিক্ত স্টিকার পাঠানোর কারণে Anti-Spam Protection-এর আওতায় এসেছে।\n\n🔒 Temporary Messaging Restriction Activated\n\n⏳ Restriction Duration: ${durationMins} Minutes\n\n📌 এই সময়ে ওই সদস্যের পাঠানো নতুন মেসেজ স্বয়ংক্রিয়ভাবে মুছে ফেলার চেষ্টা করা হবে।\n\n🛡️ গ্রুপের অন্য সদস্যরা স্বাভাবিকভাবে মেসেজ করতে পারবেন।`,
+            ...(hideName ? {} : { mentions: [senderJid] }),
           });
         }
 
@@ -7026,31 +7190,44 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
     saveDatabase();
 
     const warningCount = db.warnings[warningKey].count;
+    const hideName = Boolean(settings.hideNameOnDelete);
 
     // Feature 10: THREE WARNING AUTO KICK (Always enforce kick even if silentModeration is enabled)
     if (warningCount === 1 && !settings.silentModeration) {
       await safeSendMessage(sock, remoteJid, {
-        text: `⚠️ [সতর্কবার্তা ১/৩]\nসদস্য @${cleanPhone}, গ্রুপে ${noticeReason}!\n${
-          deleteSuccessful
-            ? 'আপনার মেসেজটি মুছে দেওয়া হয়েছে।'
-            : !isBotAdmin
-              ? '⚠️ বটের মেসেজ ডিলিট পারমিশন (Admin) না থাকায় মেসেজটি মুছে ফেলা যায়নি।'
-              : 'মেসেজটি মুছে ফেলার চেষ্টা করা হয়েছে।'
-        } নিয়ম মেনে চলার অনুরোধ করা হচ্ছে।`,
-        mentions: [senderJid],
+        text: hideName
+          ? `⚠️ [সতর্কবার্তা ১/৩]\nগ্রুপে ${noticeReason}!\n${
+              deleteSuccessful
+                ? 'নিয়ম ভঙ্গকারী মেসেজটি মুছে দেওয়া হয়েছে।'
+                : !isBotAdmin
+                  ? '⚠️ বটের মেসেজ ডিলিট পারমিশন (Admin) না থাকায় মেসেজটি মুছে ফেলা যায়নি।'
+                  : 'মেসেজটি মুছে ফেলার চেষ্টা করা হয়েছে।'
+            } সবাইকে নিয়ম মেনে চলার অনুরোধ করা হচ্ছে।`
+          : `⚠️ [সতর্কবার্তা ১/৩]\nসদস্য @${cleanPhone}, গ্রুপে ${noticeReason}!\n${
+              deleteSuccessful
+                ? 'আপনার মেসেজটি মুছে দেওয়া হয়েছে।'
+                : !isBotAdmin
+                  ? '⚠️ বটের মেসেজ ডিলিট পারমিশন (Admin) না থাকায় মেসেজটি মুছে ফেলা যায়নি।'
+                  : 'মেসেজটি মুছে ফেলার চেষ্টা করা হয়েছে।'
+            } নিয়ম মেনে চলার অনুরোধ করা হচ্ছে।`,
+        ...(hideName ? {} : { mentions: [senderJid] }),
       });
     } else if (warningCount === 2 && !settings.silentModeration) {
       await safeSendMessage(sock, remoteJid, {
-        text: `⚠️ [সতর্কবার্তা ২/৩]\nসদস্য @${cleanPhone}, এটি আপনার দ্বিতীয় সতর্কতা (${noticeReason})!\nপরবর্তী আরেকটি নিয়মলঙ্ঘনে আপনাকে স্বয়ংক্রিয়ভাবে গ্রুপ থেকে রিমুভ (Kick) করা হবে!`,
-        mentions: [senderJid],
+        text: hideName
+          ? `⚠️ [সতর্কবার্তা ২/৩]\nগ্রুপে ${noticeReason}!\nপরবর্তী নিয়মলঙ্ঘনে স্বয়ংক্রিয়ভাবে গ্রুপ থেকে রিমুভ (Kick) করা হবে!`
+          : `⚠️ [সতর্কবার্তা ২/৩]\nসদস্য @${cleanPhone}, এটি আপনার দ্বিতীয় সতর্কতা (${noticeReason})!\nপরবর্তী আরেকটি নিয়মলঙ্ঘনে আপনাকে স্বয়ংক্রিয়ভাবে গ্রুপ থেকে রিমুভ (Kick) করা হবে!`,
+        ...(hideName ? {} : { mentions: [senderJid] }),
       });
     } else if (warningCount >= 3 && settings.autoKick3Warnings) {
       const freshPerms = await checkPermissions(sock, remoteJid, senderJid, true, senderAltJid);
       if (freshPerms.isSenderAdmin) {
         if (!settings.silentModeration) {
           await safeSendMessage(sock, remoteJid, {
-            text: `🛡️ [অ্যাডমিন সুরক্ষা Notice]\nসদস্য @${cleanPhone} ৩টি সতর্কতা অতিক্রম করেছেন। তবে তিনি একজন গ্রুপ অ্যাডমিন হওয়ায় তাকে কিক করা সম্ভব নয়।`,
-            mentions: [senderJid],
+            text: hideName
+              ? `🛡️ [অ্যাডমিন সুরক্ষা Notice]\n৩টি সতর্কতা অতিক্রম হয়েছে (${noticeReason})। তবে গ্রুপ অ্যাডমিন হওয়ায় তাকে কিক করা সম্ভব নয়।`
+              : `🛡️ [অ্যাডমিন সুরক্ষা Notice]\nসদস্য @${cleanPhone} ৩টি সতর্কতা অতিক্রম করেছেন। তবে তিনি একজন গ্রুপ অ্যাডমিন হওয়ায় তাকে কিক করা সম্ভব নয়।`,
+            ...(hideName ? {} : { mentions: [senderJid] }),
           });
         }
       } else if (freshPerms.isBotAdmin) {
@@ -7067,8 +7244,10 @@ export async function processIncomingMessage(sock: WASocket, msg: proto.IWebMess
 
         if (!settings.silentModeration) {
           await safeSendMessage(sock, remoteJid, {
-            text: `🚨 [চূড়ান্ত অ্যাকশন - ৩য় সতর্কতা]\nসদস্য @${cleanPhone} ৩ বার গ্রুপের নিয়ম লঙ্ঘন করেছেন (${noticeReason})।\nনিরাপত্তার স্বার্থে তাকে গ্রুপ থেকে রিমুভ করা হচ্ছে!`,
-            mentions: [senderJid],
+            text: hideName
+              ? `🚨 [চূড়ান্ত অ্যাকশন - ৩য় সতর্কতা]\n৩ বার গ্রুপের নিয়ম লঙ্ঘন করায় (${noticeReason}) নিরাপত্তার স্বার্থে সদস্যকে গ্রুপ থেকে রিমুভ করা হচ্ছে!`
+              : `🚨 [চূড়ান্ত অ্যাকশন - ৩য় সতর্কতা]\nসদস্য @${cleanPhone} ৩ বার গ্রুপের নিয়ম লঙ্ঘন করেছেন (${noticeReason})।\nনিরাপত্তার স্বার্থে তাকে গ্রুপ থেকে রিমুভ করা হচ্ছে!`,
+            ...(hideName ? {} : { mentions: [senderJid] }),
           });
         }
 
