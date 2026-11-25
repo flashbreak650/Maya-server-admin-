@@ -177,8 +177,6 @@ interface ModerationSettings {
   mayaMemoryLimit: number;
   aiBadwordDetection: boolean;
   silentModeration: boolean;
-  hideNameOnDelete?: boolean;
-  silentAllPresetMigratedV1?: boolean;
   mayaReplyMode: 'group' | 'inbox' | 'off';
   // AI Key Pool
   aiKeys?: AiKey[];
@@ -422,8 +420,8 @@ export default function App() {
     // New Moderation & AI
     aiBadwordTitle: isBn ? 'Gemini AI Badword Detector (এআই গালি শনাক্তকারী)' : 'Gemini AI Badword Detector',
     aiBadwordDesc: isBn ? 'লিস্টে নেই এমন গালি বা আপত্তিকর কথা জিমিনি এআই এর মাধ্যমে খুঁজে বের করে ডিলিট করবে।' : 'Uses Gemini AI to detect complex badwords not in the custom list.',
-    silentModTitle: isBn ? 'ডিলিট ও ওয়ার্নিং নোটিশ (Warning Notice)' : 'Delete Warning Notices',
-    silentModDesc: isBn ? 'চালু থাকলে মেসেজ ডিলিটের পর গ্রুপে সতর্কবার্তা পাঠাবে; বন্ধ থাকলে নীরবে ডিলিট করবে।' : 'Send group warning notices after deleting a violation (turn OFF for silent delete).',
+    silentModTitle: isBn ? 'Silent Moderation (নিঃশব্দ মডারেশন)' : 'Silent Moderation',
+    silentModDesc: isBn ? 'মেসেজ ডিলিট করার পর গ্রুপে কোনো সতর্কবার্তা (Warning Message) পাঠাবে না।' : 'Disable bot warning messages after deleting a violation.',
 
     // Activity Logs
     activityTitle: isBn ? 'লাইভ মডারেশন অ্যাক্টিভিটি লগ' : 'Real-Time Moderation Activity Log',
@@ -551,12 +549,12 @@ export default function App() {
     antiLink: true,
     allowCarromLinks: true,
     autoKick3Warnings: true,
-    autoWelcome: false,
+    autoWelcome: true,
     welcomeMessage: '',
-    newMemberInboxRulesEnabled: false,
+    newMemberInboxRulesEnabled: true,
     newMemberInboxRulesNotice: '',
     newMemberGroupNoticeText: '',
-    botReply: false,
+    botReply: true,
     customBadwords: [],
     mayaAiEnabled: true,
     mayaPrivateReply: true,
@@ -573,16 +571,14 @@ export default function App() {
     mayaLanguage: 'auto',
     mayaMemoryLimit: 20,
     aiBadwordDetection: true,
-    silentModeration: true,
-    hideNameOnDelete: true,
-    silentAllPresetMigratedV1: true,
+    silentModeration: false,
     mayaReplyMode: 'group',
     dashboardPinEnabled: false,
     nightModeEnabled: false,
     nightLockStart: '00:00',
     nightLockEnd: '06:00',
     nightModeTimezone: 'Asia/Dhaka',
-    nightModeNotify: false,
+    nightModeNotify: true,
     antiCallEnabled: false,
     antiCallMessage: '📵 দুঃখিত! এটি একটি অটোমেটেড WhatsApp সিকিউরিটি বট। অনুগ্রহ করে কল না করে মেসেজ পাঠান।',
     antiCallAutoBlockCount: 3,
@@ -590,7 +586,7 @@ export default function App() {
     mayaVisionEnabled: true,
     antiNsfwImage: false,
     activityTrackingEnabled: true,
-    keywordAutoReplyEnabled: false,
+    keywordAutoReplyEnabled: true,
     keywordTriggers: [],
     individualMuteEnabled: true,
     individualMuteStickerLimit: 3,
@@ -599,10 +595,10 @@ export default function App() {
     stickerDeleteMaxRetries: 4,
     stickerQueueConcurrency: 5,
     manualBlockNotice: '',
-    autoSalamReplyEnabled: false,
+    autoSalamReplyEnabled: true,
     botTypingEnabled: true,
     leaderboardCleanOnly: true,
-    adminMentionReplyEnabled: false,
+    adminMentionReplyEnabled: true,
     adminMentionReplyTarget: 'all_admins',
     adminMentionReplyMessage: '🛡️ সম্মানিত @{{admin}}, সদস্য @{{user}} আপনাকে মেনশন করেছেন। অ্যাডমিন বর্তমানে ব্যস্ত থাকতে পারেন — অনুগ্রহ করে একটু অপেক্ষা করুন, সময় পেলে উত্তর দেবেন।',
     bossAdminNumber: '8801632222592',
@@ -1896,61 +1892,6 @@ export default function App() {
     }
   };
 
-  const updateMultipleSettings = async (patch: Partial<ModerationSettings>) => {
-    let previousSnapshot: ModerationSettings | null = null;
-    setSettings((prev) => {
-      previousSnapshot = prev;
-      return { ...prev, ...patch };
-    });
-    try {
-      const res = await callApi('/api/moderation/settings', 'POST', patch);
-      if (res?.settings) {
-        setSettings(res.settings);
-      }
-      showNotification(isBn ? 'সব সেটিংস সফলভাবে সেভ হয়েছে' : 'All settings updated successfully');
-    } catch (err: any) {
-      showNotification((isBn ? 'সেভ করতে ব্যর্থ: ' : 'Save failed: ') + err.message);
-      if (previousSnapshot) setSettings(previousSnapshot);
-    }
-  };
-
-  const areAllNoticesOff = Boolean(
-    settings.silentModeration &&
-      !settings.autoWelcome &&
-      !settings.newMemberInboxRulesEnabled &&
-      !settings.adminMentionReplyEnabled &&
-      !settings.autoSalamReplyEnabled &&
-      !settings.botReply &&
-      !settings.nightModeNotify &&
-      !settings.keywordAutoReplyEnabled
-  );
-
-  const handleToggleAllNoticesOneButton = (enableNotices: boolean) => {
-    if (enableNotices) {
-      updateMultipleSettings({
-        silentModeration: false,
-        autoWelcome: true,
-        newMemberInboxRulesEnabled: true,
-        nightModeNotify: true,
-        adminMentionReplyEnabled: true,
-        autoSalamReplyEnabled: true,
-        botReply: true,
-        keywordAutoReplyEnabled: true,
-      });
-    } else {
-      updateMultipleSettings({
-        silentModeration: true,
-        autoWelcome: false,
-        newMemberInboxRulesEnabled: false,
-        nightModeNotify: false,
-        adminMentionReplyEnabled: false,
-        autoSalamReplyEnabled: false,
-        botReply: false,
-        keywordAutoReplyEnabled: false,
-      });
-    }
-  };
-
   const handleAddAiKey = async (e?: React.FormEvent | React.MouseEvent | React.KeyboardEvent) => {
     e?.preventDefault();
     if (!newKeyInput.trim()) {
@@ -2968,7 +2909,6 @@ export default function App() {
               onBack={() => navigateToPage('home')}
               onNavigate={navigateToPage}
               onUpdateToggle={(key, val) => updateSettingToggle(key as keyof ModerationSettings, val)}
-              onUpdateMultipleSettings={(patch) => updateMultipleSettings(patch as Partial<ModerationSettings>)}
               onSaveBadwords={saveCustomBadwords}
               onSaveStickerSpamConfig={handleSaveStickerSpamConfig}
               onRefreshStickerQueue={handleRefreshStickerQueue}
@@ -4237,33 +4177,7 @@ export default function App() {
                   </label>
                 </div>
 
-                {/* Master All Notices ON/OFF (Single Button) */}
-                <div className="toggle-row">
-                  <div className="toggle-info">
-                    <h4>
-                      <span>
-                        {isBn
-                          ? 'সব নোটিশ সিস্টেম (এক বাটনে ON / OFF)'
-                          : 'All Notices System (One-Button ON / OFF)'}
-                      </span>
-                    </h4>
-                    <p>
-                      {isBn
-                        ? 'অফ থাকলে সব নোটিশ বন্ধ থাকবে — শুধু নীরবে রিমুভ হবে এবং নাম হাইড থাকবে। অন করলে সব নোটিশ একসাথে চালু হবে।'
-                        : 'OFF silences all notices (silent remove + hidden name); ON enables all group notices together.'}
-                    </p>
-                  </div>
-                  <label className="switch">
-                    <input
-                      type="checkbox"
-                      checked={!areAllNoticesOff}
-                      onChange={(e) => handleToggleAllNoticesOneButton(e.target.checked)}
-                    />
-                    <span className="slider"></span>
-                  </label>
-                </div>
-
-                {/* Delete Warning Notices (OFF = Silent Delete, ON = Send Warning) */}
+                {/* Silent Moderation */}
                 <div className="toggle-row">
                   <div className="toggle-info">
                     <h4>
@@ -4275,34 +4189,8 @@ export default function App() {
                   <label className="switch">
                     <input
                       type="checkbox"
-                      checked={!settings.silentModeration}
-                      onChange={(e) => updateSettingToggle('silentModeration', !e.target.checked)}
-                    />
-                    <span className="slider"></span>
-                  </label>
-                </div>
-
-                {/* Hide Bot & Sender Name on Delete */}
-                <div className="toggle-row">
-                  <div className="toggle-info">
-                    <h4>
-                      <span>
-                        {isBn
-                          ? 'মেসেজ রিমুভে বট ও মেম্বারের নাম লুকান (Hide Name)'
-                          : 'Hide Bot & Member Name on Remove'}
-                      </span>
-                    </h4>
-                    <p>
-                      {isBn
-                        ? 'চালু থাকলে বটের WhatsApp প্রোফাইল নাম অদৃশ্য (Blank) হবে এবং কোনো নোটিশে বট বা মেম্বারের নাম/@মেনশন দেখাবে না।'
-                        : 'Sets bot PushName to invisible blank and hides bot/member names from any group notices.'}
-                    </p>
-                  </div>
-                  <label className="switch">
-                    <input
-                      type="checkbox"
-                      checked={Boolean(settings.hideNameOnDelete)}
-                      onChange={(e) => updateSettingToggle('hideNameOnDelete', e.target.checked)}
+                      checked={settings.silentModeration}
+                      onChange={(e) => updateSettingToggle('silentModeration', e.target.checked)}
                     />
                     <span className="slider"></span>
                   </label>

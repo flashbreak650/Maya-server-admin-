@@ -497,17 +497,9 @@ export function HomeFeatureHub({
       id: 'sec_replies',
       title: isBn ? 'অটো সালাম, টাইপিং ও সাইলেন্ট' : 'Salam, Typing & Silent Mode',
       desc: isBn ? 'সালামের উত্তর, Typing..., সাইলেন্ট ও বট রিপ্লাই' : 'Zero-API Salam, typing indicator & silent mode',
-      keywords: 'salam typing silent bot reply hide name সালাম টাইপিং সাইলেন্ট উত্তর নোটিশ বন্ধ',
-      statusText: settings.silentModeration
-        ? isBn
-          ? 'সব নোটিশ বন্ধ (Silent)'
-          : 'Silent (No Notice)'
-        : settings.autoSalamReplyEnabled !== false
-        ? isBn
-          ? 'সালাম চালু'
-          : 'Salam ON'
-        : 'Custom',
-      isOn: Boolean(settings.silentModeration || settings.autoSalamReplyEnabled !== false || settings.botTypingEnabled !== false),
+      keywords: 'salam typing silent bot reply সালাম টাইপিং সাইলেন্ট উত্তর',
+      statusText: settings.autoSalamReplyEnabled !== false ? (isBn ? 'সালাম চালু' : 'Salam ON') : 'Custom',
+      isOn: Boolean(settings.autoSalamReplyEnabled !== false || settings.botTypingEnabled !== false),
       iconBg: 'bg-blue-50',
       iconText: 'text-blue-700',
       icon: <Bot size={18} />,

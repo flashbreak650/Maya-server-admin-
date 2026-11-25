@@ -625,12 +625,9 @@ export function handleIncomingStickerFastPath(sock: WASocket, msg: proto.IWebMes
       const lastAlert = lastSpamAlertAt.get(burstKey) || 0;
       if (!settings.silentModeration && now - lastAlert > 15000) {
         lastSpamAlertAt.set(burstKey, now);
-        const hideName = Boolean(settings.hideNameOnDelete);
         safeSendMessage(sock, detected.remoteJid, {
-          text: hideName
-            ? `🚨 Security Alert\n\n⚠️ অতিরিক্ত স্টিকার পাঠানোর কারণে Anti-Spam Protection কার্যকর করা হয়েছে।\n\n🔒 Temporary Messaging Restriction Activated (${durationMins} মিনিট)\n🛡️ স্প্যাম করা স্টিকারগুলো স্বয়ংক্রিয়ভাবে মুছে ফেলা হচ্ছে।`
-            : `🚨 WAGuard Security Alert\n\n⚠️ @${detected.senderPhone} অতিরিক্ত স্টিকার পাঠানোর কারণে Anti-Spam Protection-এর আওতায় এসেছে।\n\n🔒 Temporary Messaging Restriction Activated (${durationMins} মিনিট)\n🛡️ স্প্যাম করা স্টিকারগুলো High-Priority Queue থেকে স্বয়ংক্রিয়ভাবে মুছে ফেলা হচ্ছে।`,
-          ...(hideName ? {} : { mentions: [detected.senderJid] }),
+          text: `🚨 WAGuard Security Alert\n\n⚠️ @${detected.senderPhone} অতিরিক্ত স্টিকার পাঠানোর কারণে Anti-Spam Protection-এর আওতায় এসেছে।\n\n🔒 Temporary Messaging Restriction Activated (${durationMins} মিনিট)\n🛡️ স্প্যাম করা স্টিকারগুলো High-Priority Queue থেকে স্বয়ংক্রিয়ভাবে মুছে ফেলা হচ্ছে।`,
+          mentions: [detected.senderJid],
         }).catch(() => {});
       }
 
@@ -700,17 +697,15 @@ async function notifyGroupAdminsNoDeletePermission(
     details: 'স্টিকার স্প্যাম ডিলিট করার জন্য অনুগ্রহ করে বট নম্বরটিকে গ্রুপের Admin বানান।',
   });
 
-  if (!getSettings().silentModeration) {
-    const adminJids = getGroupAdminJidsFromCachedMeta(groupId);
-    const adminMentionsText = adminJids.length > 0
-      ? `\n👮 অ্যাডমিন দৃষ্টি আকর্ষণ: ${adminJids.slice(0, 6).map((j) => `@${cleanUserDigits(j)}`).join(' ')}`
-      : '';
+  const adminJids = getGroupAdminJidsFromCachedMeta(groupId);
+  const adminMentionsText = adminJids.length > 0
+    ? `\n👮 অ্যাডমিন দৃষ্টি আকর্ষণ: ${adminJids.slice(0, 6).map((j) => `@${cleanUserDigits(j)}`).join(' ')}`
+    : '';
 
-    await safeSendMessage(sock, groupId, {
-      text: `⚠️ *[WAGuard Security — Delete Permission প্রয়োজন]*\n\nএই গ্রুপে স্প্যাম স্টিকার শনাক্ত হয়েছে, কিন্তু **বট নম্বরটি বর্তমানে গ্রুপ অ্যাডমিন (Admin) নয়**।\nতাই স্টিকারগুলো ডিলিট করা সম্ভব হচ্ছে না!${adminMentionsText}\n\n✅ সমাধান: গ্রুপের যেকোনো অ্যাডমিন অনুগ্রহ করে বটটিকে **Admin** বানিয়ে দিন, তাহলে Queue-তে থাকা স্টিকারগুলোও স্বয়ংক্রিয়ভাবে মুছে যাবে।`,
-      mentions: adminJids.slice(0, 6),
-    }).catch(() => {});
-  }
+  await safeSendMessage(sock, groupId, {
+    text: `⚠️ *[WAGuard Security — Delete Permission প্রয়োজন]*\n\nএই গ্রুপে স্প্যাম স্টিকার শনাক্ত হয়েছে, কিন্তু **বট নম্বরটি বর্তমানে গ্রুপ অ্যাডমিন (Admin) নয়**।\nতাই স্টিকারগুলো ডিলিট করা সম্ভব হচ্ছে না!${adminMentionsText}\n\n✅ সমাধান: গ্রুপের যেকোনো অ্যাডমিন অনুগ্রহ করে বটটিকে **Admin** বানিয়ে দিন, তাহলে Queue-তে থাকা স্টিকারগুলোও স্বয়ংক্রিয়ভাবে মুছে যাবে।`,
+    mentions: adminJids.slice(0, 6),
+  }).catch(() => {});
 
   reportServerProblem(
     {

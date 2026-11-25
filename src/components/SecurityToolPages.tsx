@@ -48,7 +48,6 @@ interface SecurityToolPageProps {
   onBack: () => void;
   onNavigate: (page: PageId) => void;
   onUpdateToggle: (key: string, val: any) => void;
-  onUpdateMultipleSettings?: (patch: Record<string, any>) => void;
   onSaveBadwords: () => void;
   onSaveStickerSpamConfig: () => void;
   onRefreshStickerQueue: () => void;
@@ -146,7 +145,6 @@ export function SecurityToolPage({
   onBack,
   onNavigate,
   onUpdateToggle,
-  onUpdateMultipleSettings,
   onSaveBadwords,
   groups,
   purgingStickers,
@@ -1193,68 +1191,6 @@ export function SecurityToolPage({
           <div className="toggle-row">
             <div className="toggle-info">
               <h4>
-                {isBn
-                  ? 'সব নোটিশ সিস্টেম (এক বাটনে ON / OFF)'
-                  : 'All Notices System (One-Button ON / OFF)'}
-              </h4>
-              <p>
-                {isBn
-                  ? 'অফ থাকলে সব নোটিশ বন্ধ থাকবে — শুধু নীরবে রিমুভ হবে এবং নাম হাইড থাকবে। অন করলে সব নোটিশ একসাথে চালু হবে।'
-                  : 'OFF silences all warnings, welcome, mention & block/kick notices; ON enables all notices in one tap.'}
-              </p>
-            </div>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={
-                  !Boolean(
-                    settings.silentModeration &&
-                      !settings.autoWelcome &&
-                      !settings.newMemberInboxRulesEnabled &&
-                      !settings.adminMentionReplyEnabled &&
-                      !settings.autoSalamReplyEnabled &&
-                      !settings.botReply &&
-                      !settings.nightModeNotify &&
-                      !settings.keywordAutoReplyEnabled
-                  )
-                }
-                onChange={(e) => {
-                  const enableNotices = e.target.checked;
-                  const patch = enableNotices
-                    ? {
-                        silentModeration: false,
-                        autoWelcome: true,
-                        newMemberInboxRulesEnabled: true,
-                        nightModeNotify: true,
-                        adminMentionReplyEnabled: true,
-                        autoSalamReplyEnabled: true,
-                        botReply: true,
-                        keywordAutoReplyEnabled: true,
-                      }
-                    : {
-                        silentModeration: true,
-                        autoWelcome: false,
-                        newMemberInboxRulesEnabled: false,
-                        nightModeNotify: false,
-                        adminMentionReplyEnabled: false,
-                        autoSalamReplyEnabled: false,
-                        botReply: false,
-                        keywordAutoReplyEnabled: false,
-                      };
-                  if (onUpdateMultipleSettings) {
-                    onUpdateMultipleSettings(patch);
-                  } else {
-                    onUpdateToggle('silentModeration', !enableNotices);
-                  }
-                }}
-              />
-              <span className="slider"></span>
-            </label>
-          </div>
-
-          <div className="toggle-row">
-            <div className="toggle-info">
-              <h4>
                 {isBn ? 'অটো সালাম উত্তর (গ্রুপে শুধু সালামের জবাব)' : 'Auto Salam Reply (Zero API)'}
               </h4>
               <p>
@@ -1307,31 +1243,8 @@ export function SecurityToolPage({
             <label className="switch">
               <input
                 type="checkbox"
-                checked={!Boolean(settings.silentModeration)}
-                onChange={(e) => onUpdateToggle('silentModeration', !e.target.checked)}
-              />
-              <span className="slider"></span>
-            </label>
-          </div>
-
-          <div className="toggle-row">
-            <div className="toggle-info">
-              <h4>
-                {isBn
-                  ? 'মেসেজ রিমুভে বট ও মেম্বারের নাম লুকান (Hide Name)'
-                  : 'Hide Bot & Member Name on Remove'}
-              </h4>
-              <p>
-                {isBn
-                  ? 'অন থাকলে রিমুভে বটের WhatsApp প্রোফাইল নাম অদৃশ্য (Blank) হবে এবং কোনো নোটিশে বট বা মেম্বারের নাম দেখাবে না।'
-                  : 'When ON, sets bot WhatsApp PushName to invisible blank and hides bot/member names in notices.'}
-              </p>
-            </div>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={Boolean(settings.hideNameOnDelete)}
-                onChange={(e) => onUpdateToggle('hideNameOnDelete', e.target.checked)}
+                checked={Boolean(settings.silentModeration)}
+                onChange={(e) => onUpdateToggle('silentModeration', e.target.checked)}
               />
               <span className="slider"></span>
             </label>

@@ -73,7 +73,6 @@ import {
   sendTestBossAndServerNotice,
   flushDatabaseSync,
   addActivityLog,
-  syncBotProfileNamePrivacy,
 } from './src/moderationEngine.ts';
 import {
   initStickerQueue,
@@ -873,7 +872,6 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
         if (socketToken !== activeSocketToken || sock !== currentSock) return;
         try {
           await resolveBotIdentitySet(sock).catch(() => {});
-          void syncBotProfileNamePrivacy(sock).catch(() => {});
           const groups = (await refreshAllConnectedGroups(sock, 15000)) || {};
           notifyStickerQueueSocketReady();
 
@@ -1721,9 +1719,6 @@ app.get('/api/moderation/settings', (req: Request, res: Response) => {
 app.post('/api/moderation/settings', (req: Request, res: Response) => {
   try {
     const updated = updateModerationSettings(req.body);
-    if (req.body && Object.prototype.hasOwnProperty.call(req.body, 'hideNameOnDelete')) {
-      void syncBotProfileNamePrivacy(currentSock).catch(() => {});
-    }
     const safeCopy = {
       ...updated,
       dashboardPin: updated.dashboardPin ? '****' : '',
