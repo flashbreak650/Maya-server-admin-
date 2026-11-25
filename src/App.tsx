@@ -61,6 +61,7 @@ import {
   HardDrive,
   Inbox,
   AudioLines,
+  Wifi,
 } from 'lucide-react';
 import { HELP_ITEMS } from './helpData.ts';
 import { HelpModal } from './components/HelpModal.tsx';
@@ -100,6 +101,7 @@ import {
   type VoiceModerationOverview,
 } from './components/VoiceModerationPage.tsx';
 import { AiMascotOverlay } from './components/AiMascotOverlay.tsx';
+import { WAGuardLogo } from './components/WAGuardLogo.tsx';
 
 interface LatestDisconnectInfo {
   id: string;
@@ -2543,7 +2545,7 @@ export default function App() {
       <header className="header">
         <div className="brand">
           <div className="brandmark">
-            <ShieldCheck size={17} />
+            <WAGuardLogo variant="mark" className="w-[19px] h-[19px]" />
           </div>
           <div className="min-w-0">
             <div className="brandname">
@@ -2805,22 +2807,13 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Friendly AI Bot Emblem Graphic (Visible on BOTH Mobile and Desktop) */}
+                {/* Friendly WAGuard Shield Bot Emblem Graphic (Visible on BOTH Mobile and Desktop) */}
                 <div className="flex flex-col items-center justify-center shrink-0 relative z-10 pointer-events-none select-none" aria-hidden="true">
-                  <svg className="w-[62px] h-[62px] sm:w-[82px] sm:h-[82px] drop-shadow-[0_4px_10px_rgba(6,78,52,0.24)]" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
-                    <line x1="60" y1="15" x2="60" y2="33" stroke="white" strokeWidth="5" strokeLinecap="round" strokeOpacity="0.95" />
-                    <circle cx="60" cy="13" r="5" fill="white" />
-                    <rect x="24" y="33" width="72" height="54" rx="18" fill="white" />
-                    <rect x="12" y="49" width="8" height="22" rx="4" fill="white" fillOpacity="0.88" />
-                    <rect x="100" y="49" width="8" height="22" rx="4" fill="white" fillOpacity="0.88" />
-                    <rect x="34" y="43" width="52" height="34" rx="11" fill="#087f55" />
-                    <circle cx="48" cy="56" r="4.2" fill="white" />
-                    <circle cx="72" cy="56" r="4.2" fill="white" />
-                    <path d="M49 67C53 71.5 67 71.5 71 67" stroke="white" strokeWidth="3.5" strokeLinecap="round" />
-                    <rect x="40" y="91" width="12" height="10" rx="5" fill="white" fillOpacity="0.9" />
-                    <rect x="68" y="91" width="12" height="10" rx="5" fill="white" fillOpacity="0.9" />
-                  </svg>
-                  <span className="mt-0.5 px-1.5 py-0.5 rounded-full bg-white/18 border border-white/25 text-[7.5px] font-extrabold tracking-widest text-white uppercase">
+                  <WAGuardLogo
+                    variant="bot"
+                    className="w-[64px] h-[64px] sm:w-[82px] sm:h-[82px] drop-shadow-[0_4px_10px_rgba(6,78,52,0.24)]"
+                  />
+                  <span className="mt-1 text-[8px] font-extrabold tracking-[0.16em] text-white/90 uppercase">
                     AI GUARD
                   </span>
                 </div>
@@ -4892,112 +4885,169 @@ export default function App() {
                   <h1>{t.connectTitle}</h1>
                   <p>{t.connectSub}</p>
                 </div>
+                <button
+                  type="button"
+                  onClick={checkStatus}
+                  className="btn outline"
+                >
+                  <RefreshCw size={12} />
+                  <span className="btn-text">{t.refresh}</span>
+                </button>
               </div>
 
               {liveStatus.online ? (
-                <div className="card max-w-xl mx-auto overflow-hidden border border-emerald-200 bg-gradient-to-b from-emerald-50/90 via-white to-slate-50/90 p-4 sm:p-6 shadow-sm rounded-2xl">
-                  {/* Connected Header Banner */}
-                  <div className="flex items-start justify-between gap-2.5 border-b border-emerald-100 pb-4 mb-4">
-                    <div className="flex items-start gap-3 min-w-0 flex-1">
-                      <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white flex items-center justify-center shadow-md shadow-emerald-600/20 shrink-0">
-                        <ShieldCheck size={22} />
+                <>
+                  {/* Unified Emerald Hero Banner (Matching Home Server Hero) */}
+                  <div className="hero flex items-center justify-between gap-3 sm:gap-5">
+                    <div className="hero-content flex-1 min-w-0">
+                      <div className="flex items-center gap-2 text-[10px] font-extrabold tracking-[0.08em] uppercase text-emerald-100">
+                        <span className="w-2 h-2 rounded-full bg-[#86efac] shrink-0" />
+                        <span>{isBn ? 'লাইভ সকেট · Real Baileys Engine' : 'Live Socket · Real Baileys Engine'}</span>
                       </div>
-                      <div className="text-left min-w-0 flex-1">
-                        <h3 className="text-slate-900 text-[15px] sm:text-base font-extrabold tracking-tight leading-snug">
-                          {isBn ? 'WhatsApp একাউন্ট সফলভাবে যুক্ত' : 'WhatsApp Linked Successfully'}
-                        </h3>
-                        <p className="text-[11px] sm:text-xs text-slate-500 font-medium mt-0.5 leading-relaxed">
-                          {isBn ? 'Real Baileys Sockets মডারেশন ইঞ্জিন সক্রিয় আছে' : 'Real Baileys Socket Moderation Engine Active'}
-                        </p>
-                      </div>
-                    </div>
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-extrabold border border-emerald-200 whitespace-nowrap shrink-0">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
-                      Live
-                    </span>
-                  </div>
-
-                  {/* Account Info Box */}
-                  <div className="bg-white rounded-xl border border-emerald-100 p-3.5 sm:p-4 shadow-2xs text-left mb-4">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 text-white font-bold flex items-center justify-center text-base shadow-sm shrink-0">
-                          🌺
-                        </div>
-                        <div className="min-w-0">
-                          <span className="text-[10px] uppercase tracking-wider font-bold text-slate-400 block">
-                            {isBn ? 'সংযুক্ত হোয়াটসঅ্যাপ একাউন্ট' : 'CONNECTED WHATSAPP ACCOUNT'}
-                          </span>
-                          <h4 className="text-sm font-extrabold text-slate-900 truncate mt-0.5">
-                            {liveStatus.user?.name || '🌺 Maya Ai 🌺'}
-                          </h4>
-                          <p className="text-xs font-mono text-emerald-700 font-bold break-all">
-                            {liveStatus.phoneNumber || liveStatus.user?.id?.split(':')[0] || '8801838489457'}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="self-start sm:self-center shrink-0">
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 text-[11px] font-bold border border-emerald-200 whitespace-nowrap">
-                          ✓ Verified Socket
+                      <h3 className="text-white text-[16px] sm:text-[18px] mt-1.5">
+                        {isBn ? 'WhatsApp একাউন্ট সফলভাবে যুক্ত' : 'WhatsApp Linked Successfully'}
+                      </h3>
+                      <p className="text-emerald-50/90 mt-0.5">
+                        {isBn
+                          ? 'Real Baileys Sockets মডারেশন ও সুরক্ষা ইঞ্জিন সক্রিয় আছে।'
+                          : 'Real Baileys Socket moderation & protection engine is active.'}
+                      </p>
+                      <div className="hero-status">
+                        <span className="dot" style={{ background: '#4ade80' }} />
+                        <span className="truncate font-mono tabular-nums">
+                          {(liveStatus.user?.name || 'Maya Ai').trim()} · {liveStatus.phoneNumber || liveStatus.user?.id?.split(':')[0] || 'Connected'}
                         </span>
                       </div>
                     </div>
 
-                    {/* Metric Chips inside the card */}
-                    <div className="grid grid-cols-3 gap-2 mt-3.5 pt-3 border-t border-slate-100 text-center">
-                      <div className="bg-slate-50/90 p-2 rounded-xl border border-slate-100">
-                        <span className="text-[9.5px] text-slate-500 block">{isBn ? 'সার্ভার স্টেট' : 'Server State'}</span>
-                        <span className="text-[11px] sm:text-xs font-extrabold text-emerald-700">Online</span>
-                      </div>
-                      <div className="bg-slate-50/90 p-2 rounded-xl border border-slate-100">
-                        <span className="text-[9.5px] text-slate-500 block">{isBn ? 'অটো মডারেশন' : 'Auto Moderation'}</span>
-                        <span className="text-[11px] sm:text-xs font-extrabold text-slate-800">24/7 Active</span>
-                      </div>
-                      <div className="bg-slate-50/90 p-2 rounded-xl border border-slate-100">
-                        <span className="text-[9.5px] text-slate-500 block">{isBn ? 'মায়া AI' : 'Maya AI'}</span>
-                        <span className="text-[11px] sm:text-xs font-extrabold text-teal-700">Ready</span>
-                      </div>
+                    <div className="flex flex-col items-center justify-center shrink-0 relative z-10 pointer-events-none select-none" aria-hidden="true">
+                      <WAGuardLogo
+                        variant="bot"
+                        className="w-[64px] h-[64px] sm:w-[80px] sm:h-[80px] drop-shadow-[0_6px_14px_rgba(6,78,52,0.28)]"
+                      />
+                      <span className="mt-1 text-[8px] font-extrabold tracking-[0.16em] text-white/90 uppercase">
+                        VERIFIED
+                      </span>
                     </div>
                   </div>
 
-                  {/* Balanced 2x2 Action Button Cards */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <button className="btn primary py-2.5 text-xs font-bold shadow-sm w-full" onClick={() => navigateToPage('home')}>
-                      <LayoutDashboard size={14} /> {isBn ? 'ড্যাশবোর্ডে যান' : 'Go to Dashboard'}
-                    </button>
-                    <button
-                      className="btn soft py-2.5 text-xs font-bold w-full"
-                      onClick={() => sessionCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
-                    >
-                      <Download size={14} /> {isBn ? 'সেশন ব্যাকআপ' : 'Backup Session'}
-                    </button>
-                    <button className="btn outline py-2.5 text-xs font-semibold w-full" onClick={checkStatus}>
-                      <RefreshCw size={14} /> {isBn ? 'স্ট্যাটাস রিফ্রেশ' : 'Sync Status'}
-                    </button>
-                    <button className="btn danger py-2.5 text-xs font-semibold w-full" onClick={handleDisconnect}>
-                      <LogOut size={14} /> {isBn ? 'ডিসকানেক্ট করুন' : 'Disconnect'}
-                    </button>
+                  {/* Single-Elevation 3-Card Telemetry Strip (Matching Home .stats) */}
+                  <div className="grid grid-cols-3 gap-2 sm:gap-2.5 mb-2.5">
+                    <div className="stat">
+                      <div className="symbol sg">
+                        <Wifi size={15} />
+                      </div>
+                      <h2 className="text-[15px] sm:text-[18px] text-[#087f55]">Online</h2>
+                      <small>{isBn ? 'সার্ভার স্টেট' : 'Server State'}</small>
+                      <p className="hidden sm:block">Real Baileys Socket</p>
+                    </div>
+                    <div className="stat">
+                      <div className="symbol sb">
+                        <ShieldCheck size={15} />
+                      </div>
+                      <h2 className="text-[15px] sm:text-[18px]">24/7</h2>
+                      <small>{isBn ? 'অটো মডারেশন' : 'Auto Moderation'}</small>
+                      <p className="hidden sm:block">{isBn ? 'সক্রিয় প্রহরী' : 'Active Guard'}</p>
+                    </div>
+                    <div className="stat">
+                      <div className="symbol sp">
+                        <Sparkles size={15} />
+                      </div>
+                      <h2 className="text-[15px] sm:text-[18px] text-[#087f55]">Ready</h2>
+                      <small>{isBn ? 'মায়া AI' : 'Maya AI'}</small>
+                      <p className="hidden sm:block">{isBn ? 'স্মার্ট রিপ্লাই প্রস্তুত' : 'Smart Reply Ready'}</p>
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <div className="card max-w-lg mx-auto text-center">
-                  <div className="symbol sg mx-auto mb-3 w-12 h-12">
-                    <Smartphone size={22} />
-                  </div>
-                  <h3 className="text-base font-extrabold">{t.linkDeviceHead}</h3>
-                  <p className="hint text-xs mt-1">
-                    {t.phoneInputHint}
-                  </p>
 
-                  <div className="flex justify-center my-3">
-                    <div className="mode-switcher">
+                  {/* Connected Account Profile & Tactile Controls Card */}
+                  <div className="card">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-center gap-3.5 min-w-0">
+                        <WAGuardLogo
+                          variant="device"
+                          className="w-12 h-12 shrink-0 rounded-[13px] shadow-[0_6px_16px_rgba(8,127,85,0.18)]"
+                        />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 text-[10.5px] font-bold text-[#64748b]">
+                            <span>{isBn ? 'সংযুক্ত হোয়াটসঅ্যাপ একাউন্ট' : 'Connected WhatsApp Account'}</span>
+                            <span aria-hidden="true">·</span>
+                            <span className="text-[#087f55] inline-flex items-center gap-1">
+                              <CheckCircle2 size={11} className="shrink-0" />
+                              {isBn ? 'Verified Socket' : 'Verified Socket'}
+                            </span>
+                          </div>
+                          <h3 className="text-[15px] sm:text-base font-extrabold text-[#0f291e] truncate mt-0.5 tracking-tight">
+                            {liveStatus.user?.name || 'Maya Ai'}
+                          </h3>
+                          <p className="text-xs font-mono font-bold text-[#087f55] tabular-nums break-all mt-0.5">
+                            {liveStatus.phoneNumber || liveStatus.user?.id?.split(':')[0] || '—'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-4 border-t border-emerald-950/[0.06] grid grid-cols-2 gap-2.5">
                       <button
+                        type="button"
+                        onClick={() => navigateToPage('home')}
+                        className="min-h-[44px] px-4 py-2.5 rounded-[12px] bg-gradient-to-r from-[#098a5c] to-[#07734c] hover:from-[#077850] hover:to-[#066341] text-white text-xs font-extrabold shadow-[0_4px_14px_rgba(8,127,85,0.22)] flex items-center justify-center gap-2 whitespace-nowrap transition-all duration-150 active:scale-[0.985] cursor-pointer"
+                      >
+                        <LayoutDashboard size={15} className="shrink-0" />
+                        <span>{isBn ? 'ড্যাশবোর্ডে যান' : 'Go to Dashboard'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => sessionCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+                        className="min-h-[44px] px-4 py-2.5 rounded-[12px] bg-[#e8f8f0] hover:bg-[#daf3e6] text-[#065f3e] border border-emerald-700/15 text-xs font-extrabold flex items-center justify-center gap-2 whitespace-nowrap transition-all duration-150 active:scale-[0.985] cursor-pointer"
+                      >
+                        <Download size={15} className="shrink-0" />
+                        <span>{isBn ? 'সেশন ব্যাকআপ' : 'Backup Session'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={checkStatus}
+                        className="min-h-[44px] px-4 py-2.5 rounded-[12px] bg-white hover:bg-[#f6fbf8] text-[#0f291e] border border-emerald-950/12 hover:border-emerald-600/35 shadow-[0_1px_3px_rgba(10,56,36,0.03)] text-xs font-bold flex items-center justify-center gap-2 whitespace-nowrap transition-all duration-150 active:scale-[0.985] cursor-pointer"
+                      >
+                        <RefreshCw size={15} className="shrink-0 text-[#087f55]" />
+                        <span>{isBn ? 'স্ট্যাটাস রিফ্রেশ' : 'Sync Status'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleDisconnect}
+                        className="min-h-[44px] px-4 py-2.5 rounded-[12px] bg-[#fff1f2] hover:bg-[#ffe4e6] text-[#be123c] border border-rose-600/18 text-xs font-extrabold flex items-center justify-center gap-2 whitespace-nowrap transition-all duration-150 active:scale-[0.985] cursor-pointer"
+                      >
+                        <LogOut size={15} className="shrink-0" />
+                        <span>{isBn ? 'ডিসকানেক্ট করুন' : 'Disconnect'}</span>
+                      </button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="card">
+                  <div className="card-head">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <WAGuardLogo
+                        variant="device"
+                        className="w-11 h-11 shrink-0 rounded-[12px] shadow-[0_4px_12px_rgba(8,127,85,0.16)]"
+                      />
+                      <div className="min-w-0">
+                        <h3>{t.linkDeviceHead}</h3>
+                        <p>{t.phoneInputHint}</p>
+                      </div>
+                    </div>
+                    <div className="mode-switcher shrink-0">
+                      <button
+                        type="button"
                         className={`mode-btn ${pairingMode === 'code' ? 'active' : ''}`}
                         onClick={() => setPairingMode('code')}
                       >
                         <KeyRound size={13} /> {t.eightDigitCode}
                       </button>
                       <button
+                        type="button"
                         className={`mode-btn ${pairingMode === 'qr' ? 'active' : ''}`}
                         onClick={() => setPairingMode('qr')}
                       >
@@ -5009,7 +5059,7 @@ export default function App() {
                   <div className="form-group text-left mt-3">
                     <label>{t.phoneInputLabel}</label>
                     <input
-                      className="field font-mono"
+                      className="field font-mono tabular-nums min-h-[42px] text-xs sm:text-sm"
                       value={phoneNumber}
                       onChange={(e) => setPhoneNumber(e.target.value)}
                       placeholder="8801XXXXXXXXX"
@@ -5018,48 +5068,56 @@ export default function App() {
                   </div>
 
                   {pairingError && (
-                    <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs p-3 rounded-lg font-medium leading-relaxed text-left my-2.5">
+                    <div className="bg-rose-50 border border-rose-200 text-rose-700 text-xs p-3 rounded-xl font-medium leading-relaxed text-left my-2.5">
                       {pairingError}
                     </div>
                   )}
 
                   <button
-                    className={`btn primary full mt-2 ${isPairingLoading ? 'is-loading' : ''}`}
+                    type="button"
+                    className={`min-h-[44px] w-full px-4 py-2.5 rounded-[12px] bg-gradient-to-r from-[#098a5c] to-[#07734c] hover:from-[#077850] hover:to-[#066341] disabled:opacity-60 text-white text-xs font-extrabold shadow-[0_4px_14px_rgba(8,127,85,0.22)] flex items-center justify-center gap-2 whitespace-nowrap transition-all duration-150 active:scale-[0.985] cursor-pointer ${isPairingLoading ? 'opacity-80 pointer-events-none' : ''}`}
                     onClick={() => handleStartPairing(false)}
                     disabled={isPairingLoading}
                   >
-                    <KeyRound size={13} /> {t.genPairCodeBtn}
+                    {isPairingLoading ? (
+                      <RefreshCw size={15} className="animate-spin shrink-0" />
+                    ) : (
+                      <KeyRound size={15} className="shrink-0" />
+                    )}
+                    <span>{t.genPairCodeBtn}</span>
                   </button>
 
-                  {/* Connection Status, Connecting Indicator & Last Connection Status */}
-                  <div className="mt-3 p-2.5 rounded-lg border border-slate-200 bg-slate-50 text-left space-y-1.5">
-                    <div className="flex items-center justify-between gap-2 text-[11px]">
-                      <span className="font-bold text-slate-600">{isBn ? 'কানেকশন স্ট্যাটাস:' : 'Connection Status:'}</span>
+                  {/* Clean Hairline Connection Status Strip */}
+                  <div className="mt-4 pt-3.5 border-t border-emerald-950/[0.06] space-y-2 text-left">
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <span className="font-bold text-[#334155]">
+                        {isBn ? 'কানেকশন স্ট্যাটাস' : 'Connection Status'}
+                      </span>
                       <span
-                        className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded font-bold text-[10px] ${
+                        className={`inline-flex items-center gap-1.5 font-extrabold text-[11px] ${
                           liveStatus.status === 'pairing'
-                            ? 'bg-emerald-100 text-emerald-800'
+                            ? 'text-[#087f55]'
                             : liveStatus.status === 'connecting' || isPairingLoading
-                            ? 'bg-amber-100 text-amber-800'
-                            : 'bg-slate-200 text-slate-700'
+                            ? 'text-amber-700'
+                            : 'text-[#64748b]'
                         }`}
                       >
                         {(isPairingLoading || liveStatus.status === 'connecting' || liveStatus.status === 'pairing') && (
-                          <RefreshCw size={10} className="animate-spin shrink-0" />
+                          <RefreshCw size={11} className="animate-spin shrink-0" />
                         )}
                         {isPairingLoading || liveStatus.status === 'connecting'
-                          ? isBn ? 'সংযোগ হচ্ছে (Connecting...)' : 'Connecting...'
+                          ? isBn ? 'সংযোগ হচ্ছে...' : 'Connecting...'
                           : liveStatus.status === 'pairing'
-                          ? isBn ? 'পেয়ারিং সক্রিয় (Pairing Active)' : 'Pairing Active'
+                          ? isBn ? 'পেয়ারিং সক্রিয়' : 'Pairing Active'
                           : isBn ? 'ডিসকানেক্টেড' : 'Disconnected'}
                       </span>
                     </div>
-                    <div className="text-[10px] text-slate-600 leading-relaxed">
-                      <span className="font-semibold text-slate-700">{isBn ? 'সর্বশেষ স্ট্যাটাস:' : 'Last Connection Status:'}</span>{' '}
+                    <p className="text-[11px] text-[#5f7368] leading-relaxed">
+                      <span className="font-bold text-[#0f291e]">{isBn ? 'সর্বশেষ স্ট্যাটাস:' : 'Last Status:'}</span>{' '}
                       {liveStatus.lastConnectionStatus || liveStatus.stepMessage}
-                    </div>
+                    </p>
                     {liveStatus.latestDisconnect && !liveStatus.online && (
-                      <div className="mt-1.5 p-2 rounded-lg bg-rose-50 border border-rose-200 text-[10.5px] text-rose-900 space-y-1">
+                      <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-[11px] text-rose-900 space-y-1">
                         <div className="font-extrabold">
                           {isBn ? 'ডিসকানেক্টের কারণ: ' : 'Cause: '}
                           {isBn ? liveStatus.latestDisconnect.titleBn : liveStatus.latestDisconnect.titleEn}
@@ -5073,30 +5131,35 @@ export default function App() {
 
                   {/* Display generated code or QR */}
                   {(liveStatus.pairingCode || liveStatus.qrCode) && (
-                    <div className="info text-left mt-3">
-                      <div className="flex justify-between items-center text-xs font-bold">
-                        <span>OFFICIAL PAIRING CODE</span>
-                        <span className="bg-emerald-200 text-emerald-900 text-[10px] px-2.5 py-0.5 rounded-lg">Active</span>
+                    <div className="mt-4 pt-4 border-t border-emerald-950/[0.06] text-left">
+                      <div className="flex justify-between items-center text-xs font-extrabold text-[#0f291e]">
+                        <span>{isBn ? 'অফিশিয়াল পেয়ারিং কোড' : 'Official Pairing Code'}</span>
+                        <span className="text-[#087f55] font-bold">Active</span>
                       </div>
 
                       {pairingMode === 'code' ? (
-                        <>
-                          <h2 className="text-2xl font-mono font-extrabold tracking-widest text-emerald-700 text-center my-3">
+                        <div className="mt-2.5 p-4 rounded-2xl bg-[#f4faf6] border border-emerald-950/[0.08] text-center">
+                          <h2 className="text-2xl sm:text-3xl font-mono font-extrabold tracking-[0.22em] text-[#087f55] tabular-nums my-2">
                             {liveStatus.pairingCode}
                           </h2>
-                          <div className="flex justify-center gap-2">
-                            <button className="btn soft" onClick={copyToClipboard}>
-                              <Copy size={13} /> {isCopied ? (isBn ? 'কপি হয়েছে!' : 'Copied!') : t.copyCodeBtn}
+                          <div className="grid grid-cols-2 gap-2.5 mt-3">
+                            <button
+                              type="button"
+                              onClick={copyToClipboard}
+                              className="min-h-[42px] px-3.5 py-2 rounded-[11px] bg-[#e8f8f0] hover:bg-[#daf3e6] text-[#065f3e] border border-emerald-700/15 text-xs font-extrabold flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer"
+                            >
+                              <Copy size={14} /> {isCopied ? (isBn ? 'কপি হয়েছে!' : 'Copied!') : t.copyCodeBtn}
                             </button>
                             <button
-                              className="btn outline"
+                              type="button"
                               onClick={() => handleStartPairing(true)}
                               disabled={isPairingLoading}
+                              className="min-h-[42px] px-3.5 py-2 rounded-[11px] bg-white hover:bg-[#f6fbf8] text-[#0f291e] border border-emerald-950/12 text-xs font-bold flex items-center justify-center gap-1.5 whitespace-nowrap transition-colors cursor-pointer"
                             >
-                              <RefreshCw size={13} /> {t.getNewCodeBtn}
+                              <RefreshCw size={14} /> {t.getNewCodeBtn}
                             </button>
                           </div>
-                        </>
+                        </div>
                       ) : (
                         <div className="my-3 text-center">
                           {liveStatus.qrCode ? (
@@ -5106,7 +5169,7 @@ export default function App() {
                               className="w-48 h-48 mx-auto rounded-2xl border border-emerald-950/[0.08] p-2 bg-white shadow-sm"
                             />
                           ) : (
-                            <p className="text-xs text-gray-500 py-4">QR Loading...</p>
+                            <p className="text-xs text-slate-500 py-4">QR Loading...</p>
                           )}
                         </div>
                       )}
@@ -5116,7 +5179,7 @@ export default function App() {
               )}
 
               {/* Encrypted Full State Backup Card (Primary WhatsApp + 2nd Account + All ON/OFF Settings) */}
-              <div ref={sessionCardRef} className="card mt-4 border border-emerald-200/80">
+              <div ref={sessionCardRef} className="card mt-3">
                 <div className="card-head">
                   <div>
                     <h3>{isBn ? 'সেশন ও সব সেটিংস ব্যাকআপ (Full Backup & Restore)' : 'Full Session & Settings Backup'}</h3>
@@ -5155,9 +5218,9 @@ export default function App() {
                   </div>
                 )}
 
-                <div className="mt-3 space-y-3">
+                <div className="mt-3.5 space-y-3">
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                    <label className="block text-[11px] font-bold text-[#334155] mb-1.5">
                       {isBn ? 'ব্যাকআপ পাসওয়ার্ড / পিন (কমপক্ষে ৪ অক্ষর)' : 'Backup Passphrase / PIN (min 4 chars)'}
                     </label>
                     <input
@@ -5165,45 +5228,49 @@ export default function App() {
                       value={sessionPassphrase}
                       onChange={(e) => setSessionPassphrase(e.target.value)}
                       placeholder={isBn ? 'যেমন: 1234 বা গোপন পাসওয়ার্ড' : 'e.g. secret123'}
-                      className="field"
+                      className="field min-h-[40px]"
                     />
                   </div>
 
-                  <div className="flex flex-wrap gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <button
-                      className="btn primary"
+                      type="button"
+                      className="min-h-[42px] px-4 py-2 rounded-[11px] bg-gradient-to-r from-[#098a5c] to-[#07734c] hover:from-[#077850] hover:to-[#066341] disabled:opacity-60 text-white text-xs font-extrabold shadow-[0_3px_10px_rgba(8,127,85,0.18)] flex items-center justify-center gap-2 whitespace-nowrap transition-all duration-150 cursor-pointer"
                       onClick={() => handleExportSession(false)}
                       disabled={isTransferringSession}
                     >
-                      <Download size={13} />{' '}
-                      {isBn ? 'ব্যাকআপ ফাইল ডাউনলোড' : 'Download Session Backup'}
+                      <Download size={14} className="shrink-0" />
+                      <span>{isBn ? 'ব্যাকআপ ফাইল ডাউনলোড' : 'Download Session Backup'}</span>
                     </button>
 
                     <button
-                      className="btn soft"
+                      type="button"
+                      className="min-h-[42px] px-4 py-2 rounded-[11px] bg-[#e8f8f0] hover:bg-[#daf3e6] disabled:opacity-60 text-[#065f3e] border border-emerald-700/15 text-xs font-extrabold flex items-center justify-center gap-2 whitespace-nowrap transition-all duration-150 cursor-pointer"
                       onClick={() => handleExportSession(true)}
                       disabled={isTransferringSession}
                     >
-                      <Copy size={13} />{' '}
-                      {isBn ? 'ব্যাকআপ কোড কপি' : 'Copy Backup Text'}
+                      <Copy size={14} className="shrink-0" />
+                      <span>{isBn ? 'ব্যাকআপ কোড কপি' : 'Copy Backup Text'}</span>
                     </button>
 
                     <button
-                      className="btn outline"
+                      type="button"
+                      className="min-h-[42px] px-4 py-2 rounded-[11px] bg-white hover:bg-[#f6fbf8] disabled:opacity-60 text-[#0f291e] border border-emerald-950/12 hover:border-emerald-600/35 text-xs font-bold flex items-center justify-center gap-2 whitespace-nowrap transition-all duration-150 cursor-pointer"
                       onClick={() => sessionFileInputRef.current?.click()}
                       disabled={isTransferringSession}
                     >
-                      <Upload size={13} />{' '}
-                      {isBn ? 'ফাইল থেকে রিস্টোর' : 'Restore Session File'}
+                      <Upload size={14} className="shrink-0 text-[#087f55]" />
+                      <span>{isBn ? 'ফাইল থেকে রিস্টোর' : 'Restore Session File'}</span>
                     </button>
 
                     <button
-                      className="btn outline"
+                      type="button"
+                      className="min-h-[42px] px-4 py-2 rounded-[11px] bg-white hover:bg-[#f6fbf8] disabled:opacity-60 text-[#0f291e] border border-emerald-950/12 hover:border-emerald-600/35 text-xs font-bold flex items-center justify-center gap-2 whitespace-nowrap transition-all duration-150 cursor-pointer"
                       onClick={() => setShowSessionPasteBox((prev) => !prev)}
                       disabled={isTransferringSession}
                     >
-                      <FileText size={13} />{' '}
-                      {isBn ? 'পেস্ট করে রিস্টোর' : 'Restore by Paste'}
+                      <FileText size={14} className="shrink-0 text-[#087f55]" />
+                      <span>{isBn ? 'পেস্ট করে রিস্টোর' : 'Restore by Paste'}</span>
                     </button>
 
                     <input
@@ -5216,8 +5283,8 @@ export default function App() {
                   </div>
 
                   {showSessionPasteBox && (
-                    <div className="mt-2 p-3.5 rounded-2xl bg-[#f4f8f5] border border-emerald-950/[0.08] space-y-2">
-                      <label className="block text-[11px] font-bold text-slate-700">
+                    <div className="mt-2 p-3.5 rounded-2xl bg-[#f4f8f5] border border-emerald-950/[0.08] space-y-2.5">
+                      <label className="block text-[11px] font-bold text-[#0f291e]">
                         {isBn ? 'কপি করা ব্যাকআপ JSON এখানে পেস্ট করুন:' : 'Paste Encrypted Backup JSON:'}
                       </label>
                       <textarea
@@ -5229,14 +5296,16 @@ export default function App() {
                       />
                       <div className="flex gap-2">
                         <button
-                          className="btn primary"
+                          type="button"
+                          className="min-h-[38px] px-4 py-2 rounded-[10px] bg-gradient-to-r from-[#098a5c] to-[#07734c] text-white text-xs font-extrabold flex items-center gap-1.5 disabled:opacity-60 cursor-pointer"
                           onClick={() => restoreSessionFromJsonText(sessionPasteText)}
                           disabled={isTransferringSession || !sessionPasteText.trim()}
                         >
                           <Check size={13} /> {isBn ? 'সেশন রিস্টোর করুন' : 'Restore Now'}
                         </button>
                         <button
-                          className="btn outline"
+                          type="button"
+                          className="min-h-[38px] px-4 py-2 rounded-[10px] bg-white border border-emerald-950/12 text-[#0f291e] text-xs font-bold cursor-pointer"
                           onClick={() => setShowSessionPasteBox(false)}
                         >
                           {isBn ? 'বাতিল' : 'Cancel'}

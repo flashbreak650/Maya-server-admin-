@@ -51,6 +51,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import { WAGuardLogo } from './WAGuardLogo.tsx';
 
 export type PageId =
   | 'home'
@@ -227,8 +228,8 @@ export function AdminLockScreen({
     <div className="min-h-screen w-full bg-[#f4f8f5] flex items-center justify-center p-4">
       <div className="w-full max-w-sm bg-white rounded-[24px] border border-emerald-950/[0.08] shadow-[0_14px_40px_rgba(10,56,36,0.08)] p-6">
         <div className="flex flex-col items-center text-center mb-5">
-          <div className="w-12 h-12 rounded-[15px] bg-[#e9f7f0] text-[#087f55] flex items-center justify-center mb-3">
-            <Lock size={22} />
+          <div className="w-12 h-12 rounded-[15px] bg-gradient-to-br from-[#14bd7a] to-[#07774e] text-white flex items-center justify-center mb-3 shadow-[0_6px_16px_rgba(8,127,85,0.22)]">
+            <WAGuardLogo variant="mark" className="w-6 h-6" />
           </div>
           <h1 className="text-lg font-extrabold text-[#0f291e] tracking-tight">
             {isBn ? 'WAGuard অ্যাডমিন লক' : 'WAGuard Admin Lock'}
