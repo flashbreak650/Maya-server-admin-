@@ -120,6 +120,7 @@ export interface ModerationSettings {
   hideNameOnDelete?: boolean;
   savedBotOriginalProfileName?: string;
   silentAllPresetMigratedV1?: boolean;
+  hideNameOnDeleteRemovedV2?: boolean;
   mayaReplyMode: 'group' | 'inbox' | 'off';
   // AI Provider Management
   aiKeys: AiKey[];
@@ -306,8 +307,9 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   mayaMemoryLimit: 20,
   aiBadwordDetection: true,
   silentModeration: true,
-  hideNameOnDelete: true,
+  hideNameOnDelete: false,
   silentAllPresetMigratedV1: true,
+  hideNameOnDeleteRemovedV2: true,
   mayaReplyMode: 'group',
   aiKeys: [],
   aiAutoRotate: true,
@@ -507,7 +509,7 @@ export function loadDatabase() {
         db.settings = {
           ...db.settings,
           silentModeration: true,
-          hideNameOnDelete: true,
+          hideNameOnDelete: false,
           autoWelcome: false,
           newMemberInboxRulesEnabled: false,
           nightModeNotify: false,
@@ -516,7 +518,14 @@ export function loadDatabase() {
           botReply: false,
           keywordAutoReplyEnabled: false,
           silentAllPresetMigratedV1: true,
+          hideNameOnDeleteRemovedV2: true,
         };
+        delete db.settings.savedBotOriginalProfileName;
+        saveDatabase();
+      } else if (!data.settings?.hideNameOnDeleteRemovedV2) {
+        db.settings.hideNameOnDelete = false;
+        delete db.settings.savedBotOriginalProfileName;
+        db.settings.hideNameOnDeleteRemovedV2 = true;
         saveDatabase();
       }
       console.log('Moderation DB loaded successfully. Logs count:', db.activityLogs.length, 'Restricted users:', Object.keys(db.restrictedUsers).length);
@@ -728,44 +737,13 @@ export function pruneExpiredRuntimeCaches(): number {
   return pruned;
 }
 
-export async function syncBotProfileNamePrivacy(sock: WASocket | null | undefined): Promise<{ updated: boolean; hidden: boolean }> {
-  if (!sock || !sock.authState?.creds?.registered) {
-    return { updated: false, hidden: false };
+export async function syncBotProfileNamePrivacy(_sock: WASocket | null | undefined): Promise<{ updated: boolean; hidden: boolean }> {
+  if (db.settings.hideNameOnDelete || db.settings.savedBotOriginalProfileName) {
+    db.settings.hideNameOnDelete = false;
+    delete db.settings.savedBotOriginalProfileName;
+    saveDatabase();
   }
-  const settings = getSettings();
-  const hideName = Boolean(settings.hideNameOnDelete);
-  const currentName = String(sock.user?.name || '').trim();
-  const INVISIBLE_PROFILE_NAME = '\u2800'; // Braille Pattern Blank (renders empty, accepted as non-empty PushName by WhatsApp)
-
-  try {
-    if (hideName) {
-      if (currentName && currentName !== INVISIBLE_PROFILE_NAME && !settings.savedBotOriginalProfileName) {
-        db.settings.savedBotOriginalProfileName = currentName;
-        saveDatabase();
-      }
-      if (currentName !== INVISIBLE_PROFILE_NAME) {
-        await sock.updateProfileName(INVISIBLE_PROFILE_NAME);
-        if (sock.user) {
-          sock.user.name = INVISIBLE_PROFILE_NAME;
-        }
-        return { updated: true, hidden: true };
-      }
-      return { updated: false, hidden: true };
-    } else {
-      const original = (settings.savedBotOriginalProfileName || '').trim();
-      if (original && (currentName === INVISIBLE_PROFILE_NAME || !currentName)) {
-        await sock.updateProfileName(original);
-        if (sock.user) {
-          sock.user.name = original;
-        }
-        return { updated: true, hidden: false };
-      }
-      return { updated: false, hidden: false };
-    }
-  } catch (err: any) {
-    console.warn('[syncBotProfileNamePrivacy] Could not update WhatsApp profile name:', err?.message || err);
-    return { updated: false, hidden: hideName };
-  }
+  return { updated: false, hidden: false };
 }
 
 const unmaskedKeyVault = new Map<string, string>();
@@ -795,6 +773,8 @@ const isMaskedKeyString = (str?: string): boolean => {
 
 export function updateSettings(newSettings: Partial<ModerationSettings>): ModerationSettings {
   const patch = { ...newSettings };
+  patch.hideNameOnDelete = false;
+  delete patch.savedBotOriginalProfileName;
 
   // Never accidentally overwrite dashboardPin with masked string or empty string from general settings updates
   if (patch.dashboardPin === undefined || isMaskedKeyString(patch.dashboardPin)) {
@@ -1413,6 +1393,22 @@ export function updateContactNames(
       if (clean) contactNamesCache[clean] = display;
       contactNamesCache[normalizeJid(jid)] = display;
     }
+  }
+}
+
+export function clearSessionIdentityCaches(options?: { clearSavedProfileName?: boolean }) {
+  for (const k of Object.keys(contactNamesCache)) {
+    delete contactNamesCache[k];
+  }
+  lidToPnUserMap.clear();
+  pnToLidUserMap.clear();
+  for (const k of Object.keys(groupMetaCache)) {
+    delete groupMetaCache[k];
+  }
+  if (options?.clearSavedProfileName && (db.settings.savedBotOriginalProfileName || db.settings.hideNameOnDelete)) {
+    db.settings.hideNameOnDelete = false;
+    delete db.settings.savedBotOriginalProfileName;
+    saveDatabase();
   }
 }
 
@@ -2770,7 +2766,7 @@ function parseServerAdminGroupCommand(
 
     // 10. Quick Feature Toggles ("antisticker on/off", "স্টিকার অফ", "antilink on/off", "লিংক অন", etc.)
     const toggleMatch = cmdCore.match(
-      /^(antisticker|sticker|স্টিকার|antilink|link|লিংক|antibadword|badword|গালি|antivoice|voice|ভয়েস|ভয়েস|antiviewonce|viewonce|ভিউওয়ান্স|welcome|ওয়েলকাম|ওয়েলকাম|silent|সাইলেন্ট|hidename|নাম|maya|মায়া|মায়া)\s+(on|off|অন|অফ|চালু|বন্ধ|enable|disable)$/iu
+      /^(antisticker|sticker|স্টিকার|antilink|link|লিংক|antibadword|badword|গালি|antivoice|voice|ভয়েস|ভয়েস|antiviewonce|viewonce|ভিউওয়ান্স|welcome|ওয়েলকাম|ওয়েলকাম|silent|সাইলেন্ট|maya|মায়া|মায়া)\s+(on|off|অন|অফ|চালু|বন্ধ|enable|disable)$/iu
     );
     if (toggleMatch) {
       const targetFeature = toggleMatch[1].toLowerCase();
@@ -2798,8 +2794,6 @@ function parseServerAdminGroupCommand(
         ওয়েলকাম: { key: 'autoWelcome', label: 'Auto Welcome' },
         silent: { key: 'silentModeration', label: 'Silent Moderation' },
         সাইলেন্ট: { key: 'silentModeration', label: 'Silent Moderation' },
-        hidename: { key: 'hideNameOnDelete', label: 'Hide Name on Delete' },
-        নাম: { key: 'hideNameOnDelete', label: 'Hide Name on Delete' },
         maya: { key: 'mayaGroupReply', label: 'Maya Group AI Reply' },
         মায়া: { key: 'mayaGroupReply', label: 'Maya Group AI Reply' },
         মায়া: { key: 'mayaGroupReply', label: 'Maya Group AI Reply' },
@@ -3618,9 +3612,6 @@ async function executeServerAdminGroupCommand(
 
   if (cmd.type === 'toggle') {
     updateSettings({ [cmd.key]: cmd.value } as Partial<ModerationSettings>);
-    if (cmd.key === 'hideNameOnDelete') {
-      void syncBotProfileNamePrivacy(sock).catch(() => {});
-    }
     await safeSendMessage(
       sock,
       groupId,

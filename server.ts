@@ -74,6 +74,7 @@ import {
   flushDatabaseSync,
   addActivityLog,
   syncBotProfileNamePrivacy,
+  clearSessionIdentityCaches,
 } from './src/moderationEngine.ts';
 import {
   initStickerQueue,
@@ -754,6 +755,7 @@ function wipePrimarySessionsDir(reason: string) {
     console.log(`[Baileys Engine] Cleaning session directory (${reason})...`);
     fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+    clearSessionIdentityCaches({ clearSavedProfileName: true });
   } catch (e) {
     console.error('[Baileys Engine] Error cleaning session directory:', e);
   }
@@ -928,6 +930,7 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
         botState.qrCodeDataUrl = '';
         botState.pairingStartedAt = 0;
         botState.user = null;
+        botState.groups = [];
         wipePrimarySessionsDir('401 logged out / invalid creds');
         recordDisconnectEvent({
           account: 'primary',
@@ -1405,6 +1408,8 @@ async function startRealPairingFlow(cleanPhone: string): Promise<{ pairingCode: 
       const myToken = activeSocketToken;
 
       // Always start pairing from clean unregistered keys so half-paired creds.me never triggers login 401/405
+      botState.groups = [];
+      botState.user = null;
       wipePrimarySessionsDir('fresh pairing request');
 
       const { state, saveCreds } = await useMultiFileAuthState(SESSIONS_DIR);
@@ -1721,9 +1726,6 @@ app.get('/api/moderation/settings', (req: Request, res: Response) => {
 app.post('/api/moderation/settings', (req: Request, res: Response) => {
   try {
     const updated = updateModerationSettings(req.body);
-    if (req.body && Object.prototype.hasOwnProperty.call(req.body, 'hideNameOnDelete')) {
-      void syncBotProfileNamePrivacy(currentSock).catch(() => {});
-    }
     const safeCopy = {
       ...updated,
       dashboardPin: updated.dashboardPin ? '****' : '',
@@ -2069,6 +2071,7 @@ app.post('/api/whatsapp/disconnect', async (req: Request, res: Response) => {
     }
     fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+    clearSessionIdentityCaches({ clearSavedProfileName: true });
     botState.status = 'disconnected';
     botState.step = 'idle';
     botState.stepMessage = 'সেশন ডিসকানেক্ট ও ক্লিয়ার করা হয়েছে';
@@ -2078,6 +2081,7 @@ app.post('/api/whatsapp/disconnect', async (req: Request, res: Response) => {
     botState.pairingStartedAt = 0;
     botState.phoneNumber = '';
     botState.user = null;
+    botState.groups = [];
     botState.lastError = null;
     recordDisconnectEvent({
       account: 'primary',
@@ -2235,6 +2239,9 @@ app.post('/api/whatsapp/session-import', async (req: Request, res: Response) => 
 
         fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
         fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+        clearSessionIdentityCaches({ clearSavedProfileName: true });
+        botState.groups = [];
+        botState.user = null;
 
         for (const [rawName, b64] of Object.entries(files)) {
           const safeName = path.basename(rawName);
