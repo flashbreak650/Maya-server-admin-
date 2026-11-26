@@ -30,6 +30,7 @@ import { DATA_DIR, STICKER_QUEUE_DB_PATH } from './storagePaths.ts';
 import {
   getAccumulatedStickerCountsSummary,
   getAccumulatedStickersForPurge,
+  isInboxGroupConnected,
   markInboxMessageDeleted,
 } from './inboxStore.ts';
 
@@ -1317,7 +1318,9 @@ export function getStickerQueueStatus() {
       maxRetries: Math.max(5, Number(settings.stickerDeleteMaxRetries ?? 5)),
       concurrency: Math.max(4, Number(settings.stickerQueueConcurrency ?? 8)),
     },
-    permissionDeniedGroups: Object.values(permissionDeniedGroups),
+    permissionDeniedGroups: Object.values(permissionDeniedGroups).filter(
+      (g) => g?.groupId && isInboxGroupConnected(g.groupId)
+    ),
     pendingItems: pendingItems.slice(0, 50),
     recentHistory: [...recentHistory].reverse().slice(0, 40),
     accumulatedStickers: getAccumulatedStickerCountsSummary(),
@@ -1545,6 +1548,46 @@ export function pruneExpiredStickerHistory(maxAgeMs: number): number {
     scheduleSaveQueue(true);
   }
   return removed;
+}
+
+export function clearStickerPermissionDeniedGroup(groupId: string) {
+  if (!groupId) return;
+  let dirty = false;
+  if (permissionDeniedGroups[groupId]) {
+    delete permissionDeniedGroups[groupId];
+    dirty = true;
+  }
+  for (const [key, item] of activeMap.entries()) {
+    if (item.groupId === groupId) {
+      activeMap.delete(key);
+      dirty = true;
+    }
+  }
+  if (dirty) {
+    scheduleSaveQueue(true);
+  }
+}
+
+export function pruneStickerQueueForDisconnectedGroups(connectedGroupIds?: Set<string>) {
+  let dirty = false;
+  for (const gid of Object.keys(permissionDeniedGroups)) {
+    const isConnected = connectedGroupIds ? connectedGroupIds.has(gid) : isInboxGroupConnected(gid);
+    if (!isConnected) {
+      delete permissionDeniedGroups[gid];
+      dirty = true;
+    }
+  }
+  if (connectedGroupIds) {
+    for (const [key, item] of activeMap.entries()) {
+      if (!connectedGroupIds.has(item.groupId)) {
+        activeMap.delete(key);
+        dirty = true;
+      }
+    }
+  }
+  if (dirty) {
+    scheduleSaveQueue(true);
+  }
 }
 
 export function pruneExpiredBurstWindows(maxAgeMs = 5 * 60 * 1000): number {

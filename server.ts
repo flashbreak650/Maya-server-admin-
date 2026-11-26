@@ -85,6 +85,8 @@ import {
   clearStickerQueueHistory,
   enqueueBulkStickerPurge,
   flushStickerQueueSync,
+  clearStickerPermissionDeniedGroup,
+  pruneStickerQueueForDisconnectedGroups,
 } from './src/stickerQueue.ts';
 import {
   initCompanionBot,
@@ -533,6 +535,7 @@ function removeBotStateGroup(groupId: string) {
   botState.groups = botState.groups.filter((g) => g.id !== groupId);
   removeCachedGroupMeta(groupId);
   markGroupLeftInInbox(groupId);
+  clearStickerPermissionDeniedGroup(groupId);
 }
 
 function isParticipantMatchingBot(sock: WASocket, rawParticipant: any): boolean {
@@ -646,6 +649,8 @@ async function refreshAllConnectedGroups(sock: WASocket, timeoutMs = 12000): Pro
       { isFullSnapshot: true }
     ).catch(() => {});
 
+    pruneStickerQueueForDisconnectedGroups(new Set(list.map((g) => g.id)));
+
     return groups;
   } catch (err: any) {
     console.warn('[Groups Refresh Warning]:', err?.message || err);
@@ -756,6 +761,7 @@ function wipePrimarySessionsDir(reason: string) {
     fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
     clearSessionIdentityCaches({ clearSavedProfileName: true });
+    pruneStickerQueueForDisconnectedGroups(new Set());
   } catch (e) {
     console.error('[Baileys Engine] Error cleaning session directory:', e);
   }
@@ -2072,6 +2078,7 @@ app.post('/api/whatsapp/disconnect', async (req: Request, res: Response) => {
     fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
     fs.mkdirSync(SESSIONS_DIR, { recursive: true });
     clearSessionIdentityCaches({ clearSavedProfileName: true });
+    pruneStickerQueueForDisconnectedGroups(new Set());
     botState.status = 'disconnected';
     botState.step = 'idle';
     botState.stepMessage = 'সেশন ডিসকানেক্ট ও ক্লিয়ার করা হয়েছে';
@@ -2240,6 +2247,7 @@ app.post('/api/whatsapp/session-import', async (req: Request, res: Response) => 
         fs.rmSync(SESSIONS_DIR, { recursive: true, force: true });
         fs.mkdirSync(SESSIONS_DIR, { recursive: true });
         clearSessionIdentityCaches({ clearSavedProfileName: true });
+        pruneStickerQueueForDisconnectedGroups(new Set());
         botState.groups = [];
         botState.user = null;
 

@@ -1637,6 +1637,13 @@ export function markGroupLeftInInbox(groupId: string) {
   }
 }
 
+export function isInboxGroupConnected(groupId: string): boolean {
+  loadInboxIndex();
+  const entry = inboxIndex.groups[groupId];
+  if (!entry) return true;
+  return entry.connected !== false;
+}
+
 // ---------------------------------------------------------------------------
 // PAGINATED QUERY, SEARCH & FILTERS
 // ---------------------------------------------------------------------------
@@ -2120,6 +2127,7 @@ export function getAccumulatedStickerCountsSummary(): {
   let unverifiedBulkCount = 0;
 
   for (const [gid, gInfo] of Object.entries(inboxIndex.groups)) {
+    if (gInfo && gInfo.connected === false) continue;
     const records = loadGroupMessages(gid);
     let count = 0;
     let unverifiedCount = 0;
@@ -2165,7 +2173,9 @@ export function getAccumulatedStickersForPurge(
   loadInboxIndex();
   const capped = Math.max(1, Math.min(2000, Number(limit || 600)));
   const cleanTarget = targetGroupId && targetGroupId !== 'ALL' ? String(targetGroupId).trim() : '';
-  const groupIds = cleanTarget ? [cleanTarget] : Object.keys(inboxIndex.groups);
+  const groupIds = cleanTarget
+    ? [cleanTarget]
+    : Object.keys(inboxIndex.groups).filter((gid) => inboxIndex.groups[gid]?.connected !== false);
   const includeUnverified = Boolean(opts?.includeUnverifiedBulk);
 
   const items: AccumulatedGroupStickerEntry[] = [];
