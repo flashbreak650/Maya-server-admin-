@@ -145,9 +145,11 @@ export interface InboxRealtimeEvent {
   type:
     | 'inbox:message_new'
     | 'inbox:message_updated'
+    | 'inbox:message_removed'
     | 'inbox:group_updated'
     | 'inbox:storage_updated';
   groupId?: string;
+  messageId?: string;
   message?: InboxMessageRecord;
   groupSummary?: InboxGroupSummary;
   stats?: InboxStorageStats;
@@ -1475,6 +1477,43 @@ export function toggleMessageImportant(groupId: string, messageId: string, impor
     timestamp: Date.now(),
   });
   return target;
+}
+
+export function getInboxMessageById(groupId: string, messageId: string): InboxMessageRecord | null {
+  if (!groupId || !messageId || !groupId.endsWith('@g.us')) return null;
+  loadInboxIndex();
+  const records = loadGroupMessages(groupId);
+  return records.find((r) => r.id === messageId) || null;
+}
+
+export async function removeInboxMessageFromHistory(groupId: string, messageId: string): Promise<boolean> {
+  if (!groupId || !messageId || !groupId.endsWith('@g.us')) return false;
+  loadInboxIndex();
+  const records = loadGroupMessages(groupId);
+  const idx = records.findIndex((r) => r.id === messageId);
+  if (idx < 0) return false;
+  const [removed] = records.splice(idx, 1);
+
+  if (removed?.media?.relPath) {
+    try {
+      const baseDir = path.resolve(INBOX_MEDIA_DIR);
+      const full = path.resolve(baseDir, removed.media.relPath);
+      if (full.startsWith(baseDir + path.sep) && fs.existsSync(full)) {
+        await fs.promises.unlink(full).catch(() => {});
+      }
+    } catch {}
+  }
+
+  scheduleSaveGroupMessages(groupId);
+  const summary = updateGroupSummaryFromRecords(groupId);
+  emitInboxEvent({
+    type: 'inbox:message_removed',
+    groupId,
+    messageId,
+    groupSummary: summary,
+    timestamp: Date.now(),
+  });
+  return true;
 }
 
 // ---------------------------------------------------------------------------

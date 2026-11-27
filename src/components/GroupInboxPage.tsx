@@ -7,6 +7,7 @@ import {
   Check,
   CheckCheck,
   CheckCircle2,
+  ChevronDown,
   Contact2,
   Download,
   ExternalLink,
@@ -548,6 +549,10 @@ export function GroupInboxPage({
   const [nextCursor, setNextCursor] = useState<{ beforeTimestamp: number; beforeId: string } | null>(null);
 
   const [tabMode, setTabMode] = useState<'all' | 'deleted'>(initialDeletedOnly ? 'deleted' : 'all');
+  const [searchText, setSearchText] = useState('');
+  const [showGroupPicker, setShowGroupPicker] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
   const [composerText, setComposerText] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
   const [purgingStickers, setPurgingStickers] = useState(false);
@@ -670,6 +675,7 @@ export function GroupInboxPage({
         const params = new URLSearchParams();
         params.set('limit', '40');
         if (tabModeRef.current === 'deleted') params.set('deletedOnly', '1');
+        if (searchText.trim()) params.set('query', searchText.trim());
         if (appendOlder && opts?.cursor) {
           params.set('beforeTimestamp', String(opts.cursor.beforeTimestamp));
           params.set('beforeId', opts.cursor.beforeId);
@@ -728,16 +734,17 @@ export function GroupInboxPage({
     []
   );
 
-  // Load initial messages ONLY when selected group or tab mode actually changes
+  // Load initial messages when selected group, tab mode, or search query changes
   useEffect(() => {
     if (!selectedGroupId) return;
     initialScrollKeyRef.current = '';
     setShowJumpToBottom(false);
     setUnreadBelowCount(0);
+    setConfirmDeleteId(null);
     isNearBottomRef.current = true;
-    const t = setTimeout(() => loadMessages(selectedGroupId, { forceScrollBottom: true }), 80);
+    const t = setTimeout(() => loadMessages(selectedGroupId, { forceScrollBottom: true }), searchText ? 260 : 80);
     return () => clearTimeout(t);
-  }, [selectedGroupId, tabMode, loadMessages]);
+  }, [selectedGroupId, tabMode, searchText, loadMessages]);
 
   const handleStreamScroll = useCallback(() => {
     const el = messageStreamRef.current;
@@ -875,6 +882,15 @@ export function GroupInboxPage({
               return next;
             });
           }
+          if (payload?.type === 'inbox:message_removed') {
+            if (payload.groupSummary?.id) {
+              const summary = payload.groupSummary as InboxGroupSummary;
+              setGroups((prev) => prev.map((g) => (g.id === summary.id ? { ...g, ...summary } : g)));
+            }
+            if (payload.groupId === selectedGroupIdRef.current && payload.messageId) {
+              setMessages((prev) => prev.filter((m) => m.id !== payload.messageId));
+            }
+          }
         } catch {}
       };
 
@@ -930,6 +946,55 @@ export function GroupInboxPage({
       showNotification(isBn ? 'গুরুত্বপূর্ণ স্ট্যাটাস আপডেট হয়েছে' : 'Important status updated');
     } catch (err: any) {
       showNotification(err.message);
+    }
+  };
+
+  const handleDeleteGroupMessage = async (msg: InboxMessageRecord, mode: 'whatsapp' | 'local_only' = 'whatsapp') => {
+    if (!msg?.id || !msg?.groupId || deletingMessageId) return;
+    setDeletingMessageId(msg.id);
+    try {
+      const res = await callApiRef.current('/api/inbox/messages/delete', 'POST', {
+        groupId: msg.groupId,
+        messageId: msg.id,
+        mode,
+      });
+
+      if (mode === 'local_only') {
+        setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+        showNotificationRef.current(isBn ? 'ইনবক্স তালিকা থেকে মেসেজটি সরানো হয়েছে।' : 'Removed from inbox feed.');
+      } else {
+        if (res?.message) {
+          setMessages((prev) => prev.map((m) => (m.id === msg.id ? res.message : m)));
+        } else {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === msg.id
+                ? {
+                    ...m,
+                    isDeleted: true,
+                    deletedBy: 'server_dashboard',
+                    deletionReason: isBn
+                      ? 'সার্ভার থেকে ডিলিট করা হয়েছে (Delete for everyone)'
+                      : 'Deleted from server (Delete for everyone)',
+                  }
+                : m
+            )
+          );
+        }
+        showNotificationRef.current(
+          isBn
+            ? 'গ্রুপ থেকে মেসেজটি সবার জন্য ডিলিট করা হয়েছে!'
+            : 'Message deleted from WhatsApp group for everyone!'
+        );
+      }
+      setConfirmDeleteId(null);
+      loadInboxGroups();
+    } catch (err: any) {
+      showNotificationRef.current(
+        err?.message || (isBn ? 'মেসেজ ডিলিট করা যায়নি।' : 'Failed to delete message.')
+      );
+    } finally {
+      setDeletingMessageId(null);
     }
   };
 
@@ -1028,14 +1093,52 @@ export function GroupInboxPage({
                   sizeClass="w-10 h-10"
                 />
 
-                <div className="min-w-0">
-                  <h3 className="text-sm font-extrabold text-white truncate max-w-[210px] sm:max-w-md">
-                    {selectedGroup.name}
-                  </h3>
+                <div className="min-w-0 relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowGroupPicker((v) => !v)}
+                    className="flex items-center gap-1 text-left cursor-pointer group"
+                    title={isBn ? 'অন্য গ্রুপ বেছে নিন' : 'Switch group'}
+                  >
+                    <h3 className="text-sm font-extrabold text-white truncate max-w-[175px] sm:max-w-md">
+                      {selectedGroup.name}
+                    </h3>
+                    {groups.length > 1 && (
+                      <ChevronDown size={14} className="text-emerald-100 shrink-0 group-hover:translate-y-0.5 transition-transform" />
+                    )}
+                  </button>
                   <div className="text-[11px] text-emerald-100/90 truncate tabular-nums">
-                    {selectedGroup.participants} {isBn ? 'সদস্য অনলাইনে সক্রিয়' : 'members'} ·{' '}
+                    {selectedGroup.participants} {isBn ? 'সদস্য' : 'members'} ·{' '}
                     {wsConnected ? (isBn ? 'রিয়েল-টাইম কানেক্টেড' : 'Live') : 'Syncing'}
                   </div>
+
+                  {showGroupPicker && groups.length > 0 && (
+                    <div className="absolute left-0 top-full mt-2 w-64 sm:w-72 max-h-64 overflow-y-auto bg-white text-slate-900 rounded-2xl shadow-xl border border-slate-200 p-1.5 z-40">
+                      <div className="px-2.5 py-1 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">
+                        {isBn ? 'গ্রুপ পরিবর্তন করুন' : 'Switch Group'}
+                      </div>
+                      {groups.map((g) => (
+                        <button
+                          key={g.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedGroupId(g.id);
+                            setShowGroupPicker(false);
+                          }}
+                          className={`w-full text-left px-2.5 py-2 rounded-xl text-xs font-bold flex items-center justify-between gap-2 cursor-pointer ${
+                            g.id === selectedGroup.id
+                              ? 'bg-emerald-50 text-emerald-800'
+                              : 'hover:bg-slate-100 text-slate-800'
+                          }`}
+                        >
+                          <span className="truncate">{g.name}</span>
+                          <span className="text-[10px] font-mono text-slate-500 shrink-0">
+                            {g.totalStoredMessages}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1085,14 +1188,36 @@ export function GroupInboxPage({
               </div>
             </div>
 
-            {/* 2. Pinned Message Section */}
-            <div className="px-4 py-2 bg-[#f8f9fa] border-b border-slate-200 text-xs flex items-center gap-2.5 z-10">
-              <span className="p-1 rounded-lg bg-emerald-100 text-emerald-800 shrink-0">
-                <Pin size={13} className="rotate-45" />
-              </span>
-              <div className="truncate text-slate-700 font-medium">
-                <span className="font-extrabold text-slate-900 mr-1.5">WA Guard Security Notice:</span>
-                <span>{isBn ? 'গ্রুপের সকল সদস্যের জন্য মডারেশন ও স্প্যাম প্রোটেকশন সক্রিয় রয়েছে।' : 'Group moderation & anti-spam active.'}</span>
+            {/* 2. Search & Notice Bar */}
+            <div className="px-3.5 py-2 bg-[#f8f9fa] border-b border-slate-200 text-xs flex flex-wrap items-center justify-between gap-2 z-10">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="p-1 rounded-lg bg-emerald-100 text-emerald-800 shrink-0">
+                  <Pin size={12} className="rotate-45" />
+                </span>
+                <span className="truncate text-[11px] text-slate-700 font-semibold">
+                  {isBn
+                    ? 'যেকোনো মেসেজের নিচের ডিলিট আইকনে চাপ দিয়ে সরাসরি গ্রুপ থেকে মুছে ফেলতে পারবেন।'
+                    : 'Tap the delete icon on any message to delete it from the group.'}
+                </span>
+              </div>
+              <div className="relative w-full sm:w-56 shrink-0">
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input
+                  type="text"
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                  placeholder={isBn ? 'মেসেজ বা প্রেরক খুঁজুন...' : 'Search messages...'}
+                  className="w-full pl-7 pr-6 py-1 rounded-xl border border-slate-300 bg-white text-[11px] text-slate-800 focus:outline-none focus:border-emerald-600"
+                />
+                {searchText && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchText('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1260,9 +1385,83 @@ export function GroupInboxPage({
                           </p>
                         )}
 
-                        <div className="mt-1 flex items-center justify-end gap-1 text-[9.5px] text-slate-500 tabular-nums">
-                          <span>{formatFullTimestamp(msg.timestamp)}</span>
-                          {isOut && <CheckCheck size={12} className="text-emerald-600" />}
+                        <div className="mt-1.5 pt-1 border-t border-black/[0.06] flex items-center justify-between gap-2 text-[9.5px] text-slate-500 tabular-nums">
+                          {confirmDeleteId === msg.id ? (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {!msg.isDeleted ? (
+                                <button
+                                  type="button"
+                                  disabled={deletingMessageId === msg.id}
+                                  onClick={() => handleDeleteGroupMessage(msg, 'whatsapp')}
+                                  className="px-2 py-0.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-extrabold inline-flex items-center gap-1 cursor-pointer disabled:opacity-60"
+                                >
+                                  {deletingMessageId === msg.id ? (
+                                    <Loader2 size={10} className="animate-spin" />
+                                  ) : (
+                                    <Trash2 size={10} />
+                                  )}
+                                  {isBn ? 'গ্রুপ থেকে ডিলিট' : 'Delete for All'}
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={deletingMessageId === msg.id}
+                                  onClick={() => handleDeleteGroupMessage(msg, 'local_only')}
+                                  className="px-2 py-0.5 rounded-lg bg-slate-700 hover:bg-slate-800 text-white text-[10px] font-extrabold inline-flex items-center gap-1 cursor-pointer disabled:opacity-60"
+                                >
+                                  {deletingMessageId === msg.id ? (
+                                    <Loader2 size={10} className="animate-spin" />
+                                  ) : (
+                                    <Trash2 size={10} />
+                                  )}
+                                  {isBn ? 'লিস্ট থেকে সরান' : 'Remove Entry'}
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                disabled={deletingMessageId === msg.id}
+                                onClick={() => setConfirmDeleteId(null)}
+                                className="px-2 py-0.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 text-[10px] font-bold cursor-pointer"
+                              >
+                                {isBn ? 'বাতিল' : 'Cancel'}
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteId(msg.id)}
+                              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-colors cursor-pointer ${
+                                msg.isDeleted
+                                  ? 'text-slate-500 hover:text-rose-700 hover:bg-rose-100/70'
+                                  : 'text-rose-600 hover:text-rose-800 hover:bg-rose-50 font-bold'
+                              }`}
+                              title={
+                                msg.isDeleted
+                                  ? isBn
+                                    ? 'ইনবক্স তালিকা থেকে সরান'
+                                    : 'Remove from inbox list'
+                                  : isBn
+                                  ? 'WhatsApp গ্রুপ থেকে সবার জন্য ডিলিট করুন'
+                                  : 'Delete from WhatsApp group'
+                              }
+                            >
+                              <Trash2 size={11} />
+                              <span>
+                                {msg.isDeleted
+                                  ? isBn
+                                    ? 'তালিকা থেকে সরান'
+                                    : 'Clear'
+                                  : isBn
+                                  ? 'ডিলিট'
+                                  : 'Delete'}
+                              </span>
+                            </button>
+                          )}
+
+                          <div className="flex items-center gap-1 shrink-0">
+                            <span>{formatFullTimestamp(msg.timestamp)}</span>
+                            {isOut && <CheckCheck size={12} className="text-emerald-600" />}
+                          </div>
                         </div>
                       </div>
                     </div>

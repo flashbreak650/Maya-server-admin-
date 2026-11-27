@@ -5383,6 +5383,107 @@ export async function deleteMessageSafely(
   return false;
 }
 
+export async function deleteGroupMessageFromServer(
+  sock: WASocket | null | undefined,
+  groupId: string,
+  record: {
+    id: string;
+    groupName?: string;
+    senderJid?: string;
+    senderAltJid?: string;
+    rawParticipant?: string;
+    senderPhone?: string;
+    fromMe?: boolean;
+  }
+): Promise<{ success: boolean; statusCode?: number; error?: string }> {
+  if (!sock || !sock.user || !sock.authState?.creds?.registered) {
+    return {
+      success: false,
+      statusCode: 503,
+      error: 'WhatsApp বট বর্তমানে কানেক্টেড নেই। আগে কানেক্ট করুন।',
+    };
+  }
+  if (!groupId || !groupId.endsWith('@g.us') || !record?.id) {
+    return {
+      success: false,
+      statusCode: 400,
+      error: 'সঠিক গ্রুপ আইডি ও মেসেজ আইডি প্রয়োজন।',
+    };
+  }
+  if (record.id.startsWith('bot_')) {
+    return {
+      success: false,
+      statusCode: 400,
+      error: 'এই মেসেজটির WhatsApp Message ID পাওয়া যায়নি — শুধুমাত্র সার্ভার তালিকা থেকে সরানো যাবে।',
+    };
+  }
+
+  let meta = await getGroupMeta(sock, groupId, true).catch(() => null);
+  if (!meta) {
+    meta = await getGroupMeta(sock, groupId, false).catch(() => null);
+  }
+  const botIsAdmin = meta ? isBotGroupAdminFromMeta(sock, meta) : false;
+
+  if (!record.fromMe && meta && !botIsAdmin) {
+    return {
+      success: false,
+      statusCode: 403,
+      error: 'অন্য সদস্যের মেসেজ ডিলিট করতে বটকে এই গ্রুপের Admin হতে হবে।',
+    };
+  }
+
+  await resolveBotIdentitySet(sock).catch(() => {});
+  const participant = record.rawParticipant || record.senderJid || undefined;
+  const waMsgStub: proto.IWebMessageInfo = {
+    key: {
+      remoteJid: groupId,
+      fromMe: Boolean(record.fromMe),
+      id: record.id,
+      ...(participant && !record.fromMe ? { participant } : {}),
+      ...(record.senderAltJid && !record.fromMe ? { participantAlt: record.senderAltJid } : {}),
+    } as any,
+  };
+
+  const deleted = await deleteMessageSafely(
+    sock,
+    groupId,
+    waMsgStub,
+    record.senderAltJid || record.senderJid || record.rawParticipant,
+    Boolean(record.fromMe || botIsAdmin)
+  );
+
+  if (!deleted) {
+    return {
+      success: false,
+      statusCode: 400,
+      error: 'WhatsApp থেকে মেসেজটি ডিলিট করা যায়নি (মেসেজটি পুরোনো হতে পারে অথবা বট Admin নয়)।',
+    };
+  }
+
+  db.stats.deletedMessages++;
+  saveDatabase();
+
+  await markInboxMessageDeleted(
+    groupId,
+    record.id,
+    'server_dashboard',
+    'সার্ভার থেকে ডিলিট করা হয়েছে (Delete for everyone)',
+    { deleteLocalMedia: true, deletionVerified: true }
+  ).catch(() => {});
+
+  addActivityLog({
+    groupId,
+    groupName: meta?.subject || record.groupName || 'WhatsApp Group',
+    senderJid: record.senderJid || 'SERVER',
+    senderPhone: record.senderPhone || 'SERVER-ADMIN',
+    action: 'deleted',
+    reason: 'সার্ভার ড্যাশবোর্ড থেকে মেসেজ ডিলিট করা হয়েছে',
+    details: `মেসেজ আইডি: ${record.id}`,
+  });
+
+  return { success: true };
+}
+
 const lastAntiStickerNoticeAt = new Map<string, number>();
 
 /**

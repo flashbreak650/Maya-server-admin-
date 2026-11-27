@@ -79,6 +79,7 @@ import {
   addActivityLog,
   syncBotProfileNamePrivacy,
   clearSessionIdentityCaches,
+  deleteGroupMessageFromServer,
 } from './src/moderationEngine.ts';
 import {
   initStickerQueue,
@@ -136,10 +137,12 @@ import {
   getInboxGroupsList,
   getInboxSettings,
   getInboxStorageStats,
+  getInboxMessageById,
   getRecentGroupVoiceClips,
   markGroupLeftInInbox,
   markInboxMessageDeleted,
   queryGroupInboxMessages,
+  removeInboxMessageFromHistory,
   resolveSafeGroupAvatarFile,
   resolveSafeInboxMediaFile,
   subscribeInboxEvents,
@@ -3008,6 +3011,60 @@ app.post('/api/inbox/messages/important', (req: Request, res: Response) => {
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err?.message || 'Could not update important flag' });
+  }
+});
+
+app.post('/api/inbox/messages/delete', async (req: Request, res: Response) => {
+  try {
+    const groupId = String(req.body?.groupId || '').trim();
+    const messageId = String(req.body?.messageId || '').trim();
+    const mode = req.body?.mode === 'local_only' ? 'local_only' : 'whatsapp';
+
+    if (!groupId || !/^[0-9A-Za-z._-]+@g\.us$/.test(groupId) || !messageId) {
+      return res.status(400).json({ success: false, error: 'সঠিক groupId ও messageId প্রয়োজন।' });
+    }
+
+    const record = getInboxMessageById(groupId, messageId);
+    if (!record) {
+      return res.status(404).json({ success: false, error: 'মেসেজটি সার্ভার ইনবক্স ডাটাবেজে পাওয়া যায়নি।' });
+    }
+
+    if (mode === 'local_only') {
+      await removeInboxMessageFromHistory(groupId, messageId);
+      return res.json({
+        success: true,
+        mode: 'local_only',
+        removedMessageId: messageId,
+        storage: getInboxStorageStats(),
+      });
+    }
+
+    if (record.isDeleted) {
+      return res.json({
+        success: true,
+        alreadyDeleted: true,
+        message: attachSignedMediaUrls(record),
+        storage: getInboxStorageStats(),
+      });
+    }
+
+    const result = await deleteGroupMessageFromServer(currentSock, groupId, record);
+    if (!result.success) {
+      return res.status(result.statusCode || 400).json({
+        success: false,
+        error: result.error || 'মেসেজটি ডিলিট করা যায়নি।',
+      });
+    }
+
+    const updated = getInboxMessageById(groupId, messageId);
+    res.json({
+      success: true,
+      deletedFromWhatsApp: true,
+      message: updated ? attachSignedMediaUrls(updated) : null,
+      storage: getInboxStorageStats(),
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'মেসেজ ডিলিট করতে সমস্যা হয়েছে।' });
   }
 });
 
