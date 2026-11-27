@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -8,6 +8,7 @@ import {
   Ban,
   BellRing,
   Bot,
+  Calendar,
   Check,
   CheckCircle2,
   Clock,
@@ -70,6 +71,7 @@ export type PageId =
   | 'memberblock'
   | 'logs'
   | 'nightmode'
+  | 'jummahmode'
   | 'anticall'
   | 'aivision'
   | 'activity'
@@ -157,6 +159,22 @@ export interface NightModeStatusView {
   isNightWindowNow: boolean;
   lockedCount: number;
   lockedGroups: Array<{ groupId: string; groupName: string; lockedAt: number }>;
+}
+
+export interface JummahModeStatusView {
+  enabled: boolean;
+  start: string;
+  end: string;
+  timezone: string;
+  notify: boolean;
+  currentLocalTime: string;
+  currentWeekday: string;
+  isFridayNow: boolean;
+  isJummahWindowNow: boolean;
+  lockedCount: number;
+  lockedGroups: Array<{ groupId: string; groupName: string; lockedAt: number; isManual?: boolean }>;
+  defaultLockMessage: string;
+  defaultUnlockMessage: string;
 }
 
 export interface GroupMemberDirectoryViewItem {
@@ -297,6 +315,7 @@ export function HomeFeatureHub({
   callsCount,
   keywordsCount,
   nightStatus,
+  jummahStatus,
   isConnected,
   companionOnline,
   storageUsedPercent,
@@ -315,6 +334,7 @@ export function HomeFeatureHub({
   callsCount: number;
   keywordsCount: number;
   nightStatus: NightModeStatusView | null;
+  jummahStatus?: JummahModeStatusView | null;
   isConnected: boolean;
   companionOnline?: boolean;
   storageUsedPercent?: number;
@@ -580,6 +600,25 @@ export function HomeFeatureHub({
       iconText: 'text-indigo-700',
       icon: <Moon size={18} />,
       onClick: () => onNavigate('nightmode'),
+    },
+    {
+      id: 'jummahmode',
+      title: isBn ? 'জুমার নামাজ অটো লক' : 'Friday Jummah Auto Lock',
+      desc: isBn ? 'প্রতি শুক্রবার জুম্মায় অটো লক, মোবারক নোটিশ ও ২টায় আনলক' : 'Auto lock every Friday for Jummah & guaranteed unlock',
+      keywords: 'jummah jumma friday namaz lock unlock মোবারক জুমা শুক্রবার নামাজ লক',
+      statusText:
+        settings.jummahModeEnabled !== false
+          ? isBn
+            ? `শুক্র · ${settings.jummahLockStart || '13:00'}–${settings.jummahLockEnd || '14:00'}`
+            : `Fri · ${settings.jummahLockStart || '13:00'}–${settings.jummahLockEnd || '14:00'}`
+          : isBn
+          ? 'বন্ধ আছে'
+          : 'OFF',
+      isOn: Boolean(settings.jummahModeEnabled !== false || jummahStatus?.isJummahWindowNow),
+      iconBg: 'bg-emerald-50',
+      iconText: 'text-emerald-700',
+      icon: <Calendar size={18} />,
+      onClick: () => onNavigate('jummahmode'),
     },
     {
       id: 'anticall',
@@ -1420,6 +1459,347 @@ export function NightModePage({
               {nightStatus.lockedGroups.map((g) => (
                 <div key={g.groupId} className="p-2 rounded-[10px] bg-[#f4f8f5] text-[#0f291e] text-[11px] font-bold flex justify-between">
                   <span className="truncate">{g.groupName}</span>
+                  <span className="text-[10px] font-mono tabular-nums shrink-0 text-[#5f7368]">
+                    {new Date(g.lockedAt).toLocaleTimeString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ============================================================================
+ * FEATURE #2B: AUTOMATIC FRIDAY JUMMAH NAMAZ LOCK & UNLOCK PAGE
+ * ========================================================================== */
+const DEFAULT_JUMMAH_LOCK_FALLBACK =
+  `🕌 *জুম্মা মুবারক — পবিত্র জুমার নামাজের বিরতি* 🤲\n\n` +
+  `আসসালামু আলাইকুম ওয়া রাহমাতুল্লাহ!\n` +
+  `পবিত্র জুমার নামাজ আদায়ের জন্য {{start}} থেকে {{end}} পর্যন্ত গ্রুপটি সাময়িকভাবে লক করা হয়েছে।\n\n` +
+  `📿 আসুন আমরা সবাই পবিত্র জুমার নামাজ আদায় করি, বেশি বেশি দরুদ শরিফ পাঠ করি এবং সবার জন্য দোয়া করি।\n\n` +
+  `⏰ {{end}}-এ গ্রুপটি স্বয়ংক্রিয়ভাবে সবার জন্য খুলে দেওয়া হবে। জাযাকাল্লাহু খাইরান! 🌸`;
+
+const DEFAULT_JUMMAH_UNLOCK_FALLBACK =
+  `🕌 *জুম্মা মুবারক — নামাজের বিরতি সমাপ্ত* 🌸\n\n` +
+  `আলহামদুলিল্লাহ! পবিত্র জুমার নামাজের নির্ধারিত সময় শেষ হওয়ায় গ্রুপটি আবার সকল সদস্যের জন্য উন্মুক্ত (Unlock) করা হলো।\n\n` +
+  `💬 এখন সবাই নিয়ম মেনে স্বাভাবিকভাবে মেসেজ করতে পারবেন। জুম্মা মুবারক! ✨`;
+
+export function JummahModePage({
+  isBn,
+  settings,
+  jummahStatus,
+  onBack,
+  onRefresh,
+  onSaveJummahSettings,
+  onToggleNow,
+}: {
+  isBn: boolean;
+  settings: any;
+  jummahStatus: JummahModeStatusView | null;
+  onBack: () => void;
+  onRefresh: () => void;
+  onSaveJummahSettings: (patch: any) => void;
+  onToggleNow: (lock: boolean) => void;
+}) {
+  const [start, setStart] = useState(settings.jummahLockStart || '13:00');
+  const [end, setEnd] = useState(settings.jummahLockEnd || '14:00');
+  const [timezone, setTimezone] = useState(settings.jummahModeTimezone || 'Asia/Dhaka');
+  const [lockMessage, setLockMessage] = useState(
+    settings.jummahLockMessage || jummahStatus?.defaultLockMessage || DEFAULT_JUMMAH_LOCK_FALLBACK
+  );
+  const [unlockMessage, setUnlockMessage] = useState(
+    settings.jummahUnlockMessage || jummahStatus?.defaultUnlockMessage || DEFAULT_JUMMAH_UNLOCK_FALLBACK
+  );
+
+  useEffect(() => {
+    if (settings.jummahLockStart) setStart(settings.jummahLockStart);
+    if (settings.jummahLockEnd) setEnd(settings.jummahLockEnd);
+    if (settings.jummahModeTimezone) setTimezone(settings.jummahModeTimezone);
+    if (settings.jummahLockMessage !== undefined) {
+      setLockMessage(
+        settings.jummahLockMessage || jummahStatus?.defaultLockMessage || DEFAULT_JUMMAH_LOCK_FALLBACK
+      );
+    }
+    if (settings.jummahUnlockMessage !== undefined) {
+      setUnlockMessage(
+        settings.jummahUnlockMessage || jummahStatus?.defaultUnlockMessage || DEFAULT_JUMMAH_UNLOCK_FALLBACK
+      );
+    }
+  }, [
+    settings.jummahLockStart,
+    settings.jummahLockEnd,
+    settings.jummahModeTimezone,
+    settings.jummahLockMessage,
+    settings.jummahUnlockMessage,
+    jummahStatus?.defaultLockMessage,
+    jummahStatus?.defaultUnlockMessage,
+  ]);
+
+  const isEnabled = settings.jummahModeEnabled !== false;
+  const isNotifyOn = settings.jummahModeNotify !== false;
+
+  const weekdayLabel = () => {
+    const wd = (jummahStatus?.currentWeekday || '').toLowerCase();
+    if (!isBn) return jummahStatus?.currentWeekday || 'Today';
+    if (wd.startsWith('fri')) return 'শুক্রবার (জুম্মার দিন)';
+    if (wd.startsWith('sat')) return 'শনিবার';
+    if (wd.startsWith('sun')) return 'রবিবার';
+    if (wd.startsWith('mon')) return 'সোমবার';
+    if (wd.startsWith('tue')) return 'মঙ্গলবার';
+    if (wd.startsWith('wed')) return 'বুধবার';
+    if (wd.startsWith('thu')) return 'বৃহস্পতিবার';
+    return jummahStatus?.currentWeekday || 'আজ';
+  };
+
+  return (
+    <section className="page active">
+      <SubPageHeader
+        title={isBn ? 'জুমার নামাজ অটো লক ও আনলক' : 'Friday Jummah Auto Lock & Unlock'}
+        subtitle={
+          isBn
+            ? 'কোনো বাটন চাপা ছাড়াই প্রতি শুক্রবার নির্ধারিত সময়ে (ডিফল্ট দুপুর ১:০০–২:০০) সব গ্রুপ অটো লক হয়ে জুম্মা মুবারক নোটিশ দিবে এবং ২:০০ টায় নিশ্চিত অটো আনলক হবে।'
+            : 'Automatically locks connected groups every Friday during Jummah prayer with a Mubarak notice and reliably unlocks when prayer ends.'
+        }
+        isBn={isBn}
+        onBack={onBack}
+        rightAction={
+          <button type="button" className="btn outline" onClick={onRefresh}>
+            <RefreshCw size={12} /> {isBn ? 'রিফ্রেশ' : 'Refresh'}
+          </button>
+        }
+      />
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+        <div className="card space-y-3">
+          <div className="toggle-row">
+            <div className="toggle-info">
+              <h4>{isBn ? 'প্রতি শুক্রবার অটো জুমা লক চালু' : 'Enable Automatic Friday Jummah Lock'}</h4>
+              <p>
+                {isBn
+                  ? 'ডিফল্ট চালু থাকে — প্রতি শুক্রবার অটো কাজ করবে'
+                  : 'Active by default — triggers automatically every Friday'}
+              </p>
+            </div>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={isEnabled}
+                onChange={(e) => onSaveJummahSettings({ jummahModeEnabled: e.target.checked })}
+              />
+              <span className="slider"></span>
+            </label>
+          </div>
+
+          <div className="toggle-row">
+            <div className="toggle-info">
+              <h4>{isBn ? 'জুম্মা মুবারক নোটিশ ক্যাপশন পাঠান' : 'Send Jumma Mubarak Notice'}</h4>
+              <p>
+                {isBn
+                  ? 'লক ও আনলকের সময় গ্রুপে সুন্দর ইসলামিক ক্যাপশন দিবে'
+                  : 'Posts Mubarak lock & unlock notice captions in groups'}
+              </p>
+            </div>
+            <label className="switch">
+              <input
+                type="checkbox"
+                checked={isNotifyOn}
+                onChange={(e) => onSaveJummahSettings({ jummahModeNotify: e.target.checked })}
+              />
+              <span className="slider"></span>
+            </label>
+          </div>
+
+          <div className="subpanel-soft space-y-2.5">
+            <div className="grid grid-cols-2 gap-2.5">
+              <div>
+                <label className="block text-[10px] font-bold text-[#5f7368] mb-1">
+                  {isBn ? 'লক শুরু (শুক্রবার)' : 'Friday Lock Start'}
+                </label>
+                <input
+                  type="time"
+                  value={start}
+                  onChange={(e) => setStart(e.target.value)}
+                  className="field tabular-nums"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-[#5f7368] mb-1">
+                  {isBn ? 'অটো আনলক সময়' : 'Auto Unlock End'}
+                </label>
+                <input
+                  type="time"
+                  value={end}
+                  onChange={(e) => setEnd(e.target.value)}
+                  className="field tabular-nums"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-[#5f7368] mb-1">
+                {isBn ? 'টাইমজোন (Timezone)' : 'Timezone'}
+              </label>
+              <select className="field" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
+                <option value="Asia/Dhaka">Asia/Dhaka (বাংলাদেশ সময় +06:00)</option>
+                <option value="Asia/Kolkata">Asia/Kolkata (India +05:30)</option>
+                <option value="Asia/Riyadh">Asia/Riyadh (Saudi Arabia +03:00)</option>
+                <option value="Asia/Dubai">Asia/Dubai (UAE +04:00)</option>
+                <option value="UTC">UTC (+00:00)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-[#5f7368] mb-1">
+                {isBn
+                  ? 'লক করার সময় জুম্মা মুবারক ক্যাপশন ({{start}}, {{end}} ব্যবহার করা যাবে)'
+                  : 'Lock Notice Caption (supports {{start}}, {{end}})'}
+              </label>
+              <textarea
+                rows={4}
+                value={lockMessage}
+                onChange={(e) => setLockMessage(e.target.value)}
+                className="field text-[11.5px] leading-relaxed"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold text-[#5f7368] mb-1">
+                {isBn ? 'আনলক করার সময় ক্যাপশন' : 'Unlock Notice Caption'}
+              </label>
+              <textarea
+                rows={3}
+                value={unlockMessage}
+                onChange={(e) => setUnlockMessage(e.target.value)}
+                className="field text-[11.5px] leading-relaxed"
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  onSaveJummahSettings({
+                    jummahLockStart: start,
+                    jummahLockEnd: end,
+                    jummahModeTimezone: timezone,
+                    jummahLockMessage: lockMessage,
+                    jummahUnlockMessage: unlockMessage,
+                  })
+                }
+                className="btn primary flex-1 justify-center"
+              >
+                <Save size={12} /> {isBn ? 'সময় ও ক্যাপশন সেভ করুন' : 'Save Schedule & Captions'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const defLock = jummahStatus?.defaultLockMessage || DEFAULT_JUMMAH_LOCK_FALLBACK;
+                  const defUnlock = jummahStatus?.defaultUnlockMessage || DEFAULT_JUMMAH_UNLOCK_FALLBACK;
+                  setStart('13:00');
+                  setEnd('14:00');
+                  setTimezone('Asia/Dhaka');
+                  setLockMessage(defLock);
+                  setUnlockMessage(defUnlock);
+                  onSaveJummahSettings({
+                    jummahModeEnabled: true,
+                    jummahModeNotify: true,
+                    jummahLockStart: '13:00',
+                    jummahLockEnd: '14:00',
+                    jummahModeTimezone: 'Asia/Dhaka',
+                    jummahLockMessage: '',
+                    jummahUnlockMessage: '',
+                  });
+                }}
+                className="btn outline"
+                title={isBn ? 'ডিফল্ট ১:০০–২:০০ ও ক্যাপশন রিসেট' : 'Reset to default'}
+              >
+                <RotateCcw size={12} /> {isBn ? 'ডিফল্ট' : 'Reset'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="card space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-[13px] font-extrabold text-[#0f291e]">
+              {isBn ? 'লাইভ জুমা স্ট্যাটাস ও টেস্ট কন্ট্রোল' : 'Live Status & Manual Test'}
+            </h3>
+            <span className="text-[11px] font-mono font-bold text-[#087f55] tabular-nums">
+              {jummahStatus?.currentLocalTime || '--:--'}
+            </span>
+          </div>
+
+          <div className="policy-box space-y-1.5">
+            <div className="flex justify-between text-[11px]">
+              <span>{isBn ? 'আজকের বার:' : 'Local Day:'}</span>
+              <span className="font-bold">{weekdayLabel()}</span>
+            </div>
+            <div className="flex justify-between text-[11px]">
+              <span>{isBn ? 'অটো শিডিউল:' : 'Weekly Schedule:'}</span>
+              <span className="font-bold tabular-nums">
+                {isEnabled
+                  ? isBn
+                    ? `প্রতি শুক্রবার ${start} – ${end}`
+                    : `Every Friday ${start} – ${end}`
+                  : isBn
+                  ? 'বন্ধ আছে'
+                  : 'Disabled'}
+              </span>
+            </div>
+            <div className="flex justify-between text-[11px]">
+              <span>{isBn ? 'বর্তমান অবস্থা:' : 'Current Window:'}</span>
+              <span className="font-bold">
+                {jummahStatus?.isJummahWindowNow
+                  ? isBn
+                    ? 'জুমার নামাজ লক চলছে'
+                    : 'Jummah Lock Active'
+                  : isBn
+                  ? 'অপেক্ষায় (স্বাভাবিক সময়)'
+                  : 'Standby (Normal Hours)'}
+              </span>
+            </div>
+            <div className="flex justify-between text-[11px]">
+              <span>{isBn ? 'জুমা লকে থাকা গ্রুপ:' : 'Jummah-Locked Groups:'}</span>
+              <span className="font-extrabold tabular-nums">{jummahStatus?.lockedCount || 0}</span>
+            </div>
+          </div>
+
+          <div className="p-2.5 rounded-[12px] bg-emerald-50/70 border border-emerald-900/10 text-[11px] leading-relaxed text-[#1a4332]">
+            {isBn
+              ? '🛡️ অটো-আনলক নিশ্চয়তা: বট অ্যাডমিন থাকা সব গ্রুপ প্রতি শুক্রবার ঠিক সময়ে লক হবে এবং শেষ সময়ে (যেমন ২:০০ PM) অটো আনলক হবে। নেটওয়ার্ক সমস্যা বা রিস্টার্ট হলেও ১৫ সেকেন্ড পরপর রিট্রাই করে নিশ্চিত আনলক করবে।'
+              : 'Guaranteed auto-unlock: Every 15 seconds (and immediately upon WhatsApp reconnect), the scheduler retries unlocking any Jummah-locked groups once the Friday window ends.'}
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => onToggleNow(true)}
+              className="btn primary w-full justify-center"
+            >
+              <Lock size={12} /> {isBn ? 'এখনই জুমা লক টেস্ট' : 'Test Lock Now'}
+            </button>
+            <button
+              type="button"
+              onClick={() => onToggleNow(false)}
+              className="btn outline w-full justify-center"
+            >
+              <Unlock size={12} /> {isBn ? 'সব আনলক করুন' : 'Unlock All'}
+            </button>
+          </div>
+
+          {jummahStatus && jummahStatus.lockedGroups.length > 0 && (
+            <div className="pt-2 border-t border-emerald-950/[0.06] space-y-1.5">
+              <span className="text-[10.5px] font-bold text-[#5f7368]">
+                {isBn ? 'বর্তমানে জুমা লক করা গ্রুপসমূহ:' : 'Currently Jummah-Locked:'}
+              </span>
+              {jummahStatus.lockedGroups.map((g) => (
+                <div key={g.groupId} className="p-2 rounded-[10px] bg-[#f4f8f5] text-[#0f291e] text-[11px] font-bold flex justify-between gap-2">
+                  <span className="truncate">
+                    {g.groupName} {g.isManual ? (isBn ? '(টেস্ট)' : '(Manual)') : ''}
+                  </span>
                   <span className="text-[10px] font-mono tabular-nums shrink-0 text-[#5f7368]">
                     {new Date(g.lockedAt).toLocaleTimeString()}
                   </span>

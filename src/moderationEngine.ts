@@ -77,6 +77,14 @@ export interface ModerationSettings {
   nightLockEnd: string;
   nightModeTimezone: string;
   nightModeNotify: boolean;
+  // Feature 2b: Automatic Friday Jummah Namaz Group Lock & Unlock
+  jummahModeEnabled?: boolean;
+  jummahLockStart?: string;
+  jummahLockEnd?: string;
+  jummahModeTimezone?: string;
+  jummahModeNotify?: boolean;
+  jummahLockMessage?: string;
+  jummahUnlockMessage?: string;
   // Feature 3: Anti-Call Protection
   antiCallEnabled: boolean;
   antiCallMessage: string;
@@ -231,6 +239,7 @@ export interface ModerationDB {
   warnings: Record<string, UserWarning>; // key: `${groupId}:${senderJid}`
   groupLocks: Record<string, GroupLock>; // key: groupId
   nightLockedGroups: Record<string, { groupName: string; lockedAt: number }>;
+  jummahLockedGroups?: Record<string, { groupName: string; lockedAt: number; isManual?: boolean; unlockFailures?: number }>;
   restrictedUsers: Record<string, RestrictedUser>; // key: `${groupId}:${normalizeJid(senderJid)}`
   callLogs: CallLogItem[];
   callCounts: Record<string, number>;
@@ -274,6 +283,13 @@ const DEFAULT_SETTINGS: ModerationSettings = {
   nightLockEnd: '06:00',
   nightModeTimezone: 'Asia/Dhaka',
   nightModeNotify: false,
+  jummahModeEnabled: true,
+  jummahLockStart: '13:00',
+  jummahLockEnd: '14:00',
+  jummahModeTimezone: 'Asia/Dhaka',
+  jummahModeNotify: true,
+  jummahLockMessage: '',
+  jummahUnlockMessage: '',
   antiCallEnabled: true,
   antiCallMessage: '📵 দুঃখিত! এটি একটি অটোমেটেড WhatsApp সিকিউরিটি বট। অনুগ্রহ করে কল না করে মেসেজ পাঠান।',
   antiCallAutoBlockCount: 3,
@@ -357,6 +373,7 @@ let db: ModerationDB = {
   warnings: {},
   groupLocks: {},
   nightLockedGroups: {},
+  jummahLockedGroups: {},
   restrictedUsers: {},
   callLogs: [],
   callCounts: {},
@@ -489,6 +506,7 @@ export function loadDatabase() {
         warnings: data.warnings || {},
         groupLocks: data.groupLocks || {},
         nightLockedGroups: data.nightLockedGroups || {},
+        jummahLockedGroups: data.jummahLockedGroups || {},
         restrictedUsers: data.restrictedUsers || {},
         callLogs: Array.isArray(data.callLogs) ? data.callLogs.slice(-80) : [],
         callCounts: data.callCounts || {},
@@ -3471,6 +3489,7 @@ async function executeServerAdminGroupCommand(
     await sock.groupSettingUpdate(groupId, 'not_announcement');
     delete db.groupLocks[groupId];
     delete db.nightLockedGroups[groupId];
+    if (db.jummahLockedGroups) delete db.jummahLockedGroups[groupId];
     saveDatabase();
     addActivityLog({
       groupId,
@@ -5858,6 +5877,281 @@ export function startNightModeScheduler(sockGetter: () => WASocket | null) {
       nightModeBusy = false;
     }
   }, 30000);
+}
+
+// -------------------------------------------------------------
+// FEATURE 2b: AUTOMATIC FRIDAY JUMMAH NAMAZ GROUP LOCK & UNLOCK
+// -------------------------------------------------------------
+export const DEFAULT_JUMMAH_LOCK_CAPTION =
+  `🕌 *জুম্মা মুবারক — পবিত্র জুমার নামাজের বিরতি* 🤲\n\n` +
+  `আসসালামু আলাইকুম ওয়া রাহমাতুল্লাহ!\n` +
+  `পবিত্র জুমার নামাজ আদায়ের জন্য {{start}} থেকে {{end}} পর্যন্ত গ্রুপটি সাময়িকভাবে লক করা হয়েছে।\n\n` +
+  `📿 আসুন আমরা সবাই পবিত্র জুমার নামাজ আদায় করি, বেশি বেশি দরুদ শরিফ পাঠ করি এবং সবার জন্য দোয়া করি।\n\n` +
+  `⏰ {{end}}-এ গ্রুপটি স্বয়ংক্রিয়ভাবে সবার জন্য খুলে দেওয়া হবে। জাযাকাল্লাহু খাইরান! 🌸`;
+
+export const DEFAULT_JUMMAH_UNLOCK_CAPTION =
+  `🕌 *জুম্মা মুবারক — নামাজের বিরতি সমাপ্ত* 🌸\n\n` +
+  `আলহামদুলিল্লাহ! পবিত্র জুমার নামাজের নির্ধারিত সময় শেষ হওয়ায় গ্রুপটি আবার সকল সদস্যের জন্য উন্মুক্ত (Unlock) করা হলো।\n\n` +
+  `💬 এখন সবাই নিয়ম মেনে স্বাভাবিকভাবে মেসেজ করতে পারবেন। জুম্মা মুবারক! ✨`;
+
+function formatTime12hForCaption(hhmm: string): string {
+  const match = String(hhmm || '').match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return hhmm || '1:00 PM';
+  const h24 = Math.min(23, Math.max(0, parseInt(match[1], 10)));
+  const m = match[2];
+  const period = h24 >= 12 ? 'PM' : 'AM';
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${h12}:${m} ${period}`;
+}
+
+function getLocalDayAndTime(timeZone: string = 'Asia/Dhaka'): {
+  weekday: string;
+  isFriday: boolean;
+  hhmm: string;
+} {
+  const tz = timeZone || 'Asia/Dhaka';
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(new Date());
+    const weekday = parts.find((p) => p.type === 'weekday')?.value || '';
+    const hRaw = parts.find((p) => p.type === 'hour')?.value || '00';
+    const mRaw = parts.find((p) => p.type === 'minute')?.value || '00';
+    const hhmm = `${hRaw === '24' ? '00' : hRaw.padStart(2, '0')}:${mRaw.padStart(2, '0')}`;
+    return {
+      weekday,
+      isFriday: weekday.toLowerCase().startsWith('fri'),
+      hhmm,
+    };
+  } catch {
+    const d = new Date();
+    const weekday = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()] || '';
+    const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    return {
+      weekday,
+      isFriday: d.getDay() === 5,
+      hhmm,
+    };
+  }
+}
+
+export function isWithinJummahWindow(nowHHMM: string, startHHMM: string, endHHMM: string): boolean {
+  const nowMin = parseTimeToMinutes(nowHHMM);
+  const startMin = parseTimeToMinutes(startHHMM || '13:00');
+  const endMin = parseTimeToMinutes(endHHMM || '14:00');
+  if (startMin === endMin) return false;
+  if (startMin < endMin) {
+    return nowMin >= startMin && nowMin < endMin;
+  }
+  return nowMin >= startMin || nowMin < endMin;
+}
+
+export function getJummahModeStatus() {
+  const settings = getSettings();
+  const tz = settings.jummahModeTimezone || 'Asia/Dhaka';
+  const start = settings.jummahLockStart || '13:00';
+  const end = settings.jummahLockEnd || '14:00';
+  const local = getLocalDayAndTime(tz);
+  const enabled = settings.jummahModeEnabled !== false;
+  const inWindow = local.isFriday && isWithinJummahWindow(local.hhmm, start, end);
+  const lockedGroups = Object.entries(db.jummahLockedGroups || {}).map(([groupId, info]) => ({
+    groupId,
+    groupName: info.groupName,
+    lockedAt: info.lockedAt,
+    isManual: Boolean(info.isManual),
+  }));
+
+  return {
+    enabled,
+    start,
+    end,
+    timezone: tz,
+    notify: settings.jummahModeNotify !== false,
+    currentLocalTime: local.hhmm,
+    currentWeekday: local.weekday,
+    isFridayNow: local.isFriday,
+    isJummahWindowNow: Boolean(enabled && inWindow),
+    lockedCount: lockedGroups.length,
+    lockedGroups,
+    defaultLockMessage: DEFAULT_JUMMAH_LOCK_CAPTION,
+    defaultUnlockMessage: DEFAULT_JUMMAH_UNLOCK_CAPTION,
+  };
+}
+
+export async function applyJummahMode(
+  sock: WASocket | null,
+  lock: boolean,
+  opts?: { isManual?: boolean; includeManualOnUnlock?: boolean }
+): Promise<{ affected: number }> {
+  if (!sock || !sock.authState?.creds?.registered) {
+    return { affected: 0 };
+  }
+  if (!db.jummahLockedGroups) {
+    db.jummahLockedGroups = {};
+  }
+  await resolveBotIdentitySet(sock).catch(() => {});
+  const settings = getSettings();
+  const startLabel = formatTime12hForCaption(settings.jummahLockStart || '13:00');
+  const endLabel = formatTime12hForCaption(settings.jummahLockEnd || '14:00');
+  const shouldNotify = settings.jummahModeNotify !== false;
+  let affected = 0;
+
+  if (lock) {
+    const groups = await sock.groupFetchAllParticipating().catch(() => ({} as Record<string, any>));
+    primeGroupMetaCache(groups);
+
+    const rawLockTemplate = (settings.jummahLockMessage || '').trim() || DEFAULT_JUMMAH_LOCK_CAPTION;
+    const lockText = rawLockTemplate
+      .replace(/\{\{?start\}?\}/gi, startLabel)
+      .replace(/\{\{?end\}?\}/gi, endLabel);
+
+    for (const [groupId, meta] of Object.entries(groups)) {
+      if (!groupId || !groupId.endsWith('@g.us')) continue;
+      if (!isBotGroupAdminFromMeta(sock, meta)) continue;
+      if (db.jummahLockedGroups[groupId]) continue;
+
+      // Do not hijack groups already locked by Night Mode, temporary violation locks, or another admin
+      if (db.nightLockedGroups?.[groupId] || db.groupLocks?.[groupId] || meta?.announce) {
+        continue;
+      }
+
+      try {
+        await sock.groupSettingUpdate(groupId, 'announcement');
+        db.jummahLockedGroups[groupId] = {
+          groupName: meta.subject || 'WhatsApp Group',
+          lockedAt: Date.now(),
+          isManual: Boolean(opts?.isManual),
+          unlockFailures: 0,
+        };
+        affected++;
+        if (shouldNotify) {
+          await safeSendMessage(sock, groupId, { text: lockText }).catch(() => {});
+        }
+        addActivityLog({
+          groupId,
+          groupName: meta.subject || 'WhatsApp Group',
+          senderJid: 'SYSTEM',
+          senderPhone: 'JUMMAH-MODE',
+          action: 'locked',
+          reason: opts?.isManual
+            ? 'জুমার নামাজ মোড (ম্যানুয়াল টেস্ট): গ্রুপ লক করা হয়েছে'
+            : `প্রতি শুক্রবার জুমার নামাজ মোড (${startLabel} – ${endLabel}): গ্রুপ অটো লক করা হয়েছে`,
+        });
+      } catch (err: any) {
+        console.warn(`[Jummah Mode Lock Failed] ${groupId}:`, err?.message || err);
+      }
+    }
+    saveDatabase();
+  } else {
+    const rawUnlockTemplate = (settings.jummahUnlockMessage || '').trim() || DEFAULT_JUMMAH_UNLOCK_CAPTION;
+    const unlockText = rawUnlockTemplate
+      .replace(/\{\{?start\}?\}/gi, startLabel)
+      .replace(/\{\{?end\}?\}/gi, endLabel);
+
+    const entries = Object.entries(db.jummahLockedGroups || {});
+    let dirty = false;
+
+    for (const [groupId, info] of entries) {
+      if (!opts?.includeManualOnUnlock && info?.isManual) {
+        continue;
+      }
+      try {
+        await sock.groupSettingUpdate(groupId, 'not_announcement');
+        delete db.jummahLockedGroups[groupId];
+        dirty = true;
+        affected++;
+
+        if (shouldNotify) {
+          await safeSendMessage(sock, groupId, { text: unlockText }).catch(() => {});
+        }
+        addActivityLog({
+          groupId,
+          groupName: info?.groupName || 'WhatsApp Group',
+          senderJid: 'SYSTEM',
+          senderPhone: 'JUMMAH-MODE',
+          action: 'unlocked',
+          reason: opts?.isManual
+            ? 'জুমার নামাজ মোড: ম্যানুয়ালি গ্রুপ আনলক করা হয়েছে'
+            : 'জুমার নামাজ সময় শেষ: গ্রুপ স্বয়ংক্রিয়ভাবে সবার জন্য আনলক করা হয়েছে',
+        });
+      } catch (err: any) {
+        const errMsg = String(err?.message || err || '');
+        console.warn(`[Jummah Mode Unlock Retry Needed] ${groupId}:`, errMsg);
+
+        // Verify whether the group is already unlocked or bot is no longer an admin/member
+        let shouldDrop = false;
+        try {
+          const freshMeta = await getGroupMeta(sock, groupId, true);
+          if (!freshMeta || !freshMeta.announce || !isBotGroupAdminFromMeta(sock, freshMeta)) {
+            shouldDrop = true;
+          }
+        } catch (metaErr: any) {
+          const mMsg = String(metaErr?.message || metaErr || '');
+          if (/not-authorized|item-not-found|forbidden|403|404/i.test(mMsg)) {
+            shouldDrop = true;
+          }
+        }
+
+        const nextFailures = Number(info?.unlockFailures || 0) + 1;
+        if (shouldDrop || nextFailures >= 12) {
+          delete db.jummahLockedGroups[groupId];
+        } else {
+          db.jummahLockedGroups[groupId] = {
+            ...info,
+            unlockFailures: nextFailures,
+          };
+        }
+        dirty = true;
+      }
+    }
+
+    if (dirty) {
+      saveDatabase();
+    }
+  }
+
+  return { affected };
+}
+
+let jummahModeBusy = false;
+export async function runJummahModeTick(sock: WASocket | null | undefined) {
+  if (jummahModeBusy) return;
+  if (!sock || !sock.authState?.creds?.registered) return;
+
+  const settings = getSettings();
+  const enabled = settings.jummahModeEnabled !== false;
+  const tz = settings.jummahModeTimezone || 'Asia/Dhaka';
+  const start = settings.jummahLockStart || '13:00';
+  const end = settings.jummahLockEnd || '14:00';
+  const local = getLocalDayAndTime(tz);
+  const shouldBeLocked = enabled && local.isFriday && isWithinJummahWindow(local.hhmm, start, end);
+
+  jummahModeBusy = true;
+  try {
+    if (shouldBeLocked) {
+      await applyJummahMode(sock, true, { isManual: false });
+    } else {
+      const hasAutoLocked = Object.values(db.jummahLockedGroups || {}).some((entry) => !entry?.isManual);
+      if (hasAutoLocked) {
+        await applyJummahMode(sock, false, { includeManualOnUnlock: false });
+      }
+    }
+  } catch (err: any) {
+    console.warn('[Jummah Mode Scheduler Error]:', err?.message || err);
+  } finally {
+    jummahModeBusy = false;
+  }
+}
+
+export function startJummahModeScheduler(sockGetter: () => WASocket | null) {
+  setInterval(() => {
+    void runJummahModeTick(sockGetter());
+  }, 15000);
 }
 
 // -------------------------------------------------------------

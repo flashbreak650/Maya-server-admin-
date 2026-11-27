@@ -62,6 +62,7 @@ import {
   Inbox,
   AudioLines,
   Wifi,
+  Calendar,
 } from 'lucide-react';
 import { HELP_ITEMS } from './helpData.ts';
 import { HelpModal } from './components/HelpModal.tsx';
@@ -71,6 +72,7 @@ import {
   CallLogViewItem,
   MemberActivityViewItem,
   NightModeStatusView,
+  JummahModeStatusView,
   GroupMemberDirectoryViewItem,
   CompanionStatusView,
   AdminLockScreen,
@@ -80,6 +82,7 @@ import {
   MemberBlockPage,
   LogsPage,
   NightModePage,
+  JummahModePage,
   AntiCallPage,
   AiVisionPage,
   ActivityRankPage,
@@ -189,6 +192,13 @@ interface ModerationSettings {
   nightLockEnd?: string;
   nightModeTimezone?: string;
   nightModeNotify?: boolean;
+  jummahModeEnabled?: boolean;
+  jummahLockStart?: string;
+  jummahLockEnd?: string;
+  jummahModeTimezone?: string;
+  jummahModeNotify?: boolean;
+  jummahLockMessage?: string;
+  jummahUnlockMessage?: string;
   antiCallEnabled?: boolean;
   antiCallMessage?: string;
   antiCallAutoBlockCount?: number;
@@ -579,6 +589,13 @@ export default function App() {
     nightLockEnd: '06:00',
     nightModeTimezone: 'Asia/Dhaka',
     nightModeNotify: true,
+    jummahModeEnabled: true,
+    jummahLockStart: '13:00',
+    jummahLockEnd: '14:00',
+    jummahModeTimezone: 'Asia/Dhaka',
+    jummahModeNotify: true,
+    jummahLockMessage: '',
+    jummahUnlockMessage: '',
     antiCallEnabled: false,
     antiCallMessage: '📵 দুঃখিত! এটি একটি অটোমেটেড WhatsApp সিকিউরিটি বট। অনুগ্রহ করে কল না করে মেসেজ পাঠান।',
     antiCallAutoBlockCount: 3,
@@ -664,6 +681,7 @@ export default function App() {
   const isPinLockedRef = useRef(false);
 
   const [nightStatus, setNightStatus] = useState<NightModeStatusView | null>(null);
+  const [jummahStatus, setJummahStatus] = useState<JummahModeStatusView | null>(null);
   const [callLogs, setCallLogs] = useState<CallLogViewItem[]>([]);
   const [keywords, setKeywords] = useState<KeywordTriggerItem[]>([]);
   const [activityReport, setActivityReport] = useState<{
@@ -1045,6 +1063,7 @@ export default function App() {
         loadGroups().catch(() => {}),
         loadCompanionStatus().catch(() => {}),
         loadNightMode().catch(() => {}),
+        loadJummahMode().catch(() => {}),
         loadCalls().catch(() => {}),
         loadKeywords().catch(() => {}),
         loadStorageOverview().catch(() => {}),
@@ -1250,6 +1269,43 @@ export default function App() {
       );
     } catch (err: any) {
       showNotification((isBn ? 'নাইট লক ব্যর্থ: ' : 'Night toggle failed: ') + err.message);
+    }
+  };
+
+  const loadJummahMode = async () => {
+    try {
+      const res = await callApi('/api/moderation/jummah-mode');
+      if (res?.status) setJummahStatus(res.status);
+    } catch {}
+  };
+
+  const handleSaveJummahSettings = async (patch: any) => {
+    try {
+      const res = await callApi('/api/moderation/settings', 'POST', patch);
+      if (res?.settings) setSettings(res.settings);
+      await loadJummahMode();
+      showNotification(isBn ? 'জুমার নামাজ অটো লক সেটিংস সেভ হয়েছে!' : 'Jummah Mode settings saved!');
+    } catch (err: any) {
+      showNotification((isBn ? 'সেভ ব্যর্থ: ' : 'Save failed: ') + err.message);
+    }
+  };
+
+  const handleToggleJummahNow = async (lock: boolean) => {
+    try {
+      const res = await callApi('/api/moderation/jummah-mode/toggle-now', 'POST', { lock });
+      if (res?.status) setJummahStatus(res.status);
+      showNotification(
+        res?.message ||
+          (lock
+            ? isBn
+              ? `${res?.affected || 0}টি গ্রুপ জুমা মোডে লক করা হয়েছে`
+              : `${res?.affected || 0} groups locked`
+            : isBn
+            ? `${res?.affected || 0}টি গ্রুপ আনলক করা হয়েছে`
+            : `${res?.affected || 0} groups unlocked`)
+      );
+    } catch (err: any) {
+      showNotification((isBn ? 'জুমা লক অ্যাকশন ব্যর্থ: ' : 'Jummah toggle failed: ') + err.message);
     }
   };
 
@@ -1627,6 +1683,7 @@ export default function App() {
     else if (page === 'security' || page.startsWith('sec_') || page === 'warnings' || page === 'blocks' || page === 'logs') loadModerationData();
     else if (page === 'memberblock') loadGroupMembers();
     else if (page === 'nightmode') loadNightMode();
+    else if (page === 'jummahmode') loadJummahMode();
     else if (page === 'anticall') loadCalls();
     else if (page === 'activity') loadActivityRank();
     else if (page === 'keywords') loadKeywords();
@@ -2597,6 +2654,9 @@ export default function App() {
           <button className={`nav ${activePage === 'nightmode' ? 'active' : ''}`} onClick={() => navigateToPage('nightmode')}>
             <Moon size={15} /> {isBn ? 'নাইট মোড' : 'Night Mode'}
           </button>
+          <button className={`nav ${activePage === 'jummahmode' ? 'active' : ''}`} onClick={() => navigateToPage('jummahmode')}>
+            <Calendar size={15} /> {isBn ? 'জুমার নামাজ লক' : 'Jummah Lock'}
+          </button>
           <button className={`nav ${activePage === 'anticall' ? 'active' : ''}`} onClick={() => navigateToPage('anticall')}>
             <PhoneOff size={15} /> {isBn ? 'অ্যান্টি-কল' : 'Anti-Call'}
           </button>
@@ -2841,6 +2901,7 @@ export default function App() {
                 callsCount={callLogs.length}
                 keywordsCount={keywords.length}
                 nightStatus={nightStatus}
+                jummahStatus={jummahStatus}
                 isConnected={liveStatus.online}
                 companionOnline={companionStatus.online}
                 storageUsedPercent={storageOverview?.snapshot?.disk?.usedPercent}
@@ -2966,6 +3027,18 @@ export default function App() {
               onRefresh={loadNightMode}
               onSaveNightSettings={handleSaveNightSettings}
               onToggleNow={handleToggleNightNow}
+            />
+          )}
+
+          {activePage === 'jummahmode' && (
+            <JummahModePage
+              isBn={isBn}
+              settings={settings}
+              jummahStatus={jummahStatus}
+              onBack={() => navigateToPage('home')}
+              onRefresh={loadJummahMode}
+              onSaveJummahSettings={handleSaveJummahSettings}
+              onToggleNow={handleToggleJummahNow}
             />
           )}
 

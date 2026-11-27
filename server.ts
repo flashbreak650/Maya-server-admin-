@@ -47,6 +47,10 @@ import {
   unrestrictUser,
   getNightModeStatus,
   applyNightModeManually,
+  getJummahModeStatus,
+  applyJummahMode,
+  runJummahModeTick,
+  startJummahModeScheduler,
   getCallLogs,
   clearCallLogs,
   resetCallCounts,
@@ -902,6 +906,7 @@ function setupSocketEvents(sock: WASocket, socketToken: number) {
           }
 
           await flushPendingServerNotices(sock);
+          void runJummahModeTick(sock).catch(() => {});
         } catch {
           // non-blocking
         }
@@ -2329,6 +2334,31 @@ app.post('/api/moderation/night-mode/toggle-now', async (req: Request, res: Resp
   }
 });
 
+// Feature 2b: Friday Jummah Namaz Auto Lock & Unlock
+app.get('/api/moderation/jummah-mode', (_req: Request, res: Response) => {
+  res.json({ success: true, status: getJummahModeStatus() });
+});
+
+app.post('/api/moderation/jummah-mode/toggle-now', async (req: Request, res: Response) => {
+  try {
+    const lock = Boolean(req.body?.lock);
+    const result = await applyJummahMode(currentSock, lock, {
+      isManual: lock,
+      includeManualOnUnlock: true,
+    });
+    res.json({
+      success: true,
+      affected: result.affected,
+      status: getJummahModeStatus(),
+      message: lock
+        ? `${result.affected}টি গ্রুপে জুমার নামাজ লক ও মোবারক নোটিশ পাঠানো হয়েছে!`
+        : `${result.affected}টি গ্রুপ জুমার লক থেকে সবার জন্য আনলক করা হয়েছে!`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Feature 3: Anti-Call Logs & Reset
 app.get('/api/moderation/calls', (_req: Request, res: Response) => {
   res.json({ success: true, calls: getCallLogs(60) });
@@ -3361,6 +3391,7 @@ async function startServer() {
     startRestrictedUsersMonitor(() => currentSock);
     startGroupLockMonitor(() => currentSock);
     startNightModeScheduler(() => currentSock);
+    startJummahModeScheduler(() => currentSock);
     initStickerQueue(() => currentSock);
     startServerHealthMonitor(() => currentSock);
     startCleanupScheduler(() => currentSock);
