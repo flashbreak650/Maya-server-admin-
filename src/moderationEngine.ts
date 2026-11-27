@@ -2316,16 +2316,68 @@ export function normalizeJid(jid: string): string {
 
 const typingWait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const MENTION_ALL_TOKEN_RE = /@?\{\{\s*(সবাই|everyone|all)\s*\}\}|@(সবাই|everyone|all)(?=$|[\s,!?.।])/iu;
+
+async function resolveMentionAllInGroupContent(
+  sock: WASocket,
+  jid: string,
+  content: any
+): Promise<any> {
+  if (!jid || !jid.endsWith('@g.us') || !content || content?.delete) return content;
+  const hasText = typeof content.text === 'string';
+  const hasCaption = !hasText && typeof content.caption === 'string';
+  if (!hasText && !hasCaption) return content;
+
+  const rawText = hasText ? content.text : content.caption;
+  if (!MENTION_ALL_TOKEN_RE.test(rawText)) return content;
+
+  const updatedText = rawText
+    .replace(/@?\{\{\s*সবাই\s*\}\}/giu, '@সবাই')
+    .replace(/@?\{\{\s*(?:everyone|all)\s*\}\}/giu, '@Everyone');
+
+  let mergedMentions: string[] = Array.isArray(content.mentions) ? [...content.mentions] : [];
+  try {
+    let meta = await getGroupMeta(sock, jid, false).catch(() => null);
+    if (!meta || !Array.isArray(meta.participants) || meta.participants.length === 0) {
+      meta = await getGroupMeta(sock, jid, true).catch(() => null);
+    }
+    const participants: any[] = Array.isArray(meta?.participants) ? meta.participants : [];
+    if (participants.length > 0) {
+      const { botUsers } = await resolveBotIdentitySet(sock).catch(() => ({
+        botUsers: new Set<string>(),
+      }));
+      const seen = new Set<string>(mergedMentions);
+      for (const p of participants) {
+        const pJid = normalizeJid(p?.id || p?.jid || '');
+        if (!pJid || botUsers.has(cleanJidUser(pJid))) continue;
+        if (!seen.has(pJid)) {
+          seen.add(pJid);
+          mergedMentions.push(pJid);
+        }
+      }
+    }
+  } catch {
+    // Non-fatal: still send cleaned text cleanly
+  }
+
+  return {
+    ...content,
+    ...(hasText ? { text: updatedText } : { caption: updatedText }),
+    ...(mergedMentions.length > 0 ? { mentions: mergedMentions } : {}),
+  };
+}
+
 export async function safeSendMessage(
   sock: WASocket,
   jid: string,
   content: any,
   options?: any
 ): Promise<boolean> {
+  const preparedContent = await resolveMentionAllInGroupContent(sock, jid, content).catch(() => content);
   const settings = getSettings();
   const shouldShowTyping =
     settings.botTypingEnabled !== false &&
-    !content?.delete &&
+    !preparedContent?.delete &&
     !options?.skipTyping &&
     Boolean(sock?.user) &&
     Boolean((sock as any)?.ws?.isOpen ?? true);
@@ -2334,7 +2386,7 @@ export async function safeSendMessage(
     if (shouldShowTyping) {
       try {
         await sock.sendPresenceUpdate('composing', jid);
-        const textSample = String(content?.text || content?.caption || '');
+        const textSample = String(preparedContent?.text || preparedContent?.caption || '');
         const typingDelayMs = Math.min(1250, Math.max(450, Math.round(textSample.length * 10)));
         await typingWait(typingDelayMs);
       } catch {
@@ -2342,10 +2394,10 @@ export async function safeSendMessage(
       }
     }
 
-    const sentMsg = await sock.sendMessage(jid, content, options);
+    const sentMsg = await sock.sendMessage(jid, preparedContent, options);
 
-    if (jid.endsWith('@g.us') && !content?.delete) {
-      const outText = String(content?.text || content?.caption || '').trim();
+    if (jid.endsWith('@g.us') && !preparedContent?.delete) {
+      const outText = String(preparedContent?.text || preparedContent?.caption || '').trim();
       if (outText) {
         captureBotOutgoingGroupMessage({
           groupId: jid,
@@ -5884,14 +5936,14 @@ export function startNightModeScheduler(sockGetter: () => WASocket | null) {
 // -------------------------------------------------------------
 export const DEFAULT_JUMMAH_LOCK_CAPTION =
   `🕌 *জুম্মা মুবারক — পবিত্র জুমার নামাজের বিরতি* 🤲\n\n` +
-  `আসসালামু আলাইকুম ওয়া রাহমাতুল্লাহ!\n` +
+  `আসসালামু আলাইকুম ওয়া রাহমাতুল্লাহ! @{{সবাই}}\n` +
   `পবিত্র জুমার নামাজ আদায়ের জন্য {{start}} থেকে {{end}} পর্যন্ত গ্রুপটি সাময়িকভাবে লক করা হয়েছে।\n\n` +
   `📿 আসুন আমরা সবাই পবিত্র জুমার নামাজ আদায় করি, বেশি বেশি দরুদ শরিফ পাঠ করি এবং সবার জন্য দোয়া করি।\n\n` +
   `⏰ {{end}}-এ গ্রুপটি স্বয়ংক্রিয়ভাবে সবার জন্য খুলে দেওয়া হবে। জাযাকাল্লাহু খাইরান! 🌸`;
 
 export const DEFAULT_JUMMAH_UNLOCK_CAPTION =
   `🕌 *জুম্মা মুবারক — নামাজের বিরতি সমাপ্ত* 🌸\n\n` +
-  `আলহামদুলিল্লাহ! পবিত্র জুমার নামাজের নির্ধারিত সময় শেষ হওয়ায় গ্রুপটি আবার সকল সদস্যের জন্য উন্মুক্ত (Unlock) করা হলো।\n\n` +
+  `আলহামদুলিল্লাহ! @{{সবাই}} পবিত্র জুমার নামাজের নির্ধারিত সময় শেষ হওয়ায় গ্রুপটি আবার সকল সদস্যের জন্য উন্মুক্ত (Unlock) করা হলো।\n\n` +
   `💬 এখন সবাই নিয়ম মেনে স্বাভাবিকভাবে মেসেজ করতে পারবেন। জুম্মা মুবারক! ✨`;
 
 function formatTime12hForCaption(hhmm: string): string {
