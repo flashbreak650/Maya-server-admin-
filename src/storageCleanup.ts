@@ -21,7 +21,11 @@ import {
   VOICE_TEMP_AUDIO_DIR,
   isPersistentVolumeConfigured,
 } from './storagePaths.ts';
-import { enforceInboxMediaStorageLimit, trimNonImportantInboxMessagesForSpace } from './inboxStore.ts';
+import {
+  enforceInboxMediaStorageLimit,
+  getInboxReclaimableMediaBytesSync,
+  trimNonImportantInboxMessagesForSpace,
+} from './inboxStore.ts';
 import {
   clearAllModerationHistories,
   pruneExpiredModerationHistories,
@@ -697,7 +701,7 @@ export async function getStorageUsageSnapshot(): Promise<StorageUsageSnapshot> {
 
   const effectiveRetentionDays =
     isContainerOverlay && freeBytes < 25 * 1024 * 1024
-      ? Math.min(2, cleanupState.settings.debugLogRetentionDays || 7)
+      ? 1
       : cleanupState.settings.debugLogRetentionDays || 7;
   const retentionMs = Math.max(1, effectiveRetentionDays) * ONE_DAY_MS;
   const logCutoff = Date.now() - retentionMs;
@@ -712,11 +716,11 @@ export async function getStorageUsageSnapshot(): Promise<StorageUsageSnapshot> {
     }
   }
 
-  // Also scan stale .tmp files inside DATA_DIR (top + non-session subdirs) so reclaimable calculation is accurate
+  // Also scan stale .tmp files inside DATA_DIR so reclaimable calculation matches actual cleanup
   let staleTmpBytes = 0;
   try {
-    const dataFiles = await scanDirectoryFilesSafe(DATA_DIR, 2);
-    const tmpCutoff = Date.now() - 120 * 1000;
+    const dataFiles = await scanDirectoryFilesSafe(DATA_DIR, 0);
+    const tmpCutoff = Date.now() - 10 * 1000;
     for (const df of dataFiles) {
       if (df.filePath.endsWith('.tmp') && df.mtimeMs < tmpCutoff && !isProtectedPath(df.filePath)) {
         staleTmpBytes += df.size;
@@ -754,16 +758,16 @@ export async function getStorageUsageSnapshot(): Promise<StorageUsageSnapshot> {
   const cleanableCacheBytes = cacheStat.bytes;
   const tempFilesBytes = osCacheBytes + staleTmpBytes;
   const tempMediaBytes = tempMediaStat.bytes + osTempMediaStat.bytes + voiceTempStat.bytes;
-  const inboxMediaKeepFloor = isContainerOverlay || freeBytes < 50 * 1024 * 1024 ? 2 * 1024 * 1024 : 15 * 1024 * 1024;
-  const pruneableInboxMediaBytes = Math.max(0, inboxMediaStat.bytes - inboxMediaKeepFloor);
-  const pruneableArchiveBytes = isContainerOverlay && freeBytes < 25 * 1024 * 1024 ? archiveStat.bytes : 0;
+  const inboxMediaKeepFloor = isContainerOverlay || freeBytes < 50 * 1024 * 1024 ? 0 : 15 * 1024 * 1024;
+  const inboxReclaim = getInboxReclaimableMediaBytesSync(inboxMediaKeepFloor, true);
+  const pruneableInboxMediaBytes = inboxReclaim.reclaimableBytes;
+  const pruneableArchiveBytes = isContainerOverlay || freeBytes < 25 * 1024 * 1024 ? archiveStat.bytes : 0;
   const totalReclaimableBytes =
     cleanableCacheBytes +
     tempFilesBytes +
     tempMediaBytes +
     archivableDebugLogsBytes +
     pruneableArchiveBytes +
-    dupScan.reclaimableBytes +
     pruneableInboxMediaBytes;
 
   return {
@@ -897,9 +901,14 @@ async function cleanOrphanedTmpAndProjectLeftovers(verifiedDirectories: string[]
   // 1) App-owned temp artifacts in os.tmpdir()
   const ownedTmp = await scanOwnedOsTempFiles();
   verifiedDirectories.push('os_tmp:waguard');
+  const aggressiveTmp = minTmpAgeMs <= 10 * 1000;
   for (let i = 0; i < ownedTmp.length; i++) {
     if (i > 0 && i % YIELD_BATCH_SIZE === 0) await yieldToEventLoop();
-    const minAge = ownedTmp[i].filePath.includes(`${path.sep}waguard_`) ? Math.min(minTmpAgeMs, IN_USE_SAFETY_WINDOW_MS) : 2 * 60 * 60 * 1000;
+    const minAge = aggressiveTmp
+      ? Math.max(0, minTmpAgeMs)
+      : ownedTmp[i].filePath.includes(`${path.sep}waguard_`)
+        ? Math.min(minTmpAgeMs, IN_USE_SAFETY_WINDOW_MS)
+        : 2 * 60 * 60 * 1000;
     const res = await safeDeleteFileIfAllowed(ownedTmp[i].filePath, minAge);
     if (res.deleted) {
       filesDeleted++;
@@ -911,16 +920,20 @@ async function cleanOrphanedTmpAndProjectLeftovers(verifiedDirectories: string[]
 
   // 2) Stale .tmp files across DATA_DIR (including group_inbox, logs, temp_media) — strictly skipping live WhatsApp session keys
   try {
-    const dataFiles = await scanDirectoryFilesSafe(DATA_DIR, 2);
+    const dataFiles = await scanDirectoryFilesSafe(DATA_DIR, 0);
     for (let i = 0; i < dataFiles.length; i++) {
       if (i > 0 && i % YIELD_BATCH_SIZE === 0) await yieldToEventLoop();
       const fp = dataFiles[i].filePath;
       if (!fp.endsWith('.tmp')) continue;
-      if (fp.startsWith(path.resolve(PRIMARY_SESSIONS_DIR) + path.sep) || fp.startsWith(path.resolve(COMPANION_SESSIONS_DIR) + path.sep)) {
+      if (
+        isProtectedPath(fp) ||
+        fp.startsWith(path.resolve(PRIMARY_SESSIONS_DIR) + path.sep) ||
+        fp.startsWith(path.resolve(COMPANION_SESSIONS_DIR) + path.sep)
+      ) {
         protectedSkipped++;
         continue;
       }
-      // Always clean stale DB/JSON .tmp leftovers older than minTmpAgeMs
+      // Clean stale .tmp leftovers older than minTmpAgeMs
       try {
         const st = await fs.promises.lstat(fp);
         if (st.isSymbolicLink() || !st.isFile()) continue;
@@ -1003,7 +1016,10 @@ async function archiveAndCleanDebugLogs(
   return { logsArchived, filesDeleted, bytesFreed, errorLogsPreserved, protectedSkipped };
 }
 
-async function removeDuplicateTemporaryFiles(verifiedDirectories: string[]): Promise<{ duplicatesRemoved: number; bytesFreed: number; protectedSkipped: number }> {
+async function removeDuplicateTemporaryFiles(
+  verifiedDirectories: string[],
+  minAgeMs = IN_USE_SAFETY_WINDOW_MS
+): Promise<{ duplicatesRemoved: number; bytesFreed: number; protectedSkipped: number }> {
   const [cacheFiles, tempMediaFiles, osMediaFiles, osOwned] = await Promise.all([
     scanDirectoryFilesSafe(CACHE_DIR),
     scanDirectoryFilesSafe(TEMP_MEDIA_DIR),
@@ -1021,7 +1037,7 @@ async function removeDuplicateTemporaryFiles(verifiedDirectories: string[]): Pro
 
   for (let i = 0; i < duplicates.length; i++) {
     if (i > 0 && i % YIELD_BATCH_SIZE === 0) await yieldToEventLoop();
-    const res = await safeDeleteFileIfAllowed(duplicates[i].filePath, IN_USE_SAFETY_WINDOW_MS);
+    const res = await safeDeleteFileIfAllowed(duplicates[i].filePath, minAgeMs);
     if (res.deleted) {
       duplicatesRemoved++;
       bytesFreed += res.bytes;
@@ -1068,7 +1084,9 @@ export async function runCleanup(
       before.breakdown.cleanableCacheBytes +
       before.breakdown.tempFilesBytes +
       before.breakdown.tempMediaBytes +
-      before.breakdown.debugLogsBytes;
+      before.breakdown.debugLogsBytes +
+      before.breakdown.archivedLogsBytes +
+      (before.breakdown.inboxMediaBytes || 0);
 
     let filesDeleted = 0;
     let duplicatesRemoved = 0;
@@ -1084,7 +1102,7 @@ export async function runCleanup(
       cacheEntriesPruned += pruneIdleConversationCaches();
       cacheEntriesPruned += pruneExpiredBurstWindows();
 
-      const cacheMinAge = mode === 'cache' ? IN_USE_SAFETY_WINDOW_MS : IN_USE_SAFETY_WINDOW_MS;
+      const cacheMinAge = trigger === 'manual' ? 5000 : IN_USE_SAFETY_WINDOW_MS;
       const cacheRes = await cleanDirectoryWithSafety(CACHE_DIR, cacheMinAge, verifiedDirectories);
       filesDeleted += cacheRes.filesDeleted;
       directBytesFreed += cacheRes.bytesFreed;
@@ -1107,11 +1125,9 @@ export async function runCleanup(
     const isTightDisk = Boolean(before.isContainerOverlay || before.disk.freeBytes < 45 * 1024 * 1024);
     const isCriticalDisk = before.disk.freeBytes < 20 * 1024 * 1024 || mode === 'full';
     if (mode === 'temp' || mode === 'full') {
-      const mediaAge = isCriticalDisk
+      const mediaAge = isCriticalDisk || trigger === 'manual'
         ? 0
-        : trigger === 'manual'
-          ? IN_USE_SAFETY_WINDOW_MS
-          : 3 * 60 * 60 * 1000;
+        : 3 * 60 * 60 * 1000;
       const tempMediaRes = await cleanDirectoryWithSafety(TEMP_MEDIA_DIR, mediaAge, verifiedDirectories);
       filesDeleted += tempMediaRes.filesDeleted;
       directBytesFreed += tempMediaRes.bytesFreed;
@@ -1127,15 +1143,27 @@ export async function runCleanup(
       directBytesFreed += voiceTempRes.bytesFreed;
       skippedProtectedCount += voiceTempRes.protectedSkipped;
 
-      const orphanRes = await cleanOrphanedTmpAndProjectLeftovers(verifiedDirectories, isCriticalDisk ? 0 : 120 * 1000);
+      const orphanMinAge = trigger === 'manual' || isCriticalDisk ? 5000 : 120 * 1000;
+      const orphanRes = await cleanOrphanedTmpAndProjectLeftovers(verifiedDirectories, orphanMinAge);
       filesDeleted += orphanRes.filesDeleted;
       directBytesFreed += orphanRes.bytesFreed;
       skippedProtectedCount += orphanRes.protectedSkipped;
 
-      // Safe quota-aware Inbox media cleanup (strictly preserves important messages & text/deleted history DB)
+      // Safe quota-aware Inbox media cleanup (preserves active starred messages & text/audit history DB)
       const prunePct = mode === 'full' ? 100 : isCriticalDisk ? 85 : trigger === 'manual' ? 65 : isTightDisk ? 40 : 0;
-      const targetMaxBytes = mode === 'full' ? 0 : isCriticalDisk ? 1024 * 1024 : isTightDisk ? 4 * 1024 * 1024 : undefined;
-      const inboxPrune = await enforceInboxMediaStorageLimit(prunePct, targetMaxBytes).catch(() => ({
+      const targetMaxBytes =
+        mode === 'full' || (trigger === 'manual' && isTightDisk)
+          ? 0
+          : isCriticalDisk
+            ? 1024 * 1024
+            : isTightDisk
+              ? 4 * 1024 * 1024
+              : undefined;
+      const inboxPrune = await enforceInboxMediaStorageLimit(prunePct, targetMaxBytes, {
+        includeDeletedMedia: mode === 'full' || isCriticalDisk || trigger === 'manual',
+        ignoreOrphanAge: trigger === 'manual' || isCriticalDisk,
+        flushSync: trigger === 'manual',
+      }).catch(() => ({
         filesRemoved: 0,
         bytesFreed: 0,
         protectedImportantSkipped: 0,
@@ -1156,7 +1184,8 @@ export async function runCleanup(
 
     // 3. Duplicate Temporary Files Scan & Deduplication
     if (mode === 'duplicates' || mode === 'temp' || mode === 'full') {
-      const dupRes = await removeDuplicateTemporaryFiles(verifiedDirectories);
+      const dupMinAge = trigger === 'manual' ? 5000 : IN_USE_SAFETY_WINDOW_MS;
+      const dupRes = await removeDuplicateTemporaryFiles(verifiedDirectories, dupMinAge);
       duplicatesRemoved += dupRes.duplicatesRemoved;
       directBytesFreed += dupRes.bytesFreed;
       skippedProtectedCount += dupRes.protectedSkipped;
@@ -1167,7 +1196,7 @@ export async function runCleanup(
       const effectiveRetentionDays = isCriticalDisk
         ? 1
         : isTightDisk
-          ? Math.min(2, cleanupState.settings.debugLogRetentionDays || 7)
+          ? 1
           : cleanupState.settings.debugLogRetentionDays || 7;
       const logRes = await archiveAndCleanDebugLogs(
         effectiveRetentionDays,
@@ -1180,8 +1209,9 @@ export async function runCleanup(
       errorLogsPreserved = logRes.errorLogsPreserved;
       skippedProtectedCount += logRes.protectedSkipped;
 
-      if (isCriticalDisk) {
-        const archiveClearRes = await cleanDirectoryWithSafety(ARCHIVE_LOGS_DIR, 24 * 60 * 60 * 1000, verifiedDirectories);
+      if (isCriticalDisk || before.isContainerOverlay || before.disk.freeBytes < 25 * 1024 * 1024) {
+        const archiveClearAge = trigger === 'manual' ? 0 : 24 * 60 * 60 * 1000;
+        const archiveClearRes = await cleanDirectoryWithSafety(ARCHIVE_LOGS_DIR, archiveClearAge, verifiedDirectories);
         filesDeleted += archiveClearRes.filesDeleted;
         directBytesFreed += archiveClearRes.bytesFreed;
       }
@@ -1224,7 +1254,9 @@ export async function runCleanup(
       after.breakdown.cleanableCacheBytes +
       after.breakdown.tempFilesBytes +
       after.breakdown.tempMediaBytes +
-      after.breakdown.debugLogsBytes;
+      after.breakdown.debugLogsBytes +
+      after.breakdown.archivedLogsBytes +
+      (after.breakdown.inboxMediaBytes || 0);
 
     const managedDelta = Math.max(0, beforeManagedBytes - afterManagedBytes);
     let recoveredBytes = Math.max(directBytesFreed, managedDelta);
@@ -1436,12 +1468,46 @@ export async function clearAllHistoriesNow() {
   const stickerRes = clearStickerQueueHistory();
   const voiceCleared = clearVoiceModerationHistory();
 
-  // Also clean temp voice audio and runtime caches
-  const [voiceTempClean, cacheClean] = await Promise.all([
+  // Also clean temp voice audio, temp media, archives, orphaned tmp files, runtime caches & reclaimable inbox media
+  const [
+    voiceTempClean,
+    cacheClean,
+    tempMediaClean,
+    osCacheClean,
+    osMediaClean,
+    archiveClean,
+    orphanClean,
+    inboxMediaClean,
+    inboxMsgTrim,
+  ] = await Promise.all([
     cleanDirectoryWithSafety(VOICE_TEMP_AUDIO_DIR, 0, []),
-    cleanDirectoryWithSafety(CACHE_DIR, 0, []),
+    cleanDirectoryWithSafety(CACHE_DIR, 5000, []),
+    cleanDirectoryWithSafety(TEMP_MEDIA_DIR, 0, []),
+    cleanDirectoryWithSafety(OS_TEMP_CACHE_DIR, 5000, []),
+    cleanDirectoryWithSafety(OS_TEMP_MEDIA_DIR, 0, []),
+    cleanDirectoryWithSafety(ARCHIVE_LOGS_DIR, 0, []),
+    cleanOrphanedTmpAndProjectLeftovers([], 5000),
+    enforceInboxMediaStorageLimit(100, 0, {
+      includeDeletedMedia: true,
+      ignoreOrphanAge: true,
+      flushSync: true,
+    }).catch(() => ({ filesRemoved: 0, bytesFreed: 0, protectedImportantSkipped: 0 })),
+    trimNonImportantInboxMessagesForSpace(200).catch(() => ({
+      messagesTrimmed: 0,
+      bytesEstimateFreed: 0,
+    })),
   ]);
-  const runtimeCachesPruned = pruneExpiredRuntimeCaches() + pruneIdleConversationCaches();
+  const runtimeCachesPruned = pruneExpiredRuntimeCaches() + pruneIdleConversationCaches() + pruneExpiredBurstWindows();
+
+  const totalFilesDeleted =
+    voiceTempClean.filesDeleted +
+    cacheClean.filesDeleted +
+    tempMediaClean.filesDeleted +
+    osCacheClean.filesDeleted +
+    osMediaClean.filesDeleted +
+    archiveClean.filesDeleted +
+    orphanClean.filesDeleted +
+    inboxMediaClean.filesRemoved;
 
   const totalClearedItems =
     modRes.warningsCleared +
@@ -1449,13 +1515,23 @@ export async function clearAllHistoriesNow() {
     modRes.callLogsCleared +
     stickerRes.removedCount +
     (voiceCleared ? 1 : 0) +
-    voiceTempClean.filesDeleted +
-    cacheClean.filesDeleted +
+    inboxMsgTrim.messagesTrimmed +
+    totalFilesDeleted +
     runtimeCachesPruned;
 
-  const bytesFreed = voiceTempClean.bytesFreed + cacheClean.bytesFreed;
+  const bytesFreed =
+    voiceTempClean.bytesFreed +
+    cacheClean.bytesFreed +
+    tempMediaClean.bytesFreed +
+    osCacheClean.bytesFreed +
+    osMediaClean.bytesFreed +
+    archiveClean.bytesFreed +
+    orphanClean.bytesFreed +
+    inboxMediaClean.bytesFreed +
+    inboxMsgTrim.bytesEstimateFreed;
 
   cleanupState.lastHistoryCleanupAt = Date.now();
+  cleanupState.lastCleanupAt = Date.now();
   cleanupState.totalFilesCleaned += Math.max(1, totalClearedItems);
   if (bytesFreed > 0) {
     cleanupState.totalRecoveredBytes += bytesFreed;
@@ -1470,14 +1546,14 @@ export async function clearAllHistoriesNow() {
 
   appendDebugLog(
     'HISTORY_MANUAL_CLEAR',
-    `Cleared all warnings=${modRes.warningsCleared}, logs=${modRes.activityLogsCleared}, sticker=${stickerRes.removedCount}, voice=${voiceCleared}, freed=${bytesFreed} bytes`
+    `Cleared all warnings=${modRes.warningsCleared}, logs=${modRes.activityLogsCleared}, sticker=${stickerRes.removedCount}, voice=${voiceCleared}, files=${totalFilesDeleted}, freed=${bytesFreed} bytes`
   );
 
   return {
     ...modRes,
     stickerHistoryCleared: stickerRes.removedCount,
     voiceHistoryCleared: voiceCleared ? 1 : 0,
-    filesDeleted: voiceTempClean.filesDeleted + cacheClean.filesDeleted,
+    filesDeleted: totalFilesDeleted,
     bytesFreed,
     totalCleared: totalClearedItems,
   };

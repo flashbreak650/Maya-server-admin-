@@ -5422,9 +5422,25 @@ export async function deleteGroupMessageFromServer(
   if (!meta) {
     meta = await getGroupMeta(sock, groupId, false).catch(() => null);
   }
+  if (meta) {
+    learnGroupParticipantsLidPn(meta);
+  }
   const botIsAdmin = meta ? isBotGroupAdminFromMeta(sock, meta) : false;
 
-  if (!record.fromMe && meta && !botIsAdmin) {
+  const phoneDigits = String(record.senderPhone || '').replace(/\D/g, '');
+  const phoneHintJid =
+    phoneDigits.length >= 7 && phoneDigits.length <= 15 ? `${phoneDigits}@s.whatsapp.net` : '';
+
+  const resolved = await resolveAllGroupParticipantJids(
+    sock,
+    groupId,
+    record.senderJid,
+    record.senderAltJid || phoneHintJid || undefined,
+    record.rawParticipant
+  );
+  const isSenderOwn = Boolean(record.fromMe || resolved.isSenderBot || record.senderJid === 'BOT');
+
+  if (!isSenderOwn && meta && !botIsAdmin) {
     return {
       success: false,
       statusCode: 403,
@@ -5432,33 +5448,155 @@ export async function deleteGroupMessageFromServer(
     };
   }
 
-  await resolveBotIdentitySet(sock).catch(() => {});
-  const participant = record.rawParticipant || record.senderJid || undefined;
-  const waMsgStub: proto.IWebMessageInfo = {
-    key: {
-      remoteJid: groupId,
-      fromMe: Boolean(record.fromMe),
-      id: record.id,
-      ...(participant && !record.fromMe ? { participant } : {}),
-      ...(record.senderAltJid && !record.fromMe ? { participantAlt: record.senderAltJid } : {}),
-    } as any,
+  const sendRevokeKey = async (deleteKey: proto.IMessageKey) => {
+    await Promise.race([
+      sock.sendMessage(groupId, { delete: deleteKey }, { useCachedGroupMetadata: true }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('WhatsApp delete ACK timeout (10s)')), 10000)),
+    ]);
   };
 
-  const deleted = await deleteMessageSafely(
-    sock,
-    groupId,
-    waMsgStub,
-    record.senderAltJid || record.senderJid || record.rawParticipant,
-    Boolean(record.fromMe || botIsAdmin)
-  );
+  let anySucceeded = false;
+  let lastError: any = null;
+  const dispatchedTargets: string[] = [];
 
-  if (!deleted) {
+  if (isSenderOwn) {
+    // 1) Author revoke (edit='7') without participant
+    try {
+      await sendRevokeKey({
+        remoteJid: groupId,
+        fromMe: true,
+        id: record.id,
+      });
+      anySucceeded = true;
+      dispatchedTargets.push('fromMe:true');
+    } catch (err: any) {
+      lastError = err;
+    }
+
+    // 2) Multi-device / LID groups often require own participant LID/PN (and admin revoke edit='8' if linked phone sent it)
+    const ownCandidates: string[] = [];
+    for (const cand of [
+      ...resolved.candidates,
+      sock.user?.lid ? normalizeJid(sock.user.lid) : '',
+      sock.user?.id ? normalizeJid(sock.user.id) : '',
+    ]) {
+      const c = String(cand || '').trim();
+      if (c && isValidUserParticipantJid(c) && !ownCandidates.includes(c)) {
+        ownCandidates.push(c);
+      }
+    }
+
+    const ownPrimary = ownCandidates[0];
+    const ownAlt = ownPrimary ? ownCandidates.find((c) => isLidJid(c) !== isLidJid(ownPrimary)) : undefined;
+
+    for (const p of [ownPrimary, ownAlt].filter((x): x is string => Boolean(x))) {
+      await new Promise((r) => setTimeout(r, 120));
+      try {
+        await sendRevokeKey({
+          remoteJid: groupId,
+          fromMe: true,
+          id: record.id,
+          participant: p,
+        });
+        anySucceeded = true;
+        dispatchedTargets.push(`fromMe:true(${p})`);
+      } catch (err: any) {
+        lastError = err;
+      }
+
+      if (botIsAdmin) {
+        await new Promise((r) => setTimeout(r, 120));
+        try {
+          await sendRevokeKey({
+            remoteJid: groupId,
+            fromMe: false,
+            id: record.id,
+            participant: p,
+          });
+          anySucceeded = true;
+          dispatchedTargets.push(`admin:${p}`);
+        } catch (err: any) {
+          lastError = err;
+        }
+      }
+    }
+  } else {
+    const orderedCandidates: string[] = [];
+    for (const cand of [
+      resolved.matchedSenderId ? normalizeJid(resolved.matchedSenderId) : '',
+      ...resolved.candidates,
+      record.rawParticipant && isValidUserParticipantJid(record.rawParticipant)
+        ? normalizeJid(record.rawParticipant)
+        : '',
+      phoneHintJid,
+      record.senderAltJid && isValidUserParticipantJid(record.senderAltJid)
+        ? normalizeJid(record.senderAltJid)
+        : '',
+      record.senderJid && isValidUserParticipantJid(record.senderJid)
+        ? normalizeJid(record.senderJid)
+        : '',
+    ]) {
+      const clean = String(cand || '').trim();
+      if (clean && isValidUserParticipantJid(clean) && !orderedCandidates.includes(clean)) {
+        orderedCandidates.push(clean);
+      }
+    }
+
+    if (orderedCandidates.length === 0) {
+      return {
+        success: false,
+        statusCode: 400,
+        error: 'প্রেরকের সঠিক WhatsApp JID পাওয়া যায়নি (পুরোনো মেসেজটি হোয়াটসঅ্যাপ থেকে ডিলিট করা সম্ভব হয়নি)।',
+      };
+    }
+
+    const primary = orderedCandidates[0];
+    const alternate = orderedCandidates.find((c) => isLidJid(c) !== isLidJid(primary));
+    const targets = [primary, alternate].filter((x): x is string => Boolean(x));
+
+    for (let i = 0; i < targets.length; i++) {
+      const participant = targets[i];
+      if (i > 0) {
+        await new Promise((r) => setTimeout(r, 160));
+      }
+      try {
+        await sendRevokeKey({
+          remoteJid: groupId,
+          fromMe: false,
+          id: record.id,
+          participant,
+        });
+        anySucceeded = true;
+        dispatchedTargets.push(participant);
+      } catch (err: any) {
+        lastError = err;
+        const status = Number(err?.output?.statusCode || err?.status || 0);
+        const errMsg = String(err?.message || '');
+        if (status === 401 || status === 403 || status === 429 || /not-authorized|forbidden|not.?admin/i.test(errMsg)) {
+          break;
+        }
+      }
+    }
+  }
+
+  if (!anySucceeded) {
+    const errText = String(lastError?.message || '');
+    console.warn('[Server Delete Message FAILED]', { groupId, messageId: record.id, errText });
     return {
       success: false,
       statusCode: 400,
-      error: 'WhatsApp থেকে মেসেজটি ডিলিট করা যায়নি (মেসেজটি পুরোনো হতে পারে অথবা বট Admin নয়)।',
+      error: botIsAdmin
+        ? 'WhatsApp থেকে মেসেজটি ডিলিট করা যায়নি (মেসেজটি বেশি পুরোনো বা WhatsApp অনুমোদন দেয়নি)।'
+        : 'WhatsApp থেকে মেসেজটি ডিলিট করা যায়নি (বট গ্রুপের Admin নয়)।',
     };
   }
+
+  console.log('[Server Delete Message SENT]', {
+    groupId,
+    messageId: record.id,
+    isSenderOwn,
+    dispatchedTargets,
+  });
 
   db.stats.deletedMessages++;
   saveDatabase();

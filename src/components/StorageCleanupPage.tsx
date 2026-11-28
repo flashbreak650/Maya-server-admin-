@@ -257,18 +257,31 @@ export function StorageCleanupPage({
     ? 'bg-amber-500'
     : 'bg-[#087f55]';
 
+  const isOverlay = Boolean(snap?.isContainerOverlay);
   const statusText = isCritical
     ? isBn
-      ? 'সংকটজনক স্পেস (<6MB ফ্রি)'
-      : 'Critical (<6MB free)'
+      ? isOverlay
+        ? 'সংকটজনক স্পেস (<5MB ফ্রি)'
+        : 'সংকটজনক স্পেস (≥95%)'
+      : isOverlay
+      ? 'Critical (<5MB free)'
+      : 'Critical (≥95%)'
     : isWarning
     ? isBn
-      ? 'উচ্চ ব্যবহার (<12MB ফ্রি)'
-      : 'Warning (<12MB free)'
+      ? isOverlay
+        ? 'উচ্চ ব্যবহার (<9MB ফ্রি)'
+        : 'উচ্চ ব্যবহার (≥85%)'
+      : isOverlay
+      ? 'Warning (<9MB free)'
+      : 'Warning (≥85%)'
     : isNotice
     ? isBn
-      ? 'সতর্ক সীমা (<22MB ফ্রি)'
-      : 'Notice (<22MB free)'
+      ? isOverlay
+        ? 'সতর্ক সীমা (<12MB ফ্রি)'
+        : 'সতর্ক সীমা (≥70%)'
+      : isOverlay
+      ? 'Notice (<12MB free)'
+      : 'Notice (≥70%)'
     : isBn
     ? 'স্বাভাবিক ও নিরাপদ'
     : 'Healthy & Secure';
@@ -292,7 +305,7 @@ export function StorageCleanupPage({
           label: isBn ? 'ইনবক্স মিডিয়া ফাইল (Inbox Media)' : 'Inbox Saved Media Files',
           count: bd.inboxMediaFiles ?? 0,
           bytes: bd.inboxMediaBytes ?? 0,
-          policy: isBn ? 'ফুল ক্লিনআপে ৫০% পুরোনো প্রুন' : 'Pruned if exceeding limit',
+          policy: isBn ? 'ফুল ক্লিনআপে নিরাপদ প্রুন (স্টার করা বাদে)' : 'Pruned safely on full cleanup (starred kept)',
           isProtected: false,
         },
         {

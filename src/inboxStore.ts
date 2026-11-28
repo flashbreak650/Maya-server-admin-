@@ -997,7 +997,12 @@ export async function captureIncomingGroupMessages(
     const rawSender = msg.key?.fromMe
       ? sock?.user?.id || sock?.user?.lid || 'BOT'
       : rawParticipant || 'unknown';
-    const senderAltJid = String((msg.key as any)?.participantAlt || '').trim();
+    const senderAltJid = String(
+      (msg.key as any)?.participantAlt ||
+        (msg.key as any)?.participantPn ||
+        (msg.key as any)?.participantLid ||
+        ''
+    ).trim();
     const senderJid =
       rawSender === 'BOT' || rawSender === 'unknown' ? rawSender : safeNormalizeJid(rawSender);
 
@@ -1924,9 +1929,94 @@ export function updateInboxSettings(patch: Partial<InboxStorageSettings>): Inbox
   return { ...inboxIndex.settings };
 }
 
+export function getInboxReclaimableMediaBytesSync(
+  keepFloorBytes = 0,
+  includeDeletedMedia = true
+): {
+  totalBytes: number;
+  reclaimableBytes: number;
+  orphanBytes: number;
+  protectedBytes: number;
+} {
+  loadInboxIndex();
+  const baseDir = path.resolve(INBOX_MEDIA_DIR);
+  const referencedFiles = new Set<string>();
+  let pruneableReferencedBytes = 0;
+  let protectedBytes = 0;
+
+  for (const gid of Object.keys(inboxIndex.groups)) {
+    const records = loadGroupMessages(gid);
+    for (const rec of records) {
+      if (rec.media?.status === 'saved' && rec.media.relPath) {
+        const fullPath = path.resolve(baseDir, rec.media.relPath);
+        if (!fullPath.startsWith(baseDir + path.sep)) continue;
+        referencedFiles.add(fullPath);
+        let actualSize = Number(rec.media.fileSize || 0);
+        try {
+          if (fs.existsSync(fullPath)) {
+            actualSize = fs.statSync(fullPath).size;
+          } else {
+            actualSize = 0;
+          }
+        } catch {}
+        const isActiveStarred =
+          rec.isImportant &&
+          !rec.isDeleted &&
+          rec.deletedBy !== 'moderation_engine' &&
+          rec.deletedBy !== 'sticker_queue';
+        const isDeletedProtected =
+          !includeDeletedMedia &&
+          (rec.isImportant || rec.deletedBy === 'moderation_engine' || rec.deletedBy === 'sticker_queue');
+        if (isActiveStarred || isDeletedProtected) {
+          protectedBytes += actualSize;
+        } else {
+          pruneableReferencedBytes += actualSize;
+        }
+      }
+    }
+  }
+
+  let totalBytes = 0;
+  let orphanBytes = 0;
+  const walkMedia = (dir: string, depth = 0) => {
+    if (depth > 3 || !fs.existsSync(dir)) return;
+    try {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isSymbolicLink()) continue;
+        const fp = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walkMedia(fp, depth + 1);
+        } else if (entry.isFile()) {
+          try {
+            const sz = fs.statSync(fp).size;
+            totalBytes += sz;
+            if (entry.name.endsWith('.tmp') || !referencedFiles.has(fp)) {
+              orphanBytes += sz;
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+  };
+  walkMedia(baseDir, 0);
+
+  const reclaimableBytes = orphanBytes + Math.max(0, pruneableReferencedBytes - Math.max(0, keepFloorBytes));
+  return {
+    totalBytes,
+    reclaimableBytes,
+    orphanBytes,
+    protectedBytes,
+  };
+}
+
 export async function enforceInboxMediaStorageLimit(
   forcePrunePercent = 0,
-  targetMaxBytesOverride?: number
+  targetMaxBytesOverride?: number,
+  options?: {
+    includeDeletedMedia?: boolean;
+    ignoreOrphanAge?: boolean;
+    flushSync?: boolean;
+  }
 ): Promise<{
   filesRemoved: number;
   bytesFreed: number;
@@ -1939,6 +2029,11 @@ export async function enforceInboxMediaStorageLimit(
 
   const limitBytes = getInboxEffectiveMediaLimitBytes();
   const initialMediaBytes = measureFolderBytesSync(INBOX_MEDIA_DIR).bytes;
+  const includeDeletedMedia =
+    options?.includeDeletedMedia ?? (targetMaxBytesOverride === 0 || forcePrunePercent >= 100);
+  const ignoreOrphanAge =
+    options?.ignoreOrphanAge ?? (targetMaxBytesOverride === 0 || forcePrunePercent >= 100);
+  const orphanMinAgeMs = ignoreOrphanAge ? 5000 : 120000;
 
   let targetMaxBytes =
     targetMaxBytesOverride !== undefined
@@ -1950,7 +2045,8 @@ export async function enforceInboxMediaStorageLimit(
     targetMaxBytes = Math.min(targetMaxBytes, Math.floor(limitBytes * 0.85));
   }
 
-  // Collect all non-important saved media across groups, oldest first
+  // Collect all pruneable saved media across groups, oldest first.
+  // Active (non-deleted) user-starred important messages are ALWAYS protected.
   const candidates: Array<{ groupId: string; record: InboxMessageRecord; fullPath: string; size: number }> = [];
   const referencedFiles = new Set<string>();
   let protectedImportantSkipped = 0;
@@ -1963,7 +2059,17 @@ export async function enforceInboxMediaStorageLimit(
         const fullPath = path.resolve(baseDir, rec.media.relPath);
         if (!fullPath.startsWith(baseDir + path.sep)) continue;
         referencedFiles.add(fullPath);
-        if (rec.isImportant || rec.deletedBy === 'moderation_engine' || rec.deletedBy === 'sticker_queue') {
+
+        const isActiveStarredProtected =
+          rec.isImportant &&
+          !rec.isDeleted &&
+          rec.deletedBy !== 'moderation_engine' &&
+          rec.deletedBy !== 'sticker_queue';
+        const isDeletedAutoProtected =
+          !includeDeletedMedia &&
+          (rec.isImportant || rec.deletedBy === 'moderation_engine' || rec.deletedBy === 'sticker_queue');
+
+        if (isActiveStarredProtected || isDeletedAutoProtected) {
           protectedImportantSkipped++;
           continue;
         }
@@ -1983,29 +2089,27 @@ export async function enforceInboxMediaStorageLimit(
   const affectedGroups = new Set<string>();
 
   // 1) Remove orphaned files & .tmp files inside INBOX_MEDIA_DIR that are no longer referenced
-  try {
-    const groupDirs = await fs.promises.readdir(baseDir, { withFileTypes: true });
-    for (const gd of groupDirs) {
-      if (gd.isFile() && gd.name.endsWith('.tmp')) {
-        const p = path.join(baseDir, gd.name);
-        try {
-          const st = await fs.promises.stat(p);
-          await fs.promises.unlink(p);
-          currentBytes = Math.max(0, currentBytes - st.size);
-          bytesFreed += st.size;
-          filesRemoved++;
-        } catch {}
-        continue;
-      }
-      if (!gd.isDirectory()) continue;
-      const subDir = path.join(baseDir, gd.name);
-      const subFiles = await fs.promises.readdir(subDir, { withFileTypes: true }).catch(() => []);
-      for (const sf of subFiles) {
-        if (!sf.isFile()) continue;
-        const fp = path.join(subDir, sf.name);
-        if (sf.name.endsWith('.tmp') || (!referencedFiles.has(fp) && Date.now() - ((await fs.promises.stat(fp).catch(() => null))?.mtimeMs || Date.now()) > 120000)) {
+  const cleanOrphansInDir = async (dirPath: string, depth = 0) => {
+    if (depth > 3) return;
+    try {
+      const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isSymbolicLink()) continue;
+        const fp = path.join(dirPath, entry.name);
+        if (entry.isDirectory()) {
+          await cleanOrphansInDir(fp, depth + 1);
+          const rem = await fs.promises.readdir(fp).catch(() => ['keep']);
+          if (rem.length === 0 && path.resolve(fp) !== baseDir) {
+            await fs.promises.rmdir(fp).catch(() => {});
+          }
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        const st = await fs.promises.stat(fp).catch(() => null);
+        if (!st) continue;
+        const ageMs = Date.now() - st.mtimeMs;
+        if (entry.name.endsWith('.tmp') || (!referencedFiles.has(fp) && ageMs >= orphanMinAgeMs)) {
           try {
-            const st = await fs.promises.stat(fp);
             await fs.promises.unlink(fp);
             currentBytes = Math.max(0, currentBytes - st.size);
             bytesFreed += st.size;
@@ -2013,10 +2117,12 @@ export async function enforceInboxMediaStorageLimit(
           } catch {}
         }
       }
-    }
-  } catch {}
+    } catch {}
+  };
+  await cleanOrphansInDir(baseDir, 0);
 
   if (forcePrunePercent <= 0 && targetMaxBytesOverride === undefined && currentBytes <= limitBytes) {
+    refreshDiskStatsCached(true);
     return { filesRemoved, bytesFreed, protectedImportantSkipped };
   }
 
@@ -2038,16 +2144,38 @@ export async function enforceInboxMediaStorageLimit(
         ...item.record.media!,
         status: 'pruned_for_space',
         relPath: undefined,
-        unavailableReason: 'স্টোরেজ লিমিট রক্ষার জন্য পুরোনো নন-ইম্পর্ট্যান্ট মিডিয়া ফাইলটি নিরাপদভাবে পরিষ্কার করা হয়েছে।',
+        unavailableReason: item.record.isDeleted
+          ? 'ডিস্ক স্পেস বাঁচাতে ডিলিট হওয়া মেসেজের মিডিয়া ফাইল পরিষ্কার করা হয়েছে (টেক্সট ও প্রমাণ সংরক্ষিত)।'
+          : 'স্টোরেজ লিমিট রক্ষার জন্য পুরোনো নন-ইম্পর্ট্যান্ট মিডিয়া ফাইলটি নিরাপদভাবে পরিষ্কার করা হয়েছে।',
       };
       affectedGroups.add(item.groupId);
     } catch {}
   }
 
+  // Clean up empty group media folders after pruning
+  try {
+    const groupDirs = await fs.promises.readdir(baseDir, { withFileTypes: true });
+    for (const gd of groupDirs) {
+      if (gd.isDirectory()) {
+        const subDir = path.join(baseDir, gd.name);
+        const rem = await fs.promises.readdir(subDir).catch(() => ['keep']);
+        if (rem.length === 0) {
+          await fs.promises.rmdir(subDir).catch(() => {});
+        }
+      }
+    }
+  } catch {}
+
   for (const gid of affectedGroups) {
-    scheduleSaveGroupMessages(gid);
+    if (options?.flushSync || targetMaxBytesOverride !== undefined) {
+      saveGroupMessagesSync(gid);
+    } else {
+      scheduleSaveGroupMessages(gid);
+    }
     updateGroupSummaryFromRecords(gid);
   }
+
+  refreshDiskStatsCached(true);
 
   if (filesRemoved > 0) {
     emitInboxEvent({
@@ -2095,6 +2223,7 @@ export async function trimNonImportantInboxMessagesForSpace(maxPerGroup = 350): 
   if (messagesTrimmed > 0) {
     saveInboxIndexSync();
   }
+  refreshDiskStatsCached(true);
   return { messagesTrimmed, bytesEstimateFreed };
 }
 
